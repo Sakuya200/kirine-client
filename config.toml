@@ -1,0 +1,13 @@
+[basic]
+mode = "local"
+data_dir = 'D:\project\kirine-client\data'
+log_dir = 'D:\project\kirine-client\logs'
+model_dir = 'D:\project\kirine-client\models'
+
+[remote]
+api_url = ""
+api_token = ""
+
+[training]
+prepared_base_models = []
+attn_implementation = "sdpa"

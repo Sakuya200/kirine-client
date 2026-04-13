@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  color: #102037;
+  background:
+    radial-gradient(circle at 85% 0%, #ffe3cc 0%, rgba(255, 227, 204, 0) 45%),
+    radial-gradient(circle at 8% 100%, #fff1de 0%, rgba(255, 241, 222, 0) 42%), #fffbf7;
+  font-family: 'Space Grotesk', 'Noto Sans SC', 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: #102037;
+  background:
+    radial-gradient(circle at 95% 0%, rgba(234, 136, 56, 0.14) 0%, rgba(234, 136, 56, 0) 32%),
+    radial-gradient(circle at 0% 100%, rgba(247, 169, 101, 0.12) 0%, rgba(247, 169, 101, 0) 35%), #fffbf7;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.surface-grid {
+  background-image:
+    linear-gradient(rgba(183, 117, 63, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(183, 117, 63, 0.05) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+input,
+textarea,
+select {
+  color: #334155;
+  box-shadow: 0 6px 18px rgba(200, 124, 57, 0.08);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: rise-in 360ms ease-out;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid #fbefe5;
+  border-radius: 999px;
+  background: linear-gradient(#f6bc88, #de8a42);
+}
+
+::-webkit-scrollbar-track {
+  background: #fdf1e7;
+}

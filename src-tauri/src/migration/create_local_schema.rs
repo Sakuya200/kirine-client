@@ -1,0 +1,666 @@
+use sea_orm_migration::{prelude::*, sea_orm::Statement};
+
+use crate::migration::LOCAL_SCHEMA_VERSION;
+
+pub struct Migration;
+
+impl MigrationName for Migration {
+    fn name(&self) -> &str {
+        "m20260409_000001_create_local_schema"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        run_up_flow(manager).await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        run_down_flow(manager).await?;
+        Ok(())
+    }
+}
+
+async fn run_up_flow(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    create_meta_node(manager).await?;
+    create_speakers_node(manager).await?;
+    create_task_history_node(manager).await?;
+    create_tts_tasks_node(manager).await?;
+    create_model_training_tasks_node(manager).await?;
+    create_voice_clone_tasks_node(manager).await?;
+    create_indexes_node(manager).await?;
+    persist_schema_version_node(manager).await?;
+    Ok(())
+}
+
+async fn run_down_flow(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    drop_indexes_node(manager).await?;
+    drop_tables_node(manager).await?;
+    Ok(())
+}
+
+async fn create_meta_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(AppMeta::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(AppMeta::Key)
+                        .string()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(ColumnDef::new(AppMeta::Value).string().not_null())
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_speakers_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(Speakers::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Speakers::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(ColumnDef::new(Speakers::Name).string().not_null())
+                .col(ColumnDef::new(Speakers::LanguagesJson).text().not_null())
+                .col(
+                    ColumnDef::new(Speakers::Samples)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .col(
+                    ColumnDef::new(Speakers::BaseModel)
+                        .string()
+                        .not_null()
+                        .default("qwen3_tts"),
+                )
+                .col(
+                    ColumnDef::new(Speakers::Description)
+                        .text()
+                        .not_null()
+                        .default(""),
+                )
+                .col(ColumnDef::new(Speakers::ModelPath).text())
+                .col(ColumnDef::new(Speakers::Status).string().not_null())
+                .col(ColumnDef::new(Speakers::Source).string().not_null())
+                .col(ColumnDef::new(Speakers::CreateTime).string().not_null())
+                .col(ColumnDef::new(Speakers::ModifyTime).string().not_null())
+                .col(
+                    ColumnDef::new(Speakers::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_task_history_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(TaskHistory::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(TaskHistory::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(ColumnDef::new(TaskHistory::TaskType).string().not_null())
+                .col(ColumnDef::new(TaskHistory::Title).string().not_null())
+                .col(ColumnDef::new(TaskHistory::SpeakerId).integer())
+                .col(
+                    ColumnDef::new(TaskHistory::SpeakerNameSnapshot)
+                        .string()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(TaskHistory::Status).string().not_null())
+                .col(
+                    ColumnDef::new(TaskHistory::DurationSeconds)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .col(ColumnDef::new(TaskHistory::CreateTime).string().not_null())
+                .col(ColumnDef::new(TaskHistory::ModifyTime).string().not_null())
+                .col(ColumnDef::new(TaskHistory::FinishedTime).string())
+                .col(ColumnDef::new(TaskHistory::ErrorMessage).text())
+                .col(
+                    ColumnDef::new(TaskHistory::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(TtsTasks::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(TtsTasks::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(ColumnDef::new(TtsTasks::HistoryId).integer().not_null())
+                .col(ColumnDef::new(TtsTasks::SpeakerId).integer().not_null())
+                .col(ColumnDef::new(TtsTasks::ModelPath).text())
+                .col(
+                    ColumnDef::new(TtsTasks::BaseModel)
+                        .string()
+                        .not_null()
+                        .default("qwen3_tts"),
+                )
+                .col(
+                    ColumnDef::new(TtsTasks::HardwareType)
+                        .string()
+                        .not_null()
+                        .default("cuda"),
+                )
+                .col(ColumnDef::new(TtsTasks::Language).string().not_null())
+                .col(ColumnDef::new(TtsTasks::Format).string().not_null())
+                .col(ColumnDef::new(TtsTasks::Text).text().not_null())
+                .col(
+                    ColumnDef::new(TtsTasks::VoicePrompt)
+                        .text()
+                        .not_null()
+                        .default(""),
+                )
+                .col(ColumnDef::new(TtsTasks::CharCount).integer().not_null())
+                .col(ColumnDef::new(TtsTasks::FileName).string().not_null())
+                .col(ColumnDef::new(TtsTasks::OutputFilePath).text())
+                .col(ColumnDef::new(TtsTasks::CreateTime).string().not_null())
+                .col(ColumnDef::new(TtsTasks::ModifyTime).string().not_null())
+                .col(
+                    ColumnDef::new(TtsTasks::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_tts_tasks_history")
+                        .from(TtsTasks::Table, TtsTasks::HistoryId)
+                        .to(TaskHistory::Table, TaskHistory::Id)
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_tts_tasks_speaker")
+                        .from(TtsTasks::Table, TtsTasks::SpeakerId)
+                        .to(Speakers::Table, Speakers::Id),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(ModelTrainingTasks::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::HistoryId)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::Language)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::BaseModel)
+                        .string()
+                        .not_null()
+                        .default("qwen3_tts"),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::HardwareType)
+                        .string()
+                        .not_null()
+                        .default("cuda"),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::ModelName)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::EpochCount)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::BatchSize)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::SampleCount)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::SamplesJson)
+                        .text()
+                        .not_null()
+                        .default("[]"),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::NotesJson)
+                        .text()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(ModelTrainingTasks::OutputSpeakerId).integer())
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::CreateTime)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::ModifyTime)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_model_training_tasks_history")
+                        .from(ModelTrainingTasks::Table, ModelTrainingTasks::HistoryId)
+                        .to(TaskHistory::Table, TaskHistory::Id)
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_model_training_tasks_speaker")
+                        .from(
+                            ModelTrainingTasks::Table,
+                            ModelTrainingTasks::OutputSpeakerId,
+                        )
+                        .to(Speakers::Table, Speakers::Id),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(VoiceCloneTasks::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::HistoryId)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::BaseModel)
+                        .string()
+                        .not_null()
+                        .default("qwen3_tts"),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::HardwareType)
+                        .string()
+                        .not_null()
+                        .default("cuda"),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::Language)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::Format)
+                        .string()
+                        .not_null()
+                        .default("wav"),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::RefAudioName)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::RefAudioPath)
+                        .text()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(VoiceCloneTasks::RefText).text().not_null())
+                .col(ColumnDef::new(VoiceCloneTasks::Text).text().not_null())
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::CharCount)
+                        .integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::FileName)
+                        .string()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(VoiceCloneTasks::OutputFilePath).text())
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::CreateTime)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::ModifyTime)
+                        .string()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_voice_clone_tasks_history")
+                        .from(VoiceCloneTasks::Table, VoiceCloneTasks::HistoryId)
+                        .to(TaskHistory::Table, TaskHistory::Id)
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
+async fn create_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_tts_tasks_history_id")
+                .table(TtsTasks::Table)
+                .col(TtsTasks::HistoryId)
+                .unique()
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_model_training_tasks_history_id")
+                .table(ModelTrainingTasks::Table)
+                .col(ModelTrainingTasks::HistoryId)
+                .unique()
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_voice_clone_tasks_history_id")
+                .table(VoiceCloneTasks::Table)
+                .col(VoiceCloneTasks::HistoryId)
+                .unique()
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_task_history_type_status_time")
+                .table(TaskHistory::Table)
+                .col(TaskHistory::TaskType)
+                .col(TaskHistory::Status)
+                .col(TaskHistory::CreateTime)
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_task_history_speaker")
+                .table(TaskHistory::Table)
+                .col(TaskHistory::SpeakerId)
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_speakers_status_modify_time")
+                .table(Speakers::Table)
+                .col(Speakers::Status)
+                .col(Speakers::ModifyTime)
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
+    Ok(())
+}
+
+async fn persist_schema_version_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .get_connection()
+        .execute(Statement::from_string(
+            manager.get_database_backend(),
+            format!(
+                "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('local_schema_version', '{LOCAL_SCHEMA_VERSION}')"
+            ),
+        ))
+        .await?;
+    Ok(())
+}
+
+async fn drop_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .drop_index(
+            Index::drop()
+                .name("idx_voice_clone_tasks_history_id")
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .drop_index(
+            Index::drop()
+                .name("idx_model_training_tasks_history_id")
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .drop_index(Index::drop().name("idx_tts_tasks_history_id").to_owned())
+        .await?;
+    manager
+        .drop_index(
+            Index::drop()
+                .name("idx_speakers_status_modify_time")
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .drop_index(Index::drop().name("idx_task_history_speaker").to_owned())
+        .await?;
+    manager
+        .drop_index(
+            Index::drop()
+                .name("idx_task_history_type_status_time")
+                .to_owned(),
+        )
+        .await?;
+    Ok(())
+}
+
+async fn drop_tables_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .drop_table(Table::drop().table(VoiceCloneTasks::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(ModelTrainingTasks::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(TtsTasks::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(TaskHistory::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(Speakers::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(AppMeta::Table).to_owned())
+        .await?;
+    Ok(())
+}
+
+#[derive(DeriveIden)]
+enum AppMeta {
+    Table,
+    Key,
+    Value,
+}
+
+#[derive(DeriveIden)]
+enum Speakers {
+    Table,
+    Id,
+    Name,
+    LanguagesJson,
+    Samples,
+    BaseModel,
+    Description,
+    ModelPath,
+    Status,
+    Source,
+    CreateTime,
+    ModifyTime,
+    Deleted,
+}
+
+#[derive(DeriveIden)]
+enum TaskHistory {
+    Table,
+    Id,
+    TaskType,
+    Title,
+    SpeakerId,
+    SpeakerNameSnapshot,
+    Status,
+    DurationSeconds,
+    CreateTime,
+    ModifyTime,
+    FinishedTime,
+    ErrorMessage,
+    Deleted,
+}
+
+#[derive(DeriveIden)]
+enum TtsTasks {
+    Table,
+    Id,
+    HistoryId,
+    SpeakerId,
+    ModelPath,
+    BaseModel,
+    HardwareType,
+    Language,
+    Format,
+    Text,
+    VoicePrompt,
+    CharCount,
+    FileName,
+    OutputFilePath,
+    CreateTime,
+    ModifyTime,
+    Deleted,
+}
+
+#[derive(DeriveIden)]
+enum ModelTrainingTasks {
+    Table,
+    Id,
+    HistoryId,
+    Language,
+    BaseModel,
+    HardwareType,
+    ModelName,
+    EpochCount,
+    BatchSize,
+    SampleCount,
+    SamplesJson,
+    NotesJson,
+    OutputSpeakerId,
+    CreateTime,
+    ModifyTime,
+    Deleted,
+}
+
+#[derive(DeriveIden)]
+enum VoiceCloneTasks {
+    Table,
+    Id,
+    HistoryId,
+    BaseModel,
+    HardwareType,
+    Language,
+    Format,
+    RefAudioName,
+    RefAudioPath,
+    RefText,
+    Text,
+    CharCount,
+    FileName,
+    OutputFilePath,
+    CreateTime,
+    ModifyTime,
+    Deleted,
+}

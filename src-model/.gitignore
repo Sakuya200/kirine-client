@@ -1,0 +1,6 @@
+venv
+src/__pycache__
+tests/training-data
+tests/__pycache__
+base-models
+src/qwen3_tts/__pycache__
