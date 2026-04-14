@@ -1,13 +1,13 @@
 [basic]
 mode = "local"
-data_dir = 'D:\project\kirine-client\data'
-log_dir = 'D:\project\kirine-client\logs'
-model_dir = 'D:\project\kirine-client\models'
+data_dir = 'D:\Project\temp\kirine-client\data'
+log_dir = 'D:\Project\temp\kirine-client\logs'
+model_dir = 'D:\Project\temp\kirine-client\models'
 
 [remote]
 api_url = ""
 api_token = ""
 
 [training]
-prepared_base_models = []
+prepared_base_models = ["qwen3_tts"]
 attn_implementation = "sdpa"

@@ -2,6 +2,7 @@ import argparse
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 
@@ -50,10 +51,12 @@ def load_dependencies() -> SimpleNamespace:
 
 
 def normalize_speaker_name(speaker_name: str) -> str:
-    return speaker_name.strip().lower()
+    normalized = re.sub(r"[\s\-]+", "_", speaker_name.strip())
+    normalized = re.sub(r"_+", "_", normalized)
+    return normalized.casefold()
 
 
-def infer_speaker_name_from_model(model_path: str) -> str:
+def load_speaker_mapping(model_path: str) -> dict[str, object]:
     config_path = Path(model_path).expanduser().resolve() / "config.json"
     if not config_path.exists():
         raise FileNotFoundError(f"config.json not found under model path: {config_path}")
@@ -68,6 +71,11 @@ def infer_speaker_name_from_model(model_path: str) -> str:
             f"No custom speaker mapping was found in model config: {config_path}"
         )
 
+    return speaker_ids
+
+
+def infer_speaker_name_from_model(model_path: str) -> str:
+    speaker_ids = load_speaker_mapping(model_path)
     speaker_name = next(iter(speaker_ids.keys()), "").strip()
     if not speaker_name:
         raise ValueError(
@@ -77,8 +85,29 @@ def infer_speaker_name_from_model(model_path: str) -> str:
     return speaker_name
 
 
+def resolve_explicit_speaker_name(speaker_name: str, model_path: str) -> str:
+    explicit_speaker = normalize_speaker_name(speaker_name)
+    if not explicit_speaker:
+        return ""
+
+    speaker_ids = load_speaker_mapping(model_path)
+    speaker_pairs = {
+        normalize_speaker_name(candidate).casefold(): candidate
+        for candidate in speaker_ids.keys()
+        if normalize_speaker_name(candidate)
+    }
+    resolved_speaker = speaker_pairs.get(explicit_speaker.casefold())
+    if resolved_speaker:
+        return resolved_speaker
+
+    available_speakers = ", ".join(sorted(speaker_ids.keys()))
+    raise ValueError(
+        f"Unsupported speaker '{speaker_name}'. Available speakers: {available_speakers}"
+    )
+
+
 def resolve_speaker_name(args: argparse.Namespace) -> str:
-    explicit_speaker = normalize_speaker_name(args.speaker)
+    explicit_speaker = resolve_explicit_speaker_name(args.speaker, args.init_model_path)
     if explicit_speaker:
         return explicit_speaker
 
@@ -119,6 +148,11 @@ def generate_audio(args: argparse.Namespace, dependencies: SimpleNamespace | Non
     output_path = Path(args.output_path).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     speaker_name = resolve_speaker_name(args)
+
+    print(
+        f"[tts] resolved speaker={speaker_name} language={args.language} device={args.device}",
+        flush=True,
+    )
 
     model, runtime, deps = load_model(args, dependencies)
     wavs, sr = model.generate_custom_voice(

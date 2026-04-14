@@ -83,6 +83,7 @@ struct TtsPaths {
 #[derive(Debug)]
 struct TtsTaskExecution {
     base_model: BaseModel,
+    speaker_name: String,
     model_path: String,
     hardware_type: HardwareType,
     language: String,
@@ -190,7 +191,7 @@ impl Qwen3TTSModelTaskPipeline {
             .with_context(|| format!("failed to load tts execution params for task {}", task_id))?
             .ok_or_else(|| anyhow::anyhow!("未找到 TTS 任务执行参数: {}", task_id))?;
 
-        task_history_entity::Entity::find_by_id(task_id)
+        let task_history = task_history_entity::Entity::find_by_id(task_id)
             .filter(task_history_entity::Column::SpeakerId.eq(speaker_id))
             .filter(task_history_entity::Column::Deleted.eq(0))
             .one(service.orm())
@@ -205,6 +206,7 @@ impl Qwen3TTSModelTaskPipeline {
                 .base_model
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            speaker_name: task_history.speaker_name_snapshot.trim().to_string(),
             model_path: resolve_runtime_model_path(
                 Path::new(service.model_dir()),
                 &src_model_root,
@@ -431,6 +433,7 @@ impl Qwen3TTSModelTaskPipeline {
         info!(
             tts_script = %paths.tts_python_script_path.display(),
             model_path = %params.model_path,
+            speaker_name = %params.speaker_name,
             output_path = %temp_wav_path.display(),
             device = runtime.device(),
             mode = runtime.mode_label(params.base_model),
@@ -443,6 +446,8 @@ impl Qwen3TTSModelTaskPipeline {
         let mut script_args = vec![
             "--init-model-path".to_string(),
             params.model_path.clone(),
+            "--speaker".to_string(),
+            params.speaker_name.clone(),
             "--text".to_string(),
             params.text.clone(),
             "--language".to_string(),

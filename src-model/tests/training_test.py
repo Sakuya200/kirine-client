@@ -248,6 +248,20 @@ class TtsTests(unittest.TestCase):
 			writes=writes,
 		)
 
+	def write_tts_model_config(self, model_dir: Path, speakers: dict[str, int]):
+		(model_dir / "config.json").write_text(
+			json.dumps(
+				{
+					"talker_config": {
+						"spk_id": speakers,
+						"spk_is_dialect": {speaker_name: False for speaker_name in speakers},
+					}
+				},
+				ensure_ascii=False,
+			),
+			encoding="utf-8",
+		)
+
 	def test_build_runtime_options_switches_between_cpu_and_gpu(self):
 		module = load_module("tts")
 		torch_module = SimpleNamespace(float32="float32", bfloat16="bfloat16")
@@ -273,18 +287,7 @@ class TtsTests(unittest.TestCase):
 			temp_root = Path(temp_dir)
 			model_dir = temp_root / "checkpoint"
 			model_dir.mkdir(parents=True)
-			(model_dir / "config.json").write_text(
-				json.dumps(
-					{
-						"talker_config": {
-							"spk_id": {"speaker-a": 3000},
-							"spk_is_dialect": {"speaker-a": False},
-						}
-					},
-					ensure_ascii=False,
-				),
-				encoding="utf-8",
-			)
+			self.write_tts_model_config(model_dir, {"speaker-a": 3000})
 			output_path = str(temp_root / "sample.wav")
 			args = module.parse_args(
 				[
@@ -307,6 +310,80 @@ class TtsTests(unittest.TestCase):
 		self.assertEqual(FakeTtsModel.last_call["kwargs"], {"device_map": "cpu", "dtype": "float32"})
 		self.assertEqual(dependencies.writes[0]["path"], output_path)
 		self.assertEqual(dependencies.writes[0]["sr"], 24000)
+
+	def test_resolve_speaker_name_matches_model_config_case_insensitively(self):
+		module = load_module("tts")
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			model_dir = temp_root / "checkpoint"
+			model_dir.mkdir(parents=True)
+			self.write_tts_model_config(model_dir, {"Vivian": 3000, "Ryan": 3001})
+
+			args = module.parse_args(
+				[
+					"--init_model_path",
+					str(model_dir),
+					"--speaker",
+					"vivian",
+				]
+			)
+
+			self.assertEqual(module.resolve_speaker_name(args), "Vivian")
+
+	def test_resolve_speaker_name_normalizes_separator_variants(self):
+		module = load_module("tts")
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			model_dir = temp_root / "checkpoint"
+			model_dir.mkdir(parents=True)
+			self.write_tts_model_config(model_dir, {"uncle_fu": 3000})
+
+			args = module.parse_args(
+				[
+					"--init_model_path",
+					str(model_dir),
+					"--speaker",
+					"Uncle-Fu",
+				]
+			)
+
+			self.assertEqual(module.resolve_speaker_name(args), "uncle_fu")
+
+	def test_resolve_speaker_name_rejects_unknown_explicit_speaker(self):
+		module = load_module("tts")
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			model_dir = temp_root / "checkpoint"
+			model_dir.mkdir(parents=True)
+			self.write_tts_model_config(model_dir, {"Vivian": 3000, "Ryan": 3001})
+
+			args = module.parse_args(
+				[
+					"--init_model_path",
+					str(model_dir),
+					"--speaker",
+					"unknown speaker",
+				]
+			)
+
+			with self.assertRaisesRegex(ValueError, "Unsupported speaker"):
+				module.resolve_speaker_name(args)
+
+	def test_resolve_speaker_name_falls_back_to_first_model_speaker_when_missing(self):
+		module = load_module("tts")
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			model_dir = temp_root / "checkpoint"
+			model_dir.mkdir(parents=True)
+			self.write_tts_model_config(model_dir, {"Vivian": 3000, "Ryan": 3001})
+
+			args = module.parse_args(["--init_model_path", str(model_dir)])
+
+			self.assertEqual(module.resolve_speaker_name(args), "Vivian")
 
 if __name__ == "__main__":
 	unittest.main()
