@@ -28,7 +28,7 @@ pub struct SettingsPayload {
     pub qlora_mode: String,
     pub qlora_rank: u32,
     pub qlora_alpha: u32,
-    pub qlora_dropout: f32,
+    pub qlora_dropout: String,
     pub qlora_quant_type: String,
     pub qlora_double_quant: bool,
     pub restart_required: bool,
@@ -49,7 +49,7 @@ pub struct SaveSettingsPayload {
     pub qlora_mode: String,
     pub qlora_rank: u32,
     pub qlora_alpha: u32,
-    pub qlora_dropout: f32,
+    pub qlora_dropout: String,
     pub qlora_quant_type: String,
     pub qlora_double_quant: bool,
 }
@@ -67,7 +67,7 @@ impl SettingsPayload {
             qlora_mode: config.qlora_mode().as_str().to_string(),
             qlora_rank: config.qlora_rank(),
             qlora_alpha: config.qlora_alpha(),
-            qlora_dropout: config.qlora_dropout(),
+            qlora_dropout: config.qlora_dropout().to_string(),
             qlora_quant_type: config.qlora_quant_type().as_str().to_string(),
             qlora_double_quant: config.qlora_double_quant(),
             restart_required: false,
@@ -178,8 +178,8 @@ pub fn save_settings_config(
     if payload.qlora_alpha == 0 {
         return Err("QLoRA Alpha 必须大于 0".to_string());
     }
-    if !(0.0..=1.0).contains(&payload.qlora_dropout) {
-        return Err("QLoRA Dropout 必须在 0 到 1 之间".to_string());
+    if payload.qlora_dropout.trim().is_empty() {
+        return Err("QLoRA Dropout 不能为空".to_string());
     }
     if matches!(hardware_type, HardwareType::Cpu) && matches!(qlora_mode, QloraMode::Enabled) {
         return Err("CPU 模式下不能启用 QLoRA，请先切换到 CUDA 硬件类型。".to_string());
@@ -242,7 +242,7 @@ pub fn save_settings_config(
                 qlora_mode,
                 payload.qlora_rank,
                 payload.qlora_alpha,
-                payload.qlora_dropout,
+                payload.qlora_dropout.trim().to_string(),
                 qlora_quant_type,
                 payload.qlora_double_quant,
             ),

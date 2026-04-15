@@ -81,7 +81,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--qlora-r", dest="qlora_r", type=int, default=16)
     parser.add_argument("--qlora-alpha", dest="qlora_alpha", type=int, default=32)
-    parser.add_argument("--qlora-dropout", dest="qlora_dropout", type=float, default=0.05)
+    parser.add_argument("--qlora-dropout", dest="qlora_dropout", type=str, default="0.05")
     parser.add_argument(
         "--qlora-quant-type",
         dest="qlora_quant_type",
@@ -228,6 +228,22 @@ def freeze_speaker_encoder(model) -> None:
     speaker_encoder.eval()
 
 
+def parse_qlora_dropout(qlora_dropout: str) -> float:
+    normalized_dropout = qlora_dropout.strip()
+    if not normalized_dropout:
+        raise ValueError("qlora_dropout must not be empty")
+
+    try:
+        parsed_dropout = float(normalized_dropout)
+    except ValueError as exc:
+        raise ValueError("qlora_dropout must be a valid number") from exc
+
+    if parsed_dropout < 0 or parsed_dropout > 1:
+        raise ValueError("qlora_dropout must be between 0 and 1")
+
+    return parsed_dropout
+
+
 def prepare_qlora_model(model, args: argparse.Namespace, runtime: TrainingRuntimeOptions):
     qlora_support = runtime.qlora_support
     if qlora_support is None:
@@ -238,7 +254,7 @@ def prepare_qlora_model(model, args: argparse.Namespace, runtime: TrainingRuntim
     lora_config = qlora_support.LoraConfig(
         r=args.qlora_r,
         lora_alpha=args.qlora_alpha,
-        lora_dropout=args.qlora_dropout,
+        lora_dropout=parse_qlora_dropout(args.qlora_dropout),
         bias="none",
         target_modules=DEFAULT_QLORA_TARGET_MODULES,
     )

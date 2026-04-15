@@ -36,7 +36,7 @@ interface SettingsForm {
   qloraMode: QloraMode;
   qloraRank: number;
   qloraAlpha: number;
-  qloraDropout: number;
+  qloraDropout: string;
   qloraQuantType: QloraQuantType;
   qloraDoubleQuant: boolean;
 }
@@ -58,10 +58,11 @@ const form = reactive<SettingsForm>({
   qloraMode: QloraMode.Disabled,
   qloraRank: 16,
   qloraAlpha: 32,
-  qloraDropout: 0.05,
+  qloraDropout: '0.05',
   qloraQuantType: QloraQuantType.Nf4,
   qloraDoubleQuant: true
 });
+const parsedQloraDropout = computed(() => Number(form.qloraDropout.trim()));
 const attnImplementationOptions = Object.values(AttentionImplementation).map(value => ({
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
@@ -102,7 +103,15 @@ const canSaveConnection = computed(() => form.apiUrl.trim().length > 0 && !isLoa
 const canSaveModel = computed(() => form.modelDir.trim().length > 0 && !isLoading.value && !isSaving.value);
 
 const canSaveTrainingRuntime = computed(
-  () => form.qloraRank > 0 && form.qloraAlpha > 0 && form.qloraDropout >= 0 && form.qloraDropout <= 1 && !isLoading.value && !isSaving.value
+  () =>
+    form.qloraRank > 0 &&
+    form.qloraAlpha > 0 &&
+    form.qloraDropout.trim().length > 0 &&
+    Number.isFinite(parsedQloraDropout.value) &&
+    parsedQloraDropout.value >= 0 &&
+    parsedQloraDropout.value <= 1 &&
+    !isLoading.value &&
+    !isSaving.value
 );
 
 const canSaveCache = computed(() => form.dataDir.trim().length > 0 && form.logCacheDir.trim().length > 0 && !isLoading.value && !isSaving.value);
@@ -278,11 +287,9 @@ onMounted(async () => {
                 <label class="block">
                   <span class="mb-1 block text-xs text-stone-500">Dropout</span>
                   <input
-                    v-model.number="form.qloraDropout"
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
+                    v-model="form.qloraDropout"
+                    type="text"
+                    inputmode="decimal"
                     class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
                   />
                 </label>

@@ -49,7 +49,7 @@ pub struct TrainingConfig {
     pub qlora_mode: QloraMode,
     pub qlora_rank: u32,
     pub qlora_alpha: u32,
-    pub qlora_dropout: f32,
+    pub qlora_dropout: String,
     pub qlora_quant_type: QloraQuantType,
     pub qlora_double_quant: bool,
 }
@@ -63,7 +63,7 @@ impl Default for TrainingConfig {
             qlora_mode: QloraMode::default(),
             qlora_rank: 16,
             qlora_alpha: 32,
-            qlora_dropout: 0.05,
+            qlora_dropout: "0.05".to_string(),
             qlora_quant_type: QloraQuantType::default(),
             qlora_double_quant: true,
         }
@@ -89,7 +89,7 @@ impl TrainingConfig {
         qlora_mode: QloraMode,
         qlora_rank: u32,
         qlora_alpha: u32,
-        qlora_dropout: f32,
+        qlora_dropout: String,
         qlora_quant_type: QloraQuantType,
         qlora_double_quant: bool,
     ) -> Self {
@@ -156,8 +156,8 @@ impl EnvConfig {
         self.training.qlora_alpha
     }
 
-    pub fn qlora_dropout(&self) -> f32 {
-        self.training.qlora_dropout
+    pub fn qlora_dropout(&self) -> &str {
+        &self.training.qlora_dropout
     }
 
     pub fn qlora_quant_type(&self) -> QloraQuantType {
