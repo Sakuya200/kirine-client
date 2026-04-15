@@ -18,7 +18,7 @@ use crate::{
             training_index_jsonl_path, training_output_jsonl_path,
         },
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, save_configs, BaseModel, HardwareType, QloraMode},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
@@ -55,7 +55,6 @@ struct TrainingParams {
     base_model: BaseModel,
     batch_size: i64,
     epoch_count: i64,
-    hardware_type: HardwareType,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,7 +149,8 @@ impl Qwen3TTSModelTaskPipeline {
             let params = self
                 .load_training_params(service, request.task_id, request.speaker_id)
                 .await?;
-            let runtime = TrainingRuntimeOptions::from_hardware_type(params.hardware_type);
+            let runtime =
+                TrainingRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
             let paths = self.resolve_training_paths(
                 service,
                 request.task_id,
@@ -229,10 +229,6 @@ impl Qwen3TTSModelTaskPipeline {
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             batch_size: row.batch_size,
             epoch_count: row.epoch_count,
-            hardware_type: row
-                .hardware_type
-                .parse()
-                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
         })
     }
 
@@ -644,11 +640,10 @@ impl Qwen3TTSModelTaskPipeline {
         params: &TrainingParams,
         runtime: TrainingRuntimeOptions,
     ) -> Result<()> {
-        let attn_implementation = load_configs()
-            .context(
-                "failed to load config.toml before resolving training attention implementation",
-            )?
-            .attn_implementation();
+        let training_config = load_configs().context(
+            "failed to load config.toml before resolving training attention implementation",
+        )?;
+        let attn_implementation = training_config.attn_implementation();
 
         info!(
             train_jsonl = %paths.train_jsonl.display(),
@@ -677,6 +672,46 @@ impl Qwen3TTSModelTaskPipeline {
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::ModelTraining, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
+        let mut script_args = vec![
+            "--train-jsonl".to_string(),
+            paths.train_jsonl.to_string_lossy().to_string(),
+            "--output-model-path".to_string(),
+            paths.output_model_dir.to_string_lossy().to_string(),
+            "--init-model-path".to_string(),
+            paths.init_model_path.to_string_lossy().to_string(),
+            "--logging-dir".to_string(),
+            metrics_log_dir.to_string_lossy().to_string(),
+            "--batch-size".to_string(),
+            params.batch_size.to_string(),
+            "--num-epochs".to_string(),
+            params.epoch_count.to_string(),
+            "--speaker-name".to_string(),
+            speaker_name.to_string(),
+            "--device".to_string(),
+            runtime.training_device().to_string(),
+            "--attn-implementation".to_string(),
+            attn_implementation.as_str().to_string(),
+            "--qlora-r".to_string(),
+            training_config.qlora_rank().to_string(),
+            "--qlora-alpha".to_string(),
+            training_config.qlora_alpha().to_string(),
+            "--qlora-dropout".to_string(),
+            training_config.qlora_dropout().to_string(),
+            "--qlora-quant-type".to_string(),
+            training_config.qlora_quant_type().as_str().to_string(),
+        ];
+
+        match training_config.qlora_mode() {
+            QloraMode::Enabled => script_args.push("--use-qlora".to_string()),
+            QloraMode::Disabled => script_args.push("--no-use-qlora".to_string()),
+        }
+
+        script_args.push(if training_config.qlora_double_quant() {
+            "--qlora-double-quant".to_string()
+        } else {
+            "--no-qlora-double-quant".to_string()
+        });
+
         run_logged_python_script(
             &paths.venv_python_path,
             &paths.train_python_script_path,
@@ -684,26 +719,7 @@ impl Qwen3TTSModelTaskPipeline {
             TrainingCommandLabel::RunTraining.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--train-jsonl".to_string(),
-                paths.train_jsonl.to_string_lossy().to_string(),
-                "--output-model-path".to_string(),
-                paths.output_model_dir.to_string_lossy().to_string(),
-                "--init-model-path".to_string(),
-                paths.init_model_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--batch-size".to_string(),
-                params.batch_size.to_string(),
-                "--num-epochs".to_string(),
-                params.epoch_count.to_string(),
-                "--speaker-name".to_string(),
-                speaker_name.to_string(),
-                "--device".to_string(),
-                runtime.training_device().to_string(),
-                "--attn-implementation".to_string(),
-                attn_implementation.as_str().to_string(),
-            ],
+            script_args,
         )
         .await
     }

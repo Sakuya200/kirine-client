@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BASE_MODEL_TEXT, HARDWARE_TYPE_TEXT } from '@/enums/settings';
+import { BASE_MODEL_TEXT } from '@/enums/settings';
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
 import type { ModelTrainingHistoryRecord } from '@/types/domain';
 
@@ -24,10 +24,6 @@ defineProps<Props>();
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">基础模型</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ BASE_MODEL_TEXT[record.detail.baseModel] }}</p>
-      </article>
-      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-        <p class="text-xs text-stone-500">硬件类型</p>
-        <p class="mt-1 text-sm font-semibold text-slate-800">{{ HARDWARE_TYPE_TEXT[record.detail.hardwareType] }}</p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">训练轮次</p>

@@ -85,7 +85,6 @@ struct TtsTaskExecution {
     base_model: BaseModel,
     speaker_name: String,
     model_path: String,
-    hardware_type: HardwareType,
     language: String,
     format: TextToSpeechFormat,
     text: String,
@@ -127,7 +126,7 @@ impl Qwen3TTSModelTaskPipeline {
                 .await?;
             let paths = self.resolve_tts_paths(service, params.base_model)?;
             let log_dir = resolve_local_log_dir()?;
-            let runtime = TtsRuntimeOptions::from_hardware_type(params.hardware_type);
+            let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
             self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
             self.validate_tts_environment(&paths, &params)?;
@@ -218,10 +217,6 @@ impl Qwen3TTSModelTaskPipeline {
             )?
             .to_string_lossy()
             .to_string(),
-            hardware_type: task_detail
-                .hardware_type
-                .parse()
-                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             language: task_detail.language,
             format: task_detail
                 .format

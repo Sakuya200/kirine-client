@@ -5,9 +5,13 @@ use tauri::State;
 
 use crate::config::{
     load_configs, resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation,
-    BasicConfig, EnvConfig, RemoteConfig,
+    BasicConfig, EnvConfig, HardwareType, QloraMode, QloraQuantType, RemoteConfig,
+};
+use crate::service::pipeline::script_paths::{
+    resolve_src_model_root, src_model_qlora_toggle_script_path, ScriptPlatform,
 };
 use crate::utils::file_ops::migrate_directory;
+use crate::utils::process::run_logged_command;
 
 pub struct EnvConfigState(pub RwLock<EnvConfig>);
 
@@ -19,7 +23,14 @@ pub struct SettingsPayload {
     pub model_dir: String,
     pub data_dir: String,
     pub log_cache_dir: String,
+    pub hardware_type: String,
     pub attn_implementation: String,
+    pub qlora_mode: String,
+    pub qlora_rank: u32,
+    pub qlora_alpha: u32,
+    pub qlora_dropout: f32,
+    pub qlora_quant_type: String,
+    pub qlora_double_quant: bool,
     pub restart_required: bool,
     pub migrated_directories: Vec<String>,
     pub removable_directories: Vec<String>,
@@ -33,7 +44,14 @@ pub struct SaveSettingsPayload {
     pub model_dir: String,
     pub data_dir: String,
     pub log_cache_dir: String,
+    pub hardware_type: String,
     pub attn_implementation: String,
+    pub qlora_mode: String,
+    pub qlora_rank: u32,
+    pub qlora_alpha: u32,
+    pub qlora_dropout: f32,
+    pub qlora_quant_type: String,
+    pub qlora_double_quant: bool,
 }
 
 impl SettingsPayload {
@@ -44,12 +62,63 @@ impl SettingsPayload {
             model_dir: config.model_dir().unwrap_or_default().to_string(),
             data_dir: config.data_dir().unwrap_or_default().to_string(),
             log_cache_dir: config.log_dir().unwrap_or_default().to_string(),
+            hardware_type: config.hardware_type().as_str().to_string(),
             attn_implementation: config.attn_implementation().as_str().to_string(),
+            qlora_mode: config.qlora_mode().as_str().to_string(),
+            qlora_rank: config.qlora_rank(),
+            qlora_alpha: config.qlora_alpha(),
+            qlora_dropout: config.qlora_dropout(),
+            qlora_quant_type: config.qlora_quant_type().as_str().to_string(),
+            qlora_double_quant: config.qlora_double_quant(),
             restart_required: false,
             migrated_directories: Vec::new(),
             removable_directories: Vec::new(),
         }
     }
+}
+
+fn sync_qlora_runtime_dependencies(
+    config: &EnvConfig,
+    enabled: bool,
+) -> std::result::Result<(), String> {
+    let app_dir = std::env::current_dir().map_err(|err| format!("解析应用目录失败: {err}"))?;
+    let src_model_root = resolve_src_model_root(&app_dir).map_err(|err| err.to_string())?;
+    let script_path = src_model_qlora_toggle_script_path(&src_model_root);
+    let log_dir = resolve_base_log_dir(config.log_dir()).map_err(|err| err.to_string())?;
+    let task_log_path = log_dir.join("settings").join("qlora_dependency_sync.log");
+    let platform = ScriptPlatform::current();
+    let mut args = platform.shell_args(&script_path);
+    args.push("--task-log-file".to_string());
+    args.push(task_log_path.to_string_lossy().to_string());
+    args.push("--mode".to_string());
+    args.push(if enabled {
+        "enable".to_string()
+    } else {
+        "disable".to_string()
+    });
+
+    tauri::async_runtime::block_on(async {
+        run_logged_command(
+            std::path::Path::new(platform.shell_program()),
+            &args,
+            &src_model_root,
+            "sync qlora dependencies",
+            &task_log_path,
+            if enabled {
+                "QLoRA dependencies enabled"
+            } else {
+                "QLoRA dependencies disabled"
+            },
+        )
+        .await
+    })
+    .map_err(|err| {
+        format!(
+            "同步 QLoRA 依赖失败，请查看日志 {}: {}",
+            task_log_path.display(),
+            err
+        )
+    })
 }
 
 fn normalized_path(value: &str) -> Option<String> {
@@ -91,6 +160,30 @@ pub fn save_settings_config(
         .attn_implementation
         .parse::<AttentionImplementation>()
         .map_err(|err| err.to_string())?;
+    let hardware_type = payload
+        .hardware_type
+        .parse::<HardwareType>()
+        .map_err(|err| err.to_string())?;
+    let qlora_mode = payload
+        .qlora_mode
+        .parse::<QloraMode>()
+        .map_err(|err| err.to_string())?;
+    let qlora_quant_type = payload
+        .qlora_quant_type
+        .parse::<QloraQuantType>()
+        .map_err(|err| err.to_string())?;
+    if payload.qlora_rank == 0 {
+        return Err("QLoRA Rank 必须大于 0".to_string());
+    }
+    if payload.qlora_alpha == 0 {
+        return Err("QLoRA Alpha 必须大于 0".to_string());
+    }
+    if !(0.0..=1.0).contains(&payload.qlora_dropout) {
+        return Err("QLoRA Dropout 必须在 0 到 1 之间".to_string());
+    }
+    if matches!(hardware_type, HardwareType::Cpu) && matches!(qlora_mode, QloraMode::Enabled) {
+        return Err("CPU 模式下不能启用 QLoRA，请先切换到 CUDA 硬件类型。".to_string());
+    }
     let next_data_dir = normalized_path(&payload.data_dir);
     let next_log_dir = normalized_path(&payload.log_cache_dir);
     let next_model_dir = normalized_path(&payload.model_dir);
@@ -143,8 +236,19 @@ pub fn save_settings_config(
         training: persisted_config
             .training
             .clone()
-            .with_attn_implementation(attn_implementation),
+            .with_hardware_type(hardware_type)
+            .with_attn_implementation(attn_implementation)
+            .with_qlora_settings(
+                qlora_mode,
+                payload.qlora_rank,
+                payload.qlora_alpha,
+                payload.qlora_dropout,
+                qlora_quant_type,
+                payload.qlora_double_quant,
+            ),
     };
+
+    sync_qlora_runtime_dependencies(&next_config, matches!(qlora_mode, QloraMode::Enabled))?;
 
     save_configs(&next_config).map_err(|err| err.to_string())?;
     *config = next_config.clone();

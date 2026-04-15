@@ -9,7 +9,6 @@ pub struct Model {
     pub speaker_id: i64,
     pub model_path: Option<String>,
     pub base_model: String,
-    pub hardware_type: String,
     pub language: String,
     pub format: String,
     pub text: String,

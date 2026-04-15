@@ -1,4 +1,5 @@
 import argparse
+import importlib
 from dataclasses import dataclass
 import json
 import os
@@ -8,13 +9,27 @@ import sys
 from types import SimpleNamespace
 
 target_speaker_embedding = None
+DEFAULT_QLORA_TARGET_MODULES = (
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+    "linear_fc1",
+    "linear_fc2",
+    "small_to_mtp_projection",
+)
 
 
 @dataclass
 class TrainingRuntimeOptions:
     is_cpu: bool
+    use_qlora: bool
     accelerator_kwargs: dict[str, object]
     model_load_kwargs: dict[str, object]
+    qlora_support: object | None = None
 
 
 @dataclass
@@ -58,6 +73,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="flash_attention_2",
     )
+    parser.add_argument(
+        "--use-qlora",
+        dest="use_qlora",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--qlora-r", dest="qlora_r", type=int, default=16)
+    parser.add_argument("--qlora-alpha", dest="qlora_alpha", type=int, default=32)
+    parser.add_argument("--qlora-dropout", dest="qlora_dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--qlora-quant-type",
+        dest="qlora_quant_type",
+        choices=("nf4", "fp4"),
+        default="nf4",
+    )
+    parser.add_argument(
+        "--qlora-double-quant",
+        dest="qlora_double_quant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     return parser.parse_args(argv)
 
 
@@ -77,6 +113,27 @@ def ensure_src_root_on_path() -> None:
     src_root_str = str(src_root)
     if src_root_str not in sys.path:
         sys.path.insert(0, src_root_str)
+
+
+def load_qlora_support(strict: bool) -> object | None:
+    try:
+        importlib.import_module("bitsandbytes")
+        peft_module = importlib.import_module("peft")
+        transformers_module = importlib.import_module("transformers")
+    except ImportError as exc:
+        if strict:
+            raise RuntimeError(
+                "QLoRA requires the optional 'peft' and 'bitsandbytes' packages. "
+                "Ensure runtime initialization completed and the CUDA environment supports bitsandbytes."
+            ) from exc
+        return None
+
+    return SimpleNamespace(
+        BitsAndBytesConfig=transformers_module.BitsAndBytesConfig,
+        LoraConfig=peft_module.LoraConfig,
+        get_peft_model=peft_module.get_peft_model,
+        prepare_model_for_kbit_training=peft_module.prepare_model_for_kbit_training,
+    )
 
 
 def load_training_dependencies() -> SimpleNamespace:
@@ -112,8 +169,11 @@ def build_runtime_options(args: argparse.Namespace, torch_module) -> TrainingRun
         accelerator_kwargs["project_dir"] = args.logging_dir
 
     if is_cpu_device(args.device):
+        if args.use_qlora:
+            raise ValueError("QLoRA requires a CUDA device; CPU mode is not supported.")
         return TrainingRuntimeOptions(
             is_cpu=True,
+            use_qlora=False,
             accelerator_kwargs={
                 **accelerator_kwargs,
                 "mixed_precision": "no",
@@ -124,16 +184,32 @@ def build_runtime_options(args: argparse.Namespace, torch_module) -> TrainingRun
             },
         )
 
+    qlora_support = None
+    model_load_kwargs: dict[str, object] = {
+        "torch_dtype": torch_module.bfloat16,
+        "attn_implementation": args.attn_implementation,
+    }
+
+    if args.use_qlora is not False:
+        qlora_support = load_qlora_support(strict=args.use_qlora is True)
+        if qlora_support is not None:
+            model_load_kwargs["device_map"] = {"": args.device}
+            model_load_kwargs["quantization_config"] = qlora_support.BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=args.qlora_quant_type,
+                bnb_4bit_use_double_quant=args.qlora_double_quant,
+                bnb_4bit_compute_dtype=torch_module.bfloat16,
+            )
+
     return TrainingRuntimeOptions(
         is_cpu=False,
+        use_qlora=qlora_support is not None,
         accelerator_kwargs={
             **accelerator_kwargs,
             "mixed_precision": "bf16",
         },
-        model_load_kwargs={
-            "torch_dtype": torch_module.bfloat16,
-            "attn_implementation": args.attn_implementation,
-        },
+        model_load_kwargs=model_load_kwargs,
+        qlora_support=qlora_support,
     )
 
 
@@ -141,6 +217,43 @@ def load_training_rows(train_jsonl: str) -> list[dict[str, object]]:
     with open(train_jsonl, "r", encoding="utf-8") as file:
         train_data = file.readlines()
     return [json.loads(line) for line in train_data if line.strip()]
+
+
+def freeze_speaker_encoder(model) -> None:
+    speaker_encoder = getattr(model, "speaker_encoder", None)
+    if speaker_encoder is None:
+        return
+
+    speaker_encoder.requires_grad_(False)
+    speaker_encoder.eval()
+
+
+def prepare_qlora_model(model, args: argparse.Namespace, runtime: TrainingRuntimeOptions):
+    qlora_support = runtime.qlora_support
+    if qlora_support is None:
+        return model
+
+    model = qlora_support.prepare_model_for_kbit_training(model)
+    freeze_speaker_encoder(model)
+    lora_config = qlora_support.LoraConfig(
+        r=args.qlora_r,
+        lora_alpha=args.qlora_alpha,
+        lora_dropout=args.qlora_dropout,
+        bias="none",
+        target_modules=DEFAULT_QLORA_TARGET_MODULES,
+    )
+    return qlora_support.get_peft_model(model, lora_config)
+
+
+def count_parameters(model) -> tuple[int, int]:
+    trainable_parameters = 0
+    total_parameters = 0
+    for parameter in model.parameters():
+        parameter_count = parameter.numel()
+        total_parameters += parameter_count
+        if parameter.requires_grad:
+            trainable_parameters += parameter_count
+    return trainable_parameters, total_parameters
 
 
 def initialize_training_pipeline(
@@ -155,6 +268,10 @@ def initialize_training_pipeline(
         args.init_model_path,
         **runtime.model_load_kwargs,
     )
+    freeze_speaker_encoder(qwen3tts.model)
+    if runtime.use_qlora:
+        qwen3tts.model = prepare_qlora_model(qwen3tts.model, args, runtime)
+
     config = deps.AutoConfig.from_pretrained(args.init_model_path)
     train_data = load_training_rows(args.train_jsonl)
 
@@ -166,12 +283,27 @@ def initialize_training_pipeline(
         collate_fn=dataset.collate_fn,
     )
 
-    optimizer = deps.AdamW(qwen3tts.model.parameters(), lr=args.lr, weight_decay=0.01)
-    model, optimizer, train_dataloader = accelerator.prepare(
-        qwen3tts.model,
-        optimizer,
-        train_dataloader,
+    optimizer = deps.AdamW(
+        (parameter for parameter in qwen3tts.model.parameters() if parameter.requires_grad),
+        lr=args.lr,
+        weight_decay=0.01,
     )
+    if runtime.use_qlora:
+        optimizer, train_dataloader = accelerator.prepare(
+            optimizer,
+            train_dataloader,
+        )
+        model = qwen3tts.model
+    else:
+        model, optimizer, train_dataloader = accelerator.prepare(
+            qwen3tts.model,
+            optimizer,
+            train_dataloader,
+        )
+
+    trainable_parameters, total_parameters = count_parameters(model)
+    mode_name = "QLoRA" if runtime.use_qlora else "full fine-tune"
+    print(f"Training mode: {mode_name} | Trainable params: {trainable_parameters:,} / {total_parameters:,}")
 
     return TrainingPipelineContext(
         runtime=runtime,
@@ -227,7 +359,8 @@ def run_training(args: argparse.Namespace, dependencies: SimpleNamespace | None 
                 codec_0_labels = batch["codec_0_labels"]
                 codec_mask = batch["codec_mask"]
 
-                speaker_embedding = model.speaker_encoder(ref_mels.to(model_device).to(model_dtype)).detach()
+                with deps.torch.no_grad():
+                    speaker_embedding = model.speaker_encoder(ref_mels.to(model_device).to(model_dtype)).detach()
                 if target_speaker_embedding is None:
                     target_speaker_embedding = speaker_embedding
 
@@ -274,7 +407,9 @@ def run_training(args: argparse.Namespace, dependencies: SimpleNamespace | None 
             if step % 10 == 0:
                 print(f"Epoch {epoch} | Step {step} | Loss: {loss.item():.4f}")
 
-        if accelerator.is_main_process:
+        accelerator.wait_for_everyone()
+        should_export_checkpoint = (not context.runtime.use_qlora) or epoch == num_epochs - 1
+        if accelerator.is_main_process and should_export_checkpoint:
             output_dir = os.path.join(args.output_model_path, f"checkpoint-epoch-{epoch}")
             shutil.copytree(args.init_model_path, output_dir, dirs_exist_ok=True)
 
@@ -296,7 +431,11 @@ def run_training(args: argparse.Namespace, dependencies: SimpleNamespace | None 
                 json.dump(config_dict, f, indent=2, ensure_ascii=False)
 
             unwrapped_model = accelerator.unwrap_model(model)
-            state_dict = {k: v.detach().to("cpu") for k, v in unwrapped_model.state_dict().items()}
+            export_model = unwrapped_model
+            if context.runtime.use_qlora and hasattr(unwrapped_model, "merge_and_unload"):
+                export_model = unwrapped_model.merge_and_unload()
+
+            state_dict = {k: v.detach().to("cpu") for k, v in export_model.state_dict().items()}
 
             drop_prefix = "speaker_encoder"
             keys_to_drop = [k for k in state_dict.keys() if k.startswith(drop_prefix)]

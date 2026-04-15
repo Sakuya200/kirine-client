@@ -9,7 +9,9 @@ use std::{
 use tracing::{error, info};
 
 use crate::{
-    config::{AttentionImplementation, BaseModel, StorageMode},
+    config::{
+        AttentionImplementation, BaseModel, HardwareType, QloraMode, QloraQuantType, StorageMode,
+    },
     Result,
 };
 
@@ -38,19 +40,65 @@ pub struct RemoteConfig {
     pub api_token: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct TrainingConfig {
     pub prepared_base_models: Vec<BaseModel>,
+    pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
+    pub qlora_mode: QloraMode,
+    pub qlora_rank: u32,
+    pub qlora_alpha: u32,
+    pub qlora_dropout: f32,
+    pub qlora_quant_type: QloraQuantType,
+    pub qlora_double_quant: bool,
+}
+
+impl Default for TrainingConfig {
+    fn default() -> Self {
+        Self {
+            prepared_base_models: Vec::new(),
+            hardware_type: HardwareType::default(),
+            attn_implementation: AttentionImplementation::default(),
+            qlora_mode: QloraMode::default(),
+            qlora_rank: 16,
+            qlora_alpha: 32,
+            qlora_dropout: 0.05,
+            qlora_quant_type: QloraQuantType::default(),
+            qlora_double_quant: true,
+        }
+    }
 }
 
 impl TrainingConfig {
+    pub fn with_hardware_type(mut self, hardware_type: HardwareType) -> Self {
+        self.hardware_type = hardware_type;
+        self
+    }
+
     pub fn with_attn_implementation(
         mut self,
         attn_implementation: AttentionImplementation,
     ) -> Self {
         self.attn_implementation = attn_implementation;
+        self
+    }
+
+    pub fn with_qlora_settings(
+        mut self,
+        qlora_mode: QloraMode,
+        qlora_rank: u32,
+        qlora_alpha: u32,
+        qlora_dropout: f32,
+        qlora_quant_type: QloraQuantType,
+        qlora_double_quant: bool,
+    ) -> Self {
+        self.qlora_mode = qlora_mode;
+        self.qlora_rank = qlora_rank;
+        self.qlora_alpha = qlora_alpha;
+        self.qlora_dropout = qlora_dropout;
+        self.qlora_quant_type = qlora_quant_type;
+        self.qlora_double_quant = qlora_double_quant;
         self
     }
 }
@@ -90,6 +138,34 @@ impl EnvConfig {
 
     pub fn attn_implementation(&self) -> AttentionImplementation {
         self.training.attn_implementation
+    }
+
+    pub fn hardware_type(&self) -> HardwareType {
+        self.training.hardware_type
+    }
+
+    pub fn qlora_mode(&self) -> QloraMode {
+        self.training.qlora_mode
+    }
+
+    pub fn qlora_rank(&self) -> u32 {
+        self.training.qlora_rank
+    }
+
+    pub fn qlora_alpha(&self) -> u32 {
+        self.training.qlora_alpha
+    }
+
+    pub fn qlora_dropout(&self) -> f32 {
+        self.training.qlora_dropout
+    }
+
+    pub fn qlora_quant_type(&self) -> QloraQuantType {
+        self.training.qlora_quant_type
+    }
+
+    pub fn qlora_double_quant(&self) -> bool {
+        self.training.qlora_double_quant
     }
 }
 

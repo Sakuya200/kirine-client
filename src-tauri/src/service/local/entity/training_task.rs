@@ -8,7 +8,6 @@ pub struct Model {
     pub history_id: i64,
     pub language: String,
     pub base_model: String,
-    pub hardware_type: String,
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,

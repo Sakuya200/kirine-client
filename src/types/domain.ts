@@ -1,6 +1,6 @@
 import type { AppLanguage } from '@/enums/language';
 import type { ModelTrainingSampleType } from '@/enums/modelTraining';
-import type { BaseModel, HardwareType } from '@/enums/settings';
+import type { BaseModel } from '@/enums/settings';
 import type { SpeakerStatus, TaskStatus } from '@/enums/status';
 import type { TextToSpeechFormat } from '@/enums/textToSpeech';
 import type { HistoryTaskType } from '@/enums/task';
@@ -35,7 +35,6 @@ export interface HistoryRecordBase {
 export interface ModelTrainingTaskDetail {
   language: AppLanguage;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   modelName: string;
   epochCount: number;
   batchSize: number;
@@ -63,7 +62,6 @@ export interface ModelTrainingSampleDetail {
 export interface TextToSpeechTaskDetail {
   speakerId: number;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   format: TextToSpeechFormat;
   text: string;
@@ -75,7 +73,6 @@ export interface TextToSpeechTaskDetail {
 
 export interface VoiceCloneTaskDetail {
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   format: TextToSpeechFormat;
   refAudioName: string;

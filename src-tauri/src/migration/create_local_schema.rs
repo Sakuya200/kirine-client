@@ -173,12 +173,6 @@ async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                         .not_null()
                         .default("qwen3_tts"),
                 )
-                .col(
-                    ColumnDef::new(TtsTasks::HardwareType)
-                        .string()
-                        .not_null()
-                        .default("cuda"),
-                )
                 .col(ColumnDef::new(TtsTasks::Language).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Format).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Text).text().not_null())
@@ -245,12 +239,6 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .string()
                         .not_null()
                         .default("qwen3_tts"),
-                )
-                .col(
-                    ColumnDef::new(ModelTrainingTasks::HardwareType)
-                        .string()
-                        .not_null()
-                        .default("cuda"),
                 )
                 .col(
                     ColumnDef::new(ModelTrainingTasks::ModelName)
@@ -344,12 +332,6 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                         .string()
                         .not_null()
                         .default("qwen3_tts"),
-                )
-                .col(
-                    ColumnDef::new(VoiceCloneTasks::HardwareType)
-                        .string()
-                        .not_null()
-                        .default("cuda"),
                 )
                 .col(
                     ColumnDef::new(VoiceCloneTasks::Language)
@@ -611,7 +593,6 @@ enum TtsTasks {
     SpeakerId,
     ModelPath,
     BaseModel,
-    HardwareType,
     Language,
     Format,
     Text,
@@ -631,7 +612,6 @@ enum ModelTrainingTasks {
     HistoryId,
     Language,
     BaseModel,
-    HardwareType,
     ModelName,
     EpochCount,
     BatchSize,
@@ -650,7 +630,6 @@ enum VoiceCloneTasks {
     Id,
     HistoryId,
     BaseModel,
-    HardwareType,
     Language,
     Format,
     RefAudioName,

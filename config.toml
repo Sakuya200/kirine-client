@@ -10,4 +10,11 @@ api_token = ""
 
 [training]
 prepared_base_models = ["qwen3_tts"]
+hardware_type = "cuda"
 attn_implementation = "sdpa"
+qlora_mode = "disabled"
+qlora_rank = 16
+qlora_alpha = 32
+qlora_dropout = 0.05
+qlora_quant_type = "nf4"
+qlora_double_quant = true

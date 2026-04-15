@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -32,7 +32,7 @@ import {
   ModelTrainingSampleType,
   type ModelTrainingOption
 } from '@/enums/modelTraining';
-import { BASE_MODEL_TEXT, BaseModel, HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
+import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
@@ -61,7 +61,6 @@ interface ImportedSampleItem {
 interface ModelTrainingTaskResultPayload {
   taskId: number;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   modelName: string;
   sampleCount: number;
   createTime: string;
@@ -71,7 +70,6 @@ interface ModelTrainingTaskResultPayload {
 const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: BaseModel.Qwen3Tts,
-  hardwareType: HardwareType.Cuda,
   modelName: 'speaker_a_custom',
   epochCount: 4,
   batchSize: 2,
@@ -80,13 +78,8 @@ const form = reactive({
   datasetArchiveFile: null as SelectedLocalFile | null,
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
-const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
-  label: HARDWARE_TYPE_TEXT[value],
-  value
-}));
 const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
-const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const isStarting = ref(false);
 const isRefreshingHistory = ref(false);
 const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
@@ -122,15 +115,13 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.modelName,
-    subtitle: `任务 ${item.id} · ${BASE_MODEL_TEXT[item.detail.baseModel]} · ${HARDWARE_TYPE_TEXT[item.detail.hardwareType]}`,
+    subtitle: `任务 ${item.id} · ${BASE_MODEL_TEXT[item.detail.baseModel]}`,
     status: item.status
   }))
 );
 
 const baseModelSummary = computed(() => {
-  return form.hardwareType === HardwareType.Cpu
-    ? '当前训练会走 CPU 路径，首次准备和训练耗时都会明显更长。'
-    : '当前训练会走 CUDA 路径，适合常规本地训练流程。';
+  return '训练任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
 });
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
@@ -143,13 +134,6 @@ const trainingBusyLabel = computed(() => {
 
   return '';
 });
-
-watch(
-  () => form.hardwareType,
-  value => {
-    taskPreferencesStore.modelTrainingHardwareType = value;
-  }
-);
 
 const extractFileName = (filePath: string) => {
   const parts = filePath.split(/[/\\]/);
@@ -193,7 +177,6 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
   return {
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
-    hardwareType: trainingRecord.detail.hardwareType,
     modelName: trainingRecord.detail.modelName,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
@@ -293,13 +276,10 @@ const removeImportedSample = (sampleId: number) => {
 };
 
 form.baseModel = taskPreferencesStore.fixedBaseModel;
-form.hardwareType = taskPreferencesStore.modelTrainingHardwareType;
-selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === form.hardwareType) ?? null;
 
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = taskPreferencesStore.fixedBaseModel;
-  form.hardwareType = taskPreferencesStore.modelTrainingHardwareType;
   form.modelName = 'speaker_a_custom';
   form.epochCount = 30;
   form.batchSize = 8;
@@ -308,7 +288,6 @@ const resetForm = () => {
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS[0];
-  selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === form.hardwareType) ?? null;
   importedSamples.value = [];
   uiStore.notifyInfo('训练表单已重置。', 2200);
 };
@@ -336,7 +315,6 @@ const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): Im
 const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
-  form.hardwareType = record.detail.hardwareType;
   form.modelName = record.detail.modelName;
   form.epochCount = record.detail.epochCount;
   form.batchSize = record.detail.batchSize;
@@ -346,7 +324,6 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.datasetAnnotationFile = null;
   importedSamples.value = record.detail.samples.map(mapHistorySampleToImportedSample);
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS.find(option => option.value === form.language) ?? null;
-  selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === form.hardwareType) ?? null;
 };
 
 const hydrateReplayTaskFromRoute = async () => {
@@ -456,7 +433,6 @@ const startTraining = async () => {
       payload: {
         language: form.language,
         baseModel: form.baseModel,
-        hardwareType: form.hardwareType,
         modelName: form.modelName.trim(),
         epochCount: form.epochCount,
         batchSize: form.batchSize,
@@ -477,7 +453,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${BASE_MODEL_TEXT[payload.baseModel]}，硬件 ${HARDWARE_TYPE_TEXT[payload.hardwareType]}，共 ${payload.sampleCount} 项样本。`,
+      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${BASE_MODEL_TEXT[payload.baseModel]}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -653,12 +629,6 @@ onBeforeUnmount(() => {
               <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
             </label>
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
-            <BaseListbox
-              v-model="form.hardwareType"
-              v-model:selected-option="selectedHardwareTypeOption"
-              label="硬件类型"
-              :options="hardwareTypeOptions"
-            />
             <div class="grid gap-3 md:grid-cols-2">
               <label class="block">
                 <span class="mb-1 block text-xs text-stone-500">训练轮次</span>
@@ -688,9 +658,7 @@ onBeforeUnmount(() => {
             <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>训练摘要</p>
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-              <p class="mt-1">
-                基础模型 {{ BASE_MODEL_TEXT[form.baseModel] }}，硬件类型 {{ HARDWARE_TYPE_TEXT[form.hardwareType] }}。{{ baseModelSummary }}
-              </p>
+              <p class="mt-1">基础模型 {{ BASE_MODEL_TEXT[form.baseModel] }}。{{ baseModelSummary }}</p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             </div>
           </div>
