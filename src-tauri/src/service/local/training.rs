@@ -167,10 +167,18 @@ impl LocalService {
         let mut notes = vec![
             format!("共导入 {} 项样本。", sample_count),
             format!(
-                "训练语言 {}，批次大小 {}。",
-                payload.language, payload.batch_size
+                "训练语言 {}，批次大小 {}，梯度累积 {}。",
+                payload.language, payload.batch_size, payload.gradient_accumulation_steps
             ),
             format!("训练模式: {}。", selected_training_mode_text),
+            format!(
+                "梯度检查点: {}。",
+                if payload.enable_gradient_checkpointing {
+                    "启用"
+                } else {
+                    "禁用"
+                }
+            ),
             format!("整理后训练样本 {} 条。", prepared.index_entries.len()),
             format!(
                 "样本目录: {}",
@@ -205,6 +213,8 @@ impl LocalService {
             model_name: Set(speaker_name.clone()),
             epoch_count: Set(payload.epoch_count),
             batch_size: Set(payload.batch_size),
+            gradient_accumulation_steps: Set(payload.gradient_accumulation_steps),
+            enable_gradient_checkpointing: Set(payload.enable_gradient_checkpointing),
             sample_count: Set(sample_count),
             samples_json: Set(serde_json::to_string(&prepared.persisted_samples)?),
             notes_json: Set(serde_json::to_string(&notes)?),

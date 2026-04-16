@@ -10,16 +10,7 @@ import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import {
-  ATTENTION_IMPLEMENTATION_TEXT,
-  AttentionImplementation,
-  HARDWARE_TYPE_TEXT,
-  HardwareType,
-  QLORA_MODE_TEXT,
-  QLORA_QUANT_TYPE_TEXT,
-  QloraMode,
-  QloraQuantType
-} from '@/enums/settings';
+import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation, HARDWARE_TYPE_TEXT, HardwareType, LoraMode } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 
@@ -33,12 +24,10 @@ interface SettingsForm {
   logCacheDir: string;
   hardwareType: HardwareType;
   attnImplementation: AttentionImplementation;
-  qloraMode: QloraMode;
-  qloraRank: number;
-  qloraAlpha: number;
-  qloraDropout: string;
-  qloraQuantType: QloraQuantType;
-  qloraDoubleQuant: boolean;
+  loraMode: LoraMode;
+  loraRank: number;
+  loraAlpha: number;
+  loraDropout: string;
 }
 
 interface SettingsResponse extends SettingsForm {
@@ -47,22 +36,22 @@ interface SettingsResponse extends SettingsForm {
   removableDirectories: string[];
 }
 
-const form = reactive<SettingsForm>({
+const DEFAULT_SETTINGS_FORM: SettingsForm = {
   apiUrl: '',
   apiToken: '',
   modelDir: '',
   dataDir: '',
   logCacheDir: '',
-  hardwareType: HardwareType.Cuda,
+  hardwareType: HardwareType.Cpu,
   attnImplementation: AttentionImplementation.Sdpa,
-  qloraMode: QloraMode.Disabled,
-  qloraRank: 16,
-  qloraAlpha: 32,
-  qloraDropout: '0.05',
-  qloraQuantType: QloraQuantType.Nf4,
-  qloraDoubleQuant: true
-});
-const parsedQloraDropout = computed(() => Number(form.qloraDropout.trim()));
+  loraMode: LoraMode.Disabled,
+  loraRank: 16,
+  loraAlpha: 32,
+  loraDropout: '0.05'
+};
+
+const form = reactive<SettingsForm>({ ...DEFAULT_SETTINGS_FORM });
+const loraDisabledOptions = [{ label: '已暂时禁用', value: LoraMode.Disabled }];
 const attnImplementationOptions = Object.values(AttentionImplementation).map(value => ({
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
@@ -71,18 +60,8 @@ const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
   label: HARDWARE_TYPE_TEXT[value],
   value
 }));
-const qloraModeOptions = Object.values(QloraMode).map(value => ({
-  label: QLORA_MODE_TEXT[value],
-  value
-}));
-const qloraQuantTypeOptions = Object.values(QloraQuantType).map(value => ({
-  label: QLORA_QUANT_TYPE_TEXT[value],
-  value
-}));
 const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const selectedAttnImplementationOption = ref<{ label: string; value: AttentionImplementation } | null>(null);
-const selectedQloraModeOption = ref<{ label: string; value: QloraMode } | null>(null);
-const selectedQloraQuantTypeOption = ref<{ label: string; value: QloraQuantType } | null>(null);
 const isLoading = ref(false);
 const isSaving = ref(false);
 const uiStore = useUiStore();
@@ -98,23 +77,13 @@ const settingsBusyLabel = computed(() => {
   return '';
 });
 
-const canSaveConnection = computed(() => form.apiUrl.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveConnection = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveModel = computed(() => form.modelDir.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveModel = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveTrainingRuntime = computed(
-  () =>
-    form.qloraRank > 0 &&
-    form.qloraAlpha > 0 &&
-    form.qloraDropout.trim().length > 0 &&
-    Number.isFinite(parsedQloraDropout.value) &&
-    parsedQloraDropout.value >= 0 &&
-    parsedQloraDropout.value <= 1 &&
-    !isLoading.value &&
-    !isSaving.value
-);
+const canSaveTrainingRuntime = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveCache = computed(() => form.dataDir.trim().length > 0 && form.logCacheDir.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveCache = computed(() => !isLoading.value && !isSaving.value);
 
 const applySettings = (payload: SettingsForm) => {
   form.apiUrl = payload.apiUrl;
@@ -124,12 +93,10 @@ const applySettings = (payload: SettingsForm) => {
   form.logCacheDir = payload.logCacheDir;
   form.hardwareType = payload.hardwareType;
   form.attnImplementation = payload.attnImplementation;
-  form.qloraMode = payload.qloraMode;
-  form.qloraRank = payload.qloraRank;
-  form.qloraAlpha = payload.qloraAlpha;
-  form.qloraDropout = payload.qloraDropout;
-  form.qloraQuantType = payload.qloraQuantType;
-  form.qloraDoubleQuant = payload.qloraDoubleQuant;
+  form.loraMode = LoraMode.Disabled;
+  form.loraRank = payload.loraRank;
+  form.loraAlpha = payload.loraAlpha;
+  form.loraDropout = payload.loraDropout;
 };
 
 const loadSettings = async () => {
@@ -147,7 +114,12 @@ const loadSettings = async () => {
 };
 
 const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
-  const isSectionValid = section === 'connection' ? canSaveConnection.value : section === 'model' ? canSaveModel.value : canSaveCache.value;
+  const isSectionValid =
+    section === 'connection'
+      ? canSaveConnection.value
+      : section === 'model'
+        ? canSaveModel.value && canSaveTrainingRuntime.value
+        : canSaveCache.value;
 
   if (!isSectionValid) {
     return;
@@ -165,12 +137,10 @@ const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
         logCacheDir: form.logCacheDir,
         hardwareType: form.hardwareType,
         attnImplementation: form.attnImplementation,
-        qloraMode: form.qloraMode,
-        qloraRank: form.qloraRank,
-        qloraAlpha: form.qloraAlpha,
-        qloraDropout: form.qloraDropout,
-        qloraQuantType: form.qloraQuantType,
-        qloraDoubleQuant: form.qloraDoubleQuant
+        loraMode: form.loraMode,
+        loraRank: form.loraRank,
+        loraAlpha: form.loraAlpha,
+        loraDropout: form.loraDropout
       }
     });
     applySettings(payload);
@@ -252,58 +222,46 @@ onMounted(async () => {
             />
             <section class="space-y-3 rounded-2xl border border-brand-100 bg-stone-50/80 p-4">
               <header class="space-y-1">
-                <h3 class="text-sm font-semibold text-stone-700">QLoRA 训练参数</h3>
-                <p class="text-xs leading-5 text-stone-500">
-                  启用后会在保存设置时立即安装 QLoRA 依赖；禁用后会同步卸载相关依赖。CPU 硬件类型下不允许启用 QLoRA。
+                <h3 class="text-sm font-semibold text-stone-700">LoRA 训练参数</h3>
+                <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                  当前 LoRA 微调 TTS 模型的效果较差，已暂时禁止使用。相关配置仅保留只读展示，应用保存时也会强制关闭 LoRA。
                 </p>
               </header>
-              <BaseListbox
-                v-model="form.qloraMode"
-                v-model:selected-option="selectedQloraModeOption"
-                label="QLoRA 模式"
-                :options="qloraModeOptions"
-              />
+              <BaseListbox v-model="form.loraMode" label="LoRA 模式" :options="loraDisabledOptions" disabled />
               <div class="grid gap-3 md:grid-cols-3">
                 <label class="block">
                   <span class="mb-1 block text-xs text-stone-500">Rank</span>
                   <input
-                    v-model.number="form.qloraRank"
+                    v-model.number="form.loraRank"
                     type="number"
                     min="1"
                     step="1"
-                    class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
                   />
                 </label>
                 <label class="block">
                   <span class="mb-1 block text-xs text-stone-500">Alpha</span>
                   <input
-                    v-model.number="form.qloraAlpha"
+                    v-model.number="form.loraAlpha"
                     type="number"
                     min="1"
                     step="1"
-                    class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
                   />
                 </label>
                 <label class="block">
                   <span class="mb-1 block text-xs text-stone-500">Dropout</span>
                   <input
-                    v-model="form.qloraDropout"
+                    v-model="form.loraDropout"
                     type="text"
                     inputmode="decimal"
-                    class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
                   />
                 </label>
               </div>
-              <BaseListbox
-                v-model="form.qloraQuantType"
-                v-model:selected-option="selectedQloraQuantTypeOption"
-                label="4bit 量化类型"
-                :options="qloraQuantTypeOptions"
-              />
-              <label class="flex items-center gap-3 rounded-xl border border-brand-100 bg-white/80 px-3 py-2 text-sm text-slate-700">
-                <input v-model="form.qloraDoubleQuant" type="checkbox" class="h-4 w-4 rounded border-brand-300 text-brand-500 focus:ring-brand-200" />
-                <span>启用 Double Quant</span>
-              </label>
             </section>
             <BaseButton tone="ghost" :disabled="!canSaveModel || !canSaveTrainingRuntime" @click="saveSettings('model')">
               <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />

@@ -380,6 +380,8 @@ impl LocalService {
             model_name: row.model_name,
             epoch_count: row.epoch_count,
             batch_size: row.batch_size,
+            gradient_accumulation_steps: row.gradient_accumulation_steps,
+            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
             sample_count: row.sample_count,
             samples,
             notes,

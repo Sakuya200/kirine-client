@@ -377,6 +377,8 @@ pub struct ModelTrainingTaskDetail {
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
     pub sample_count: i64,
     pub samples: Vec<ModelTrainingSampleInput>,
     pub notes: Vec<String>,
@@ -487,6 +489,8 @@ pub struct CreateModelTrainingTaskPayload {
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
     pub samples: Vec<ModelTrainingSampleInput>,
 }
 

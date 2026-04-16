@@ -20,6 +20,7 @@ pub mod test_support;
 mod utils;
 
 pub use anyhow::Result;
+pub use config::{load_configs, save_configs, EnvConfig, StorageMode};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

@@ -33,6 +33,14 @@ defineProps<Props>();
         <p class="text-xs text-stone-500">批次大小</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.batchSize }}</p>
       </article>
+      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+        <p class="text-xs text-stone-500">梯度累积步数</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.gradientAccumulationSteps }}</p>
+      </article>
+      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+        <p class="text-xs text-stone-500">梯度检查点</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.enableGradientCheckpointing ? '启用' : '禁用' }}</p>
+      </article>
     </div>
 
     <div class="grid gap-3 md:grid-cols-1">

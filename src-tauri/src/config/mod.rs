@@ -10,9 +10,10 @@ pub use env_config::{
 };
 pub use log::{init_log, resolve_base_log_dir};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {
+    #[default]
     Local,
     Remote,
 }
@@ -105,13 +106,13 @@ impl AttentionImplementation {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum QloraMode {
+pub enum LoraMode {
     Enabled,
     #[default]
     Disabled,
 }
 
-impl QloraMode {
+impl LoraMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Enabled => "enabled",
@@ -120,55 +121,20 @@ impl QloraMode {
     }
 }
 
-impl fmt::Display for QloraMode {
+impl fmt::Display for LoraMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl FromStr for QloraMode {
+impl FromStr for LoraMode {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim() {
             "enabled" => Ok(Self::Enabled),
             "disabled" => Ok(Self::Disabled),
-            other => Err(format!("不支持的 QLoRA 模式: {}", other)),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum QloraQuantType {
-    #[default]
-    Nf4,
-    Fp4,
-}
-
-impl QloraQuantType {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Nf4 => "nf4",
-            Self::Fp4 => "fp4",
-        }
-    }
-}
-
-impl fmt::Display for QloraQuantType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for QloraQuantType {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim() {
-            "nf4" => Ok(Self::Nf4),
-            "fp4" => Ok(Self::Fp4),
-            other => Err(format!("不支持的 QLoRA 量化类型: {}", other)),
+            other => Err(format!("不支持的 LoRA 模式: {}", other)),
         }
     }
 }

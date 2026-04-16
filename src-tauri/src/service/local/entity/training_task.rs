@@ -11,6 +11,8 @@ pub struct Model {
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
     pub sample_count: i64,
     pub samples_json: String,
     pub notes_json: String,

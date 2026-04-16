@@ -38,6 +38,8 @@ export interface ModelTrainingTaskDetail {
   modelName: string;
   epochCount: number;
   batchSize: number;
+  gradientAccumulationSteps: number;
+  enableGradientCheckpointing: boolean;
   sampleCount: number;
   samples: ModelTrainingSampleDetail[];
   notes: string[];

@@ -18,7 +18,7 @@ use crate::{
             training_index_jsonl_path, training_output_jsonl_path,
         },
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType, QloraMode},
+    config::{load_configs, save_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
@@ -55,6 +55,8 @@ struct TrainingParams {
     base_model: BaseModel,
     batch_size: i64,
     epoch_count: i64,
+    gradient_accumulation_steps: i64,
+    enable_gradient_checkpointing: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -229,6 +231,8 @@ impl Qwen3TTSModelTaskPipeline {
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             batch_size: row.batch_size,
             epoch_count: row.epoch_count,
+            gradient_accumulation_steps: row.gradient_accumulation_steps,
+            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
         })
     }
 
@@ -691,25 +695,15 @@ impl Qwen3TTSModelTaskPipeline {
             runtime.training_device().to_string(),
             "--attn-implementation".to_string(),
             attn_implementation.as_str().to_string(),
-            "--qlora-r".to_string(),
-            training_config.qlora_rank().to_string(),
-            "--qlora-alpha".to_string(),
-            training_config.qlora_alpha().to_string(),
-            "--qlora-dropout".to_string(),
-            training_config.qlora_dropout().to_string(),
-            "--qlora-quant-type".to_string(),
-            training_config.qlora_quant_type().as_str().to_string(),
+            "--gradient-accumulation-steps".to_string(),
+            params.gradient_accumulation_steps.to_string(),
+            "--no-use-lora".to_string(),
         ];
 
-        match training_config.qlora_mode() {
-            QloraMode::Enabled => script_args.push("--use-qlora".to_string()),
-            QloraMode::Disabled => script_args.push("--no-use-qlora".to_string()),
-        }
-
-        script_args.push(if training_config.qlora_double_quant() {
-            "--qlora-double-quant".to_string()
+        script_args.push(if params.enable_gradient_checkpointing {
+            "--enable-gradient-checkpointing".to_string()
         } else {
-            "--no-qlora-double-quant".to_string()
+            "--no-enable-gradient-checkpointing".to_string()
         });
 
         run_logged_python_script(

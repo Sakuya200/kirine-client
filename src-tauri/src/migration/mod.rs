@@ -6,9 +6,10 @@ use crate::Result;
 
 mod create_local_schema;
 mod m20260415_000001_drop_task_hardware_type;
+mod m20260416_000001_add_model_training_runtime_fields;
 mod seed_qwen3_tts_preset_speakers;
 
-const LOCAL_SCHEMA_VERSION: &str = "11";
+const LOCAL_SCHEMA_VERSION: &str = "12";
 
 pub(crate) struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(create_local_schema::Migration),
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
             Box::new(m20260415_000001_drop_task_hardware_type::Migration),
+            Box::new(m20260416_000001_add_model_training_runtime_fields::Migration),
         ]
     }
 }

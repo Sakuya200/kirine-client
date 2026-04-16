@@ -6,7 +6,7 @@ $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
 $venvPython = Join-Path $srcModelRoot 'venv\Scripts\python.exe'
 
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--mode', '--task-log-file') -ActionName 'toggle-qlora-dependencies'
+    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--mode', '--task-log-file') -ActionName 'toggle-lora-dependencies'
 }
 catch {
     Write-Error $_.Exception.Message
@@ -23,7 +23,7 @@ if ($mode -notin @('enable', 'disable')) {
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    Write-Error "QLoRA dependency toggle requires an initialized Python environment at $venvPython"
+    Write-Error "LoRA dependency toggle requires an initialized Python environment at $venvPython"
     exit 65
 }
 
@@ -39,7 +39,7 @@ function Invoke-LoggedCommand {
         [string[]]$Arguments
     )
 
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[toggle-qlora-dependencies] ${Description}: ${Command} $($Arguments -join ' ')"
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[toggle-lora-dependencies] ${Description}: ${Command} $($Arguments -join ' ')"
 
     $previousErrorActionPreference = $ErrorActionPreference
     $previousPythonIoEncoding = $env:PYTHONIOENCODING
@@ -60,18 +60,17 @@ function Invoke-LoggedCommand {
     }
 
     if ($exitCode -ne 0) {
-        throw "[toggle-qlora-dependencies] $Description failed with exit code $exitCode."
+        throw "[toggle-lora-dependencies] $Description failed with exit code $exitCode."
     }
 }
 
-Append-TaskLog -TaskLogFile $taskLogFile -Value "[toggle-qlora-dependencies] mode=$mode"
+Append-TaskLog -TaskLogFile $taskLogFile -Value "[toggle-lora-dependencies] mode=$mode"
 
 if ($mode -eq 'enable') {
     Invoke-LoggedCommand -Description 'install peft' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'peft')
-    Invoke-LoggedCommand -Description 'install bitsandbytes' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', 'bitsandbytes')
-    Append-TaskLog -TaskLogFile $taskLogFile -Value '[toggle-qlora-dependencies] QLoRA dependencies are enabled'
+    Append-TaskLog -TaskLogFile $taskLogFile -Value '[toggle-lora-dependencies] LoRA dependencies are enabled'
     exit 0
 }
 
-Invoke-LoggedCommand -Description 'uninstall bitsandbytes and peft' -Command $venvPython -Arguments @('-m', 'pip', 'uninstall', '-y', 'bitsandbytes', 'peft')
-Append-TaskLog -TaskLogFile $taskLogFile -Value '[toggle-qlora-dependencies] QLoRA dependencies are disabled'
+Invoke-LoggedCommand -Description 'uninstall peft' -Command $venvPython -Arguments @('-m', 'pip', 'uninstall', '-y', 'peft')
+Append-TaskLog -TaskLogFile $taskLogFile -Value '[toggle-lora-dependencies] LoRA dependencies are disabled'

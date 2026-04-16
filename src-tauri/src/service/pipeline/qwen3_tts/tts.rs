@@ -675,5 +675,11 @@ pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<Pat
 }
 
 fn is_model_checkpoint_dir(path: &Path) -> bool {
-    path.join("config.json").exists() && path.join("model.safetensors").exists()
+    let has_config = path.join("config.json").exists();
+    let has_weights = path.join("model.safetensors").exists()
+        || path.join("model.safetensors.index.json").exists()
+        || path.join("pytorch_model.bin").exists()
+        || path.join("pytorch_model.bin.index.json").exists();
+
+    has_config && has_weights
 }

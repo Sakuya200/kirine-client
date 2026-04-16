@@ -4,7 +4,6 @@ accelerate==1.12.0
 transformers==4.57.3
 safetensors==0.7.0
 tensorboard==2.20.0
-peft==0.18.0
 qwen_tts==0.1.1
 modelscope==1.35.3
 soundfile==0.13.1

@@ -256,6 +256,18 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .not_null(),
                 )
                 .col(
+                    ColumnDef::new(ModelTrainingTasks::GradientAccumulationSteps)
+                        .integer()
+                        .not_null()
+                        .default(4),
+                )
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::EnableGradientCheckpointing)
+                        .boolean()
+                        .not_null()
+                        .default(false),
+                )
+                .col(
                     ColumnDef::new(ModelTrainingTasks::SampleCount)
                         .integer()
                         .not_null(),
@@ -615,6 +627,8 @@ enum ModelTrainingTasks {
     ModelName,
     EpochCount,
     BatchSize,
+    GradientAccumulationSteps,
+    EnableGradientCheckpointing,
     SampleCount,
     SamplesJson,
     NotesJson,

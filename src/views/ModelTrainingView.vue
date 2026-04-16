@@ -73,6 +73,8 @@ const form = reactive({
   modelName: 'speaker_a_custom',
   epochCount: 4,
   batchSize: 2,
+  gradientAccumulationSteps: 4,
+  enableGradientCheckpointing: false,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
@@ -105,7 +107,13 @@ const importedSamples = ref<ImportedSampleItem[]>([]);
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
 const canStartTraining = computed(
-  () => form.modelName.trim().length > 0 && importedSamples.value.length > 0 && form.epochCount > 0 && form.batchSize > 0 && !isStarting.value
+  () =>
+    form.modelName.trim().length > 0 &&
+    importedSamples.value.length > 0 &&
+    form.epochCount > 0 &&
+    form.batchSize > 0 &&
+    form.gradientAccumulationSteps > 0 &&
+    !isStarting.value
 );
 
 const sampleSummary = computed(() => ({
@@ -283,6 +291,8 @@ const resetForm = () => {
   form.modelName = 'speaker_a_custom';
   form.epochCount = 30;
   form.batchSize = 8;
+  form.gradientAccumulationSteps = 4;
+  form.enableGradientCheckpointing = false;
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -318,6 +328,8 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.modelName = record.detail.modelName;
   form.epochCount = record.detail.epochCount;
   form.batchSize = record.detail.batchSize;
+  form.gradientAccumulationSteps = record.detail.gradientAccumulationSteps;
+  form.enableGradientCheckpointing = record.detail.enableGradientCheckpointing;
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -436,6 +448,8 @@ const startTraining = async () => {
         modelName: form.modelName.trim(),
         epochCount: form.epochCount,
         batchSize: form.batchSize,
+        gradientAccumulationSteps: form.gradientAccumulationSteps,
+        enableGradientCheckpointing: form.enableGradientCheckpointing,
         samples: importedSamples.value.map(sample => ({
           id: sample.id,
           sampleType: sample.type,
@@ -649,6 +663,25 @@ onBeforeUnmount(() => {
                 />
               </label>
             </div>
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-xs text-stone-500">梯度累积步数</span>
+                <input
+                  v-model.number="form.gradientAccumulationSteps"
+                  type="number"
+                  min="1"
+                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+                />
+              </label>
+              <label class="flex items-center gap-3 rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
+                <input
+                  v-model="form.enableGradientCheckpointing"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-brand-300 text-brand-500 focus:ring-brand-200"
+                />
+                <span>启用梯度检查点</span>
+              </label>
+            </div>
             <BaseListbox
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
@@ -660,6 +693,9 @@ onBeforeUnmount(() => {
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
               <p class="mt-1">基础模型 {{ BASE_MODEL_TEXT[form.baseModel] }}。{{ baseModelSummary }}</p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
+              <p class="mt-1">
+                当前梯度累积 {{ form.gradientAccumulationSteps }}，梯度检查点 {{ form.enableGradientCheckpointing ? '已启用' : '未启用' }}。
+              </p>
             </div>
           </div>
           <div class="mt-4 flex flex-wrap gap-2">

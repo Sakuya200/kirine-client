@@ -10,22 +10,25 @@ use tracing::{error, info};
 
 use crate::{
     config::{
-        AttentionImplementation, BaseModel, HardwareType, QloraMode, QloraQuantType, StorageMode,
+        resolve_base_log_dir, AttentionImplementation, BaseModel, HardwareType, LoraMode,
+        StorageMode,
     },
     Result,
 };
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct EnvConfig {
+    #[serde(default)]
     pub basic: BasicConfig,
+    #[serde(default)]
     pub remote: Option<RemoteConfig>,
     #[serde(default)]
     pub training: TrainingConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case", default)]
 pub struct BasicConfig {
     pub mode: StorageMode,
     pub data_dir: Option<String>,
@@ -33,25 +36,23 @@ pub struct BasicConfig {
     pub model_dir: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", default)]
 pub struct RemoteConfig {
     pub api_url: Option<String>,
     pub api_token: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
     pub prepared_base_models: Vec<BaseModel>,
     pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
-    pub qlora_mode: QloraMode,
-    pub qlora_rank: u32,
-    pub qlora_alpha: u32,
-    pub qlora_dropout: String,
-    pub qlora_quant_type: QloraQuantType,
-    pub qlora_double_quant: bool,
+    pub lora_mode: LoraMode,
+    pub lora_rank: u32,
+    pub lora_alpha: u32,
+    pub lora_dropout: String,
 }
 
 impl Default for TrainingConfig {
@@ -60,12 +61,19 @@ impl Default for TrainingConfig {
             prepared_base_models: Vec::new(),
             hardware_type: HardwareType::default(),
             attn_implementation: AttentionImplementation::default(),
-            qlora_mode: QloraMode::default(),
-            qlora_rank: 16,
-            qlora_alpha: 32,
-            qlora_dropout: "0.05".to_string(),
-            qlora_quant_type: QloraQuantType::default(),
-            qlora_double_quant: true,
+            lora_mode: LoraMode::default(),
+            lora_rank: 16,
+            lora_alpha: 32,
+            lora_dropout: "0.05".to_string(),
+        }
+    }
+}
+
+impl Default for RemoteConfig {
+    fn default() -> Self {
+        Self {
+            api_url: Some(String::new()),
+            api_token: Some(String::new()),
         }
     }
 }
@@ -84,21 +92,17 @@ impl TrainingConfig {
         self
     }
 
-    pub fn with_qlora_settings(
+    pub fn with_lora_settings(
         mut self,
-        qlora_mode: QloraMode,
-        qlora_rank: u32,
-        qlora_alpha: u32,
-        qlora_dropout: String,
-        qlora_quant_type: QloraQuantType,
-        qlora_double_quant: bool,
+        lora_mode: LoraMode,
+        lora_rank: u32,
+        lora_alpha: u32,
+        lora_dropout: String,
     ) -> Self {
-        self.qlora_mode = qlora_mode;
-        self.qlora_rank = qlora_rank;
-        self.qlora_alpha = qlora_alpha;
-        self.qlora_dropout = qlora_dropout;
-        self.qlora_quant_type = qlora_quant_type;
-        self.qlora_double_quant = qlora_double_quant;
+        self.lora_mode = lora_mode;
+        self.lora_rank = lora_rank;
+        self.lora_alpha = lora_alpha;
+        self.lora_dropout = lora_dropout;
         self
     }
 }
@@ -144,28 +148,20 @@ impl EnvConfig {
         self.training.hardware_type
     }
 
-    pub fn qlora_mode(&self) -> QloraMode {
-        self.training.qlora_mode
+    pub fn lora_mode(&self) -> LoraMode {
+        self.training.lora_mode
     }
 
-    pub fn qlora_rank(&self) -> u32 {
-        self.training.qlora_rank
+    pub fn lora_rank(&self) -> u32 {
+        self.training.lora_rank
     }
 
-    pub fn qlora_alpha(&self) -> u32 {
-        self.training.qlora_alpha
+    pub fn lora_alpha(&self) -> u32 {
+        self.training.lora_alpha
     }
 
-    pub fn qlora_dropout(&self) -> &str {
-        &self.training.qlora_dropout
-    }
-
-    pub fn qlora_quant_type(&self) -> QloraQuantType {
-        self.training.qlora_quant_type
-    }
-
-    pub fn qlora_double_quant(&self) -> bool {
-        self.training.qlora_double_quant
+    pub fn lora_dropout(&self) -> &str {
+        &self.training.lora_dropout
     }
 }
 
@@ -227,10 +223,13 @@ pub fn config_path() -> Result<std::path::PathBuf> {
 }
 
 pub fn load_configs() -> Result<EnvConfig> {
+    let config_path = config_path().context("解析配置文件路径失败")?;
+    load_configs_from_path(&config_path)
+}
+
+fn load_configs_from_path(config_path: &Path) -> Result<EnvConfig> {
     println!("[startup] 开始加载配置文件信息");
 
-    // 加载配置文件
-    let config_path = config_path().context("解析配置文件路径失败")?;
     let mut builder = Config::builder();
     let config_name = config_path.to_str().ok_or_else(|| {
         let error = io::Error::new(
@@ -260,9 +259,12 @@ pub fn load_configs() -> Result<EnvConfig> {
             err
         })
         .with_context(|| format!("将 {} 解析为 EnvConfig 失败", config_path.display()))?;
-    println!("[startup] 配置文件加载完成: {:?}", env_config);
+    let mut normalized_config = env_config;
+    materialize_config_defaults(&mut normalized_config)?;
+    save_configs_to_path(&normalized_config, config_path)?;
+    println!("[startup] 配置文件加载完成: {:?}", normalized_config);
 
-    Ok(env_config)
+    Ok(normalized_config)
 }
 
 pub fn save_configs(env_config: &EnvConfig) -> Result<()> {
@@ -272,6 +274,10 @@ pub fn save_configs(env_config: &EnvConfig) -> Result<()> {
             err
         })
         .context("配置文件保存前无法解析配置路径")?;
+    save_configs_to_path(env_config, &config_path)
+}
+
+fn save_configs_to_path(env_config: &EnvConfig, config_path: &Path) -> Result<()> {
     let content = toml::to_string_pretty(env_config)
         .map_err(|err| {
             error!(error = %err, "配置文件序列化失败");
@@ -287,5 +293,43 @@ pub fn save_configs(env_config: &EnvConfig) -> Result<()> {
         .with_context(|| format!("写入配置文件失败: {}", config_path.display()))?;
 
     info!("配置文件保存完成: {}", config_path.display());
+    Ok(())
+}
+
+fn materialize_config_defaults(config: &mut EnvConfig) -> Result<()> {
+    let resolved_data_dir = resolve_storage_dir(config.data_dir(), "data")?
+        .to_string_lossy()
+        .to_string();
+    config.basic.data_dir = Some(resolved_data_dir);
+
+    let resolved_log_dir = resolve_base_log_dir(config.log_dir())?
+        .to_string_lossy()
+        .to_string();
+    config.basic.log_dir = Some(resolved_log_dir);
+
+    let resolved_model_dir = resolve_storage_dir(config.model_dir(), "models")?
+        .to_string_lossy()
+        .to_string();
+    config.basic.model_dir = Some(resolved_model_dir);
+
+    let remote_config = config.remote.get_or_insert_with(RemoteConfig::default);
+    remote_config.api_url = Some(
+        remote_config
+            .api_url
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    );
+
+    remote_config.api_token = Some(
+        remote_config
+            .api_token
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    );
+
     Ok(())
 }
