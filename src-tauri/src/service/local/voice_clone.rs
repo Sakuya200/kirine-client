@@ -14,9 +14,7 @@ use crate::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
-        models::{
-            CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult,
-        },
+        models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
         LocalService,
     },
     utils::time::now_string,
@@ -104,7 +102,6 @@ impl LocalService {
             id: NotSet,
             history_id: Set(task_id),
             base_model: Set(payload.base_model.as_str().to_string()),
-            hardware_type: Set(payload.hardware_type.as_str().to_string()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
             ref_audio_name: Set(ref_audio_name.clone()),
@@ -129,7 +126,6 @@ impl LocalService {
             file_name,
             ref_audio_name,
             base_model: payload.base_model,
-            hardware_type: payload.hardware_type,
             language: payload.language,
             format: payload.format,
             duration_seconds: 0,
@@ -140,5 +136,4 @@ impl LocalService {
             output_file_path: serialized_output_path,
         })
     }
-
 }

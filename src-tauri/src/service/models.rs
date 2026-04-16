@@ -2,7 +2,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BaseModel, HardwareType};
+use crate::config::BaseModel;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum AppLanguage {
@@ -360,7 +360,6 @@ pub struct UpdateTaskStatusPayload {
 pub struct TextToSpeechTaskDetail {
     pub speaker_id: i64,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub text: String,
@@ -375,10 +374,11 @@ pub struct TextToSpeechTaskDetail {
 pub struct ModelTrainingTaskDetail {
     pub language: AppLanguage,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
     pub sample_count: i64,
     pub samples: Vec<ModelTrainingSampleInput>,
     pub notes: Vec<String>,
@@ -388,7 +388,6 @@ pub struct ModelTrainingTaskDetail {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceCloneTaskDetail {
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub ref_audio_name: String,
@@ -420,7 +419,6 @@ pub struct HistoryRecord {
 pub struct CreateTextToSpeechTaskPayload {
     pub speaker_id: i64,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub text: String,
@@ -435,7 +433,6 @@ pub struct TextToSpeechTaskResult {
     pub speaker_id: i64,
     pub speaker_label: String,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub duration_seconds: i64,
@@ -489,10 +486,11 @@ pub struct ModelTrainingSampleInput {
 pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub model_name: String,
     pub epoch_count: i64,
     pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
     pub samples: Vec<ModelTrainingSampleInput>,
 }
 
@@ -500,7 +498,6 @@ pub struct CreateModelTrainingTaskPayload {
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceCloneTaskPayload {
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub ref_audio_name: String,
@@ -514,7 +511,6 @@ pub struct CreateVoiceCloneTaskPayload {
 pub struct ModelTrainingTaskResult {
     pub task_id: i64,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub model_name: String,
     pub sample_count: i64,
     pub create_time: String,
@@ -528,7 +524,6 @@ pub struct VoiceCloneTaskResult {
     pub file_name: String,
     pub ref_audio_name: String,
     pub base_model: BaseModel,
-    pub hardware_type: HardwareType,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub duration_seconds: i64,

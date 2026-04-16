@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
@@ -16,7 +16,7 @@ import RecentTaskList, { type RecentTaskListItem } from '@/components/common/Rec
 import StatusPill from '@/components/common/StatusPill.vue';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
-import { BASE_MODEL_TEXT, BaseModel, HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
+import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
@@ -30,7 +30,6 @@ interface VoiceCloneResult {
   fileName: string;
   refAudioName: string;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
@@ -48,7 +47,6 @@ interface VoiceCloneTaskResultPayload {
   fileName: string;
   refAudioName: string;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   format: TextToSpeechFormat;
   refText: string;
@@ -77,24 +75,18 @@ const route = useRoute();
 const router = useRouter();
 const form = reactive({
   baseModel: BaseModel.Qwen3Tts,
-  hardwareType: HardwareType.Cuda,
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: ''
 });
-const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
-  label: HARDWARE_TYPE_TEXT[value],
-  value
-}));
 const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
 const languageOptions = Object.values(AppLanguage).map(value => ({
   label: APP_LANGUAGE_LABELS[value],
   value
 }));
 const formatOptions = TEXT_TO_SPEECH_FORMATS;
-const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
 const isGenerating = ref(false);
@@ -113,7 +105,6 @@ const charCount = computed(() => trimmedText.value.length);
 const canGenerate = computed(() => Boolean(form.refAudioFile) && Boolean(trimmedRefText.value) && Boolean(trimmedText.value) && !isGenerating.value);
 const cloneSummary = computed(() => [
   `当前基础模型为 ${BASE_MODEL_TEXT[form.baseModel]}。`,
-  `当前硬件类型为 ${HARDWARE_TYPE_TEXT[form.hardwareType]}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
   `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`,
@@ -139,13 +130,6 @@ const activeTaskBusyLabel = computed(() => {
   return '';
 });
 
-watch(
-  () => form.hardwareType,
-  value => {
-    taskPreferencesStore.voiceCloneHardwareType = value;
-  }
-);
-
 const findLanguageLabel = (language: AppLanguage) => APP_LANGUAGE_LABELS[language] ?? language;
 const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
 
@@ -164,7 +148,6 @@ const mapResultPayload = (payload: VoiceCloneTaskResultPayload): VoiceCloneResul
   fileName: payload.fileName,
   refAudioName: payload.refAudioName,
   baseModel: payload.baseModel,
-  hardwareType: payload.hardwareType,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
@@ -187,7 +170,6 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceCloneResult | nul
     fileName: record.detail.fileName,
     refAudioName: record.detail.refAudioName,
     baseModel: record.detail.baseModel,
-    hardwareType: record.detail.hardwareType,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
@@ -205,7 +187,6 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   stopActiveTaskStatusRefresh();
   activeResult.value = null;
   form.baseModel = result.baseModel;
-  form.hardwareType = result.hardwareType;
   form.language = result.language;
   form.format = result.format;
   form.refAudioFile = {
@@ -366,7 +347,6 @@ const createTask = async () => {
     const payload = await invoke<VoiceCloneTaskResultPayload>('create_voice_clone_task', {
       payload: {
         baseModel: form.baseModel,
-        hardwareType: form.hardwareType,
         language: form.language,
         format: form.format,
         refAudioName: form.refAudioFile.fileName,
@@ -411,8 +391,6 @@ const useHistoryResult = (taskId: number) => {
 
 onMounted(async () => {
   form.baseModel = taskPreferencesStore.fixedBaseModel;
-  form.hardwareType = taskPreferencesStore.voiceCloneHardwareType;
-  selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === form.hardwareType) ?? null;
   selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
@@ -431,7 +409,7 @@ onBeforeUnmount(() => {
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="文本与参数" subtitle="参考音频与参考台词必须严格对应，语言和硬件设置会参与本次克隆推理。">
+      <PanelCard title="文本与参数" subtitle="参考音频与参考台词必须严格对应，任务会使用设置页中的全局硬件类型执行克隆推理。">
         <div class="grid gap-4 md:grid-cols-2">
           <label class="block md:col-span-2">
             <span class="mb-1 block text-xs text-stone-500">参考音频</span>
@@ -446,12 +424,6 @@ onBeforeUnmount(() => {
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
 
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
-          <BaseListbox
-            v-model="form.hardwareType"
-            v-model:selected-option="selectedHardwareTypeOption"
-            label="硬件类型"
-            :options="hardwareTypeOptions"
-          />
 
           <label class="block md:col-span-2">
             <span class="mb-1 block text-xs text-stone-500">参考台词</span>
@@ -502,8 +474,7 @@ onBeforeUnmount(() => {
               <div>
                 <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
                 <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.refAudioName }} · {{ BASE_MODEL_TEXT[activeResult.baseModel] }} ·
-                  {{ HARDWARE_TYPE_TEXT[activeResult.hardwareType] }} · {{ activeResult.languageLabel }} ·
+                  {{ activeResult.refAudioName }} · {{ BASE_MODEL_TEXT[activeResult.baseModel] }} · {{ activeResult.languageLabel }} ·
                   {{ activeResult.formatLabel }}
                 </p>
               </div>

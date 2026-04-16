@@ -24,7 +24,7 @@ use crate::{
             training_reference_audio_path, training_temp_extract_dir,
         },
     },
-    config::HardwareType,
+    config::{load_configs, HardwareType},
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -35,7 +35,7 @@ use crate::{
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
-        pipeline::{model_paths::{llm_model_display_name, speaker_model_dir}},
+        pipeline::model_paths::{llm_model_display_name, speaker_model_dir},
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -94,10 +94,10 @@ impl LocalService {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
+        let selected_training_hardware = load_configs()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
-        let selected_training_hardware = payload.hardware_type;
         let selected_training_mode_text = format!(
             "{} / {}",
             llm_model_display_name(payload.base_model),
@@ -167,10 +167,18 @@ impl LocalService {
         let mut notes = vec![
             format!("共导入 {} 项样本。", sample_count),
             format!(
-                "训练语言 {}，批次大小 {}。",
-                payload.language, payload.batch_size
+                "训练语言 {}，批次大小 {}，梯度累积 {}。",
+                payload.language, payload.batch_size, payload.gradient_accumulation_steps
             ),
             format!("训练模式: {}。", selected_training_mode_text),
+            format!(
+                "梯度检查点: {}。",
+                if payload.enable_gradient_checkpointing {
+                    "启用"
+                } else {
+                    "禁用"
+                }
+            ),
             format!("整理后训练样本 {} 条。", prepared.index_entries.len()),
             format!(
                 "样本目录: {}",
@@ -202,10 +210,11 @@ impl LocalService {
             history_id: Set(task_id),
             language: Set(payload.language.as_str().to_string()),
             base_model: Set(payload.base_model.as_str().to_string()),
-            hardware_type: Set(payload.hardware_type.as_str().to_string()),
             model_name: Set(speaker_name.clone()),
             epoch_count: Set(payload.epoch_count),
             batch_size: Set(payload.batch_size),
+            gradient_accumulation_steps: Set(payload.gradient_accumulation_steps),
+            enable_gradient_checkpointing: Set(payload.enable_gradient_checkpointing),
             sample_count: Set(sample_count),
             samples_json: Set(serde_json::to_string(&prepared.persisted_samples)?),
             notes_json: Set(serde_json::to_string(&notes)?),
@@ -223,7 +232,6 @@ impl LocalService {
         Ok(ModelTrainingTaskResult {
             task_id,
             base_model: payload.base_model,
-            hardware_type: payload.hardware_type,
             model_name: speaker_name,
             sample_count,
             create_time,

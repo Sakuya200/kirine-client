@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
-import { BASE_MODEL_TEXT, HARDWARE_TYPE_TEXT } from '@/enums/settings';
+import { BASE_MODEL_TEXT } from '@/enums/settings';
 import { TEXT_TO_SPEECH_FORMATS } from '@/enums/textToSpeech';
 import type { TextToSpeechHistoryRecord } from '@/types/domain';
 
@@ -16,7 +16,6 @@ const formatLabel = computed(
   () => TEXT_TO_SPEECH_FORMATS.find(option => option.value === props.record.detail.format)?.label ?? props.record.detail.format
 );
 const baseModelLabel = computed(() => BASE_MODEL_TEXT[props.record.detail.baseModel]);
-const hardwareTypeLabel = computed(() => HARDWARE_TYPE_TEXT[props.record.detail.hardwareType]);
 </script>
 
 <template>
@@ -33,10 +32,6 @@ const hardwareTypeLabel = computed(() => HARDWARE_TYPE_TEXT[props.record.detail.
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">基础模型</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ baseModelLabel }}</p>
-      </article>
-      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-        <p class="text-xs text-stone-500">硬件类型</p>
-        <p class="mt-1 text-sm font-semibold text-slate-800">{{ hardwareTypeLabel }}</p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">输出格式</p>

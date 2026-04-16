@@ -92,20 +92,48 @@ class EncodeAudioTests(unittest.TestCase):
 class FakeAccelerator:
 	def __init__(self, **kwargs):
 		self.kwargs = kwargs
+		self.sync_gradients = True
+		self.clip_calls = []
+		self.is_main_process = True
 
-	def prepare(self, model, optimizer, train_dataloader):
-		return model, optimizer, train_dataloader
+	def prepare(self, *items):
+		return items
+
+	def clip_grad_norm_(self, parameters, max_norm):
+		self.clip_calls.append(max_norm)
+
+	def unwrap_model(self, model):
+		return model
 
 
 class FakeParameter:
 	def __init__(self):
 		self.device = "cpu"
 		self.dtype = "float32"
+		self.requires_grad = True
+
+	def numel(self):
+		return 1
 
 
 class FakeModel:
+	def __init__(self):
+		self.gradient_checkpointing_enabled = False
+		self.input_require_grads_enabled = False
+		self.config = SimpleNamespace(use_cache=True)
+		self.talker = SimpleNamespace(
+			config=SimpleNamespace(use_cache=True),
+			model=SimpleNamespace(config=SimpleNamespace(use_cache=True)),
+		)
+
 	def parameters(self):
 		return iter([FakeParameter()])
+
+	def gradient_checkpointing_enable(self):
+		self.gradient_checkpointing_enabled = True
+
+	def enable_input_require_grads(self):
+		self.input_require_grads_enabled = True
 
 
 class FakeQwen3TTSModel:
@@ -138,6 +166,14 @@ class FakeAdamW:
 		self.parameters = list(parameters)
 		self.lr = lr
 		self.weight_decay = weight_decay
+		self.step_calls = 0
+		self.zero_grad_calls = 0
+
+	def step(self):
+		self.step_calls += 1
+
+	def zero_grad(self):
+		self.zero_grad_calls += 1
 
 
 class TrainingTests(unittest.TestCase):
@@ -171,10 +207,12 @@ class TrainingTests(unittest.TestCase):
 		return train_jsonl
 
 	def test_build_runtime_options_switches_between_cpu_and_gpu(self):
-		module = load_module("training")
+		module = load_module("training_full")
 		torch_module = SimpleNamespace(float32="float32", bfloat16="bfloat16")
 		cpu_args = module.parse_args(["--train_jsonl", "train.jsonl", "--device", "cpu"])
-		gpu_args = module.parse_args(["--train_jsonl", "train.jsonl", "--device", "cuda:0"])
+		gpu_args = module.parse_args(
+			["--train_jsonl", "train.jsonl", "--device", "cuda:0", "--gradient-accumulation-steps", "8"]
+		)
 
 		cpu_runtime = module.build_runtime_options(cpu_args, torch_module)
 		gpu_runtime = module.build_runtime_options(gpu_args, torch_module)
@@ -183,14 +221,16 @@ class TrainingTests(unittest.TestCase):
 		self.assertEqual(cpu_runtime.accelerator_kwargs["mixed_precision"], "no")
 		self.assertEqual(cpu_runtime.model_load_kwargs["torch_dtype"], "float32")
 		self.assertNotIn("attn_implementation", cpu_runtime.model_load_kwargs)
+		self.assertEqual(cpu_runtime.accelerator_kwargs["gradient_accumulation_steps"], 4)
 
 		self.assertFalse(gpu_runtime.is_cpu)
 		self.assertEqual(gpu_runtime.accelerator_kwargs["mixed_precision"], "bf16")
+		self.assertEqual(gpu_runtime.accelerator_kwargs["gradient_accumulation_steps"], 8)
 		self.assertEqual(gpu_runtime.model_load_kwargs["torch_dtype"], "bfloat16")
 		self.assertEqual(gpu_runtime.model_load_kwargs["attn_implementation"], "flash_attention_2")
 
 	def test_initialize_training_pipeline_uses_cpu_safe_configuration(self):
-		module = load_module("training")
+		module = load_module("training_full")
 		dependencies = self.build_dependencies()
 
 		with tempfile.TemporaryDirectory() as temp_dir:
@@ -214,6 +254,182 @@ class TrainingTests(unittest.TestCase):
 		self.assertEqual(context.accelerator.kwargs["mixed_precision"], "no")
 		self.assertEqual(FakeQwen3TTSModel.last_call["kwargs"], {"torch_dtype": "float32"})
 		self.assertEqual(len(context.train_data), 1)
+
+	def test_initialize_training_pipeline_enables_gradient_checkpointing(self):
+		module = load_module("training_full")
+		dependencies = self.build_dependencies()
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			train_jsonl = self.write_train_jsonl(temp_root)
+			args = module.parse_args(
+				[
+					"--train_jsonl",
+					str(train_jsonl),
+					"--device",
+					"cpu",
+					"--init_model_path",
+					"fake-model",
+					"--enable-gradient-checkpointing",
+				]
+			)
+
+			context = module.initialize_training_pipeline(args, dependencies)
+
+		self.assertTrue(context.model.gradient_checkpointing_enabled)
+		self.assertFalse(context.model.input_require_grads_enabled)
+		self.assertFalse(context.model.config.use_cache)
+		self.assertFalse(context.model.talker.config.use_cache)
+		self.assertFalse(context.model.talker.model.config.use_cache)
+
+	def test_build_checkpoint_state_dict_drops_speaker_encoder_and_updates_speaker_embedding(self):
+		module = load_module("training_full")
+
+		class FakeTensorRow:
+			def __init__(self, values, dtype="float32"):
+				self.values = list(values)
+				self.dtype = dtype
+
+			def detach(self):
+				return self
+
+			def to(self, value):
+				if value != "cpu":
+					self.dtype = value
+				return self
+
+			def __eq__(self, other):
+				return self.values == other
+
+		class FakeTensor:
+			def __init__(self, values, dtype="float32"):
+				self.values = [list(row) for row in values]
+				self.dtype = dtype
+
+			def detach(self):
+				return self
+
+			def to(self, value):
+				if value == "cpu":
+					return self
+				self.dtype = value
+				return self
+
+			def clone(self):
+				return FakeTensor(self.values, self.dtype)
+
+			def __getitem__(self, index):
+				return FakeTensorRow(self.values[index], self.dtype)
+
+			def __setitem__(self, index, value):
+				self.values[index] = list(getattr(value, "values", value))
+
+		class FakeCheckpointModel:
+			def state_dict(self):
+				return {
+					"speaker_encoder.weight": FakeTensor([[9.0, 9.0]]),
+					"talker.model.codec_embedding.weight": FakeTensor([[0.0, 0.0] for _ in range(3001)]),
+					"talker.layer.weight": FakeTensor([[1.0, 2.0]]),
+				}
+
+		target_speaker_embedding = FakeTensor([[3.0, 4.0]], dtype="bfloat16")
+		state_dict = module.build_checkpoint_state_dict(FakeCheckpointModel(), target_speaker_embedding)
+
+		self.assertNotIn("speaker_encoder.weight", state_dict)
+		self.assertEqual(state_dict["talker.model.codec_embedding.weight"][3000], [3.0, 4.0])
+		self.assertEqual(state_dict["talker.layer.weight"][0], [1.0, 2.0])
+
+	def test_save_training_checkpoint_uses_sharded_safe_serialization(self):
+		module = load_module("training_full")
+
+		class FakeTensorRow:
+			def __init__(self, values, dtype="float32"):
+				self.values = list(values)
+				self.dtype = dtype
+
+			def detach(self):
+				return self
+
+			def to(self, value):
+				if value != "cpu":
+					self.dtype = value
+				return self
+
+		class FakeTensor:
+			def __init__(self, values, dtype="float32"):
+				self.values = [list(row) for row in values]
+				self.dtype = dtype
+
+			def detach(self):
+				return self
+
+			def to(self, value):
+				if value == "cpu":
+					return self
+				self.dtype = value
+				return self
+
+			def clone(self):
+				return FakeTensor(self.values, self.dtype)
+
+			def __getitem__(self, index):
+				return FakeTensorRow(self.values[index], self.dtype)
+
+			def __setitem__(self, index, value):
+				self.values[index] = list(getattr(value, "values", value))
+
+		class FakeCheckpointModel:
+			_tied_weights_keys = ["talker.model.codec_embedding.weight"]
+
+			def state_dict(self):
+				return {
+					"talker.model.codec_embedding.weight": FakeTensor([[0.0, 0.0] for _ in range(3001)]),
+					"talker.layer.weight": FakeTensor([[1.0, 2.0]]),
+				}
+
+		with tempfile.TemporaryDirectory() as temp_dir:
+			temp_root = Path(temp_dir)
+			model_dir = temp_root / "model"
+			output_dir = temp_root / "output"
+			model_dir.mkdir(parents=True)
+			output_dir.mkdir(parents=True)
+			(model_dir / "config.json").write_text("{}", encoding="utf-8")
+
+			args = SimpleNamespace(
+				init_model_path=str(model_dir),
+				output_model_path=str(output_dir),
+				speaker_name="speaker-a",
+			)
+			accelerator = FakeAccelerator()
+			model = FakeCheckpointModel()
+			target_speaker_embedding = FakeTensor([[7.0, 8.0]], dtype="bfloat16")
+
+			with patch.object(module, "save_torch_state_dict") as save_state_dict:
+				module.save_training_checkpoint(args, accelerator, model, target_speaker_embedding, epoch=0)
+
+			save_state_dict.assert_called_once()
+			_, save_dir = save_state_dict.call_args.args[:2]
+			self.assertEqual(Path(save_dir), output_dir / "checkpoint-epoch-0")
+			self.assertEqual(save_state_dict.call_args.kwargs["max_shard_size"], module.CHECKPOINT_MAX_SHARD_SIZE)
+			self.assertTrue(save_state_dict.call_args.kwargs["safe_serialization"])
+
+	def test_training_entry_routes_full_training_when_lora_disabled(self):
+		full_module = load_module("training_full")
+		entry_module = load_module("training")
+
+		with patch.object(full_module, "train") as full_train:
+			entry_module.train(["--train_jsonl", "train.jsonl", "--no-use-lora"])
+
+		full_train.assert_called_once_with(["--train_jsonl", "train.jsonl"])
+
+	def test_training_entry_routes_lora_requests_to_placeholder_module(self):
+		lora_module = load_module("training_lora")
+		entry_module = load_module("training")
+
+		with patch.object(lora_module, "train") as lora_train:
+			entry_module.train(["--train_jsonl", "train.jsonl", "--use-lora", "--lora-r", "8"])
+
+		lora_train.assert_called_once_with(["--train_jsonl", "train.jsonl", "--lora-r", "8"])
 
 
 class FakeTtsModel:

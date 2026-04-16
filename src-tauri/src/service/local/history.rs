@@ -7,7 +7,7 @@ use sea_orm::{
 
 use crate::{
     common::local_paths::resolve_task_path,
-    config::{BaseModel, HardwareType},
+    config::BaseModel,
     service::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
@@ -239,8 +239,10 @@ impl LocalService {
             );
         }
 
-        let resolved_output_file_path =
-            resolve_task_path(std::path::Path::new(self.data_dir()), normalized_output_file_path);
+        let resolved_output_file_path = resolve_task_path(
+            std::path::Path::new(self.data_dir()),
+            normalized_output_file_path,
+        );
 
         let bytes = tokio::fs::read(&resolved_output_file_path)
             .await
@@ -300,8 +302,10 @@ impl LocalService {
             );
         }
 
-        let resolved_output_file_path =
-            resolve_task_path(std::path::Path::new(self.data_dir()), normalized_output_file_path);
+        let resolved_output_file_path = resolve_task_path(
+            std::path::Path::new(self.data_dir()),
+            normalized_output_file_path,
+        );
 
         let bytes = tokio::fs::read(&resolved_output_file_path)
             .await
@@ -333,10 +337,6 @@ impl LocalService {
             base_model: row
                 .base_model
                 .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            hardware_type: row
-                .hardware_type
-                .parse::<HardwareType>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
             language: row
                 .language
@@ -377,13 +377,11 @@ impl LocalService {
                 .base_model
                 .parse::<BaseModel>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            hardware_type: row
-                .hardware_type
-                .parse::<HardwareType>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
             model_name: row.model_name,
             epoch_count: row.epoch_count,
             batch_size: row.batch_size,
+            gradient_accumulation_steps: row.gradient_accumulation_steps,
+            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
             sample_count: row.sample_count,
             samples,
             notes,
@@ -405,10 +403,6 @@ impl LocalService {
             base_model: row
                 .base_model
                 .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            hardware_type: row
-                .hardware_type
-                .parse::<HardwareType>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
             language: row
                 .language

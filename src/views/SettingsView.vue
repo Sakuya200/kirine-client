@@ -10,7 +10,7 @@ import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation } from '@/enums/settings';
+import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation, HARDWARE_TYPE_TEXT, HardwareType, LoraMode } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 
@@ -22,7 +22,12 @@ interface SettingsForm {
   modelDir: string;
   dataDir: string;
   logCacheDir: string;
+  hardwareType: HardwareType;
   attnImplementation: AttentionImplementation;
+  loraMode: LoraMode;
+  loraRank: number;
+  loraAlpha: number;
+  loraDropout: string;
 }
 
 interface SettingsResponse extends SettingsForm {
@@ -31,18 +36,31 @@ interface SettingsResponse extends SettingsForm {
   removableDirectories: string[];
 }
 
-const form = reactive<SettingsForm>({
+const DEFAULT_SETTINGS_FORM: SettingsForm = {
   apiUrl: '',
   apiToken: '',
   modelDir: '',
   dataDir: '',
   logCacheDir: '',
-  attnImplementation: AttentionImplementation.Sdpa
-});
+  hardwareType: HardwareType.Cpu,
+  attnImplementation: AttentionImplementation.Sdpa,
+  loraMode: LoraMode.Disabled,
+  loraRank: 16,
+  loraAlpha: 32,
+  loraDropout: '0.05'
+};
+
+const form = reactive<SettingsForm>({ ...DEFAULT_SETTINGS_FORM });
+const loraDisabledOptions = [{ label: '已暂时禁用', value: LoraMode.Disabled }];
 const attnImplementationOptions = Object.values(AttentionImplementation).map(value => ({
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
 }));
+const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
+  label: HARDWARE_TYPE_TEXT[value],
+  value
+}));
+const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const selectedAttnImplementationOption = ref<{ label: string; value: AttentionImplementation } | null>(null);
 const isLoading = ref(false);
 const isSaving = ref(false);
@@ -59,11 +77,13 @@ const settingsBusyLabel = computed(() => {
   return '';
 });
 
-const canSaveConnection = computed(() => form.apiUrl.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveConnection = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveModel = computed(() => form.modelDir.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveModel = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveCache = computed(() => form.dataDir.trim().length > 0 && form.logCacheDir.trim().length > 0 && !isLoading.value && !isSaving.value);
+const canSaveTrainingRuntime = computed(() => !isLoading.value && !isSaving.value);
+
+const canSaveCache = computed(() => !isLoading.value && !isSaving.value);
 
 const applySettings = (payload: SettingsForm) => {
   form.apiUrl = payload.apiUrl;
@@ -71,7 +91,12 @@ const applySettings = (payload: SettingsForm) => {
   form.modelDir = payload.modelDir;
   form.dataDir = payload.dataDir;
   form.logCacheDir = payload.logCacheDir;
+  form.hardwareType = payload.hardwareType;
   form.attnImplementation = payload.attnImplementation;
+  form.loraMode = LoraMode.Disabled;
+  form.loraRank = payload.loraRank;
+  form.loraAlpha = payload.loraAlpha;
+  form.loraDropout = payload.loraDropout;
 };
 
 const loadSettings = async () => {
@@ -89,7 +114,12 @@ const loadSettings = async () => {
 };
 
 const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
-  const isSectionValid = section === 'connection' ? canSaveConnection.value : section === 'model' ? canSaveModel.value : canSaveCache.value;
+  const isSectionValid =
+    section === 'connection'
+      ? canSaveConnection.value
+      : section === 'model'
+        ? canSaveModel.value && canSaveTrainingRuntime.value
+        : canSaveCache.value;
 
   if (!isSectionValid) {
     return;
@@ -105,7 +135,12 @@ const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
         modelDir: form.modelDir,
         dataDir: form.dataDir,
         logCacheDir: form.logCacheDir,
-        attnImplementation: form.attnImplementation
+        hardwareType: form.hardwareType,
+        attnImplementation: form.attnImplementation,
+        loraMode: form.loraMode,
+        loraRank: form.loraRank,
+        loraAlpha: form.loraAlpha,
+        loraDropout: form.loraDropout
       }
     });
     applySettings(payload);
@@ -167,19 +202,68 @@ onMounted(async () => {
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <p class="rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2 text-xs leading-5 text-stone-600">
-              基础模型类型已迁移到文本转语音和模型训练页面中按任务配置。这里维护本地模型资源目录，以及统一的 Qwen 模型注意力实现。
+              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。任务页面不再单独覆盖硬件类型。
             </p>
             <label class="block">
               <span class="mb-1 block text-xs text-stone-500">模型目录</span>
               <input v-model="form.modelDir" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型目录" />
             </label>
             <BaseListbox
+              v-model="form.hardwareType"
+              v-model:selected-option="selectedHardwareTypeOption"
+              label="全局硬件类型"
+              :options="hardwareTypeOptions"
+            />
+            <BaseListbox
               v-model="form.attnImplementation"
               v-model:selected-option="selectedAttnImplementationOption"
               label="注意力实现"
               :options="attnImplementationOptions"
             />
-            <BaseButton tone="ghost" :disabled="!canSaveModel" @click="saveSettings('model')">
+            <section class="space-y-3 rounded-2xl border border-brand-100 bg-stone-50/80 p-4">
+              <header class="space-y-1">
+                <h3 class="text-sm font-semibold text-stone-700">LoRA 训练参数</h3>
+                <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                  当前 LoRA 微调 TTS 模型的效果较差，已暂时禁止使用。相关配置仅保留只读展示，应用保存时也会强制关闭 LoRA。
+                </p>
+              </header>
+              <BaseListbox v-model="form.loraMode" label="LoRA 模式" :options="loraDisabledOptions" disabled />
+              <div class="grid gap-3 md:grid-cols-3">
+                <label class="block">
+                  <span class="mb-1 block text-xs text-stone-500">Rank</span>
+                  <input
+                    v-model.number="form.loraRank"
+                    type="number"
+                    min="1"
+                    step="1"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
+                  />
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs text-stone-500">Alpha</span>
+                  <input
+                    v-model.number="form.loraAlpha"
+                    type="number"
+                    min="1"
+                    step="1"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
+                  />
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs text-stone-500">Dropout</span>
+                  <input
+                    v-model="form.loraDropout"
+                    type="text"
+                    inputmode="decimal"
+                    disabled
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
+                  />
+                </label>
+              </div>
+            </section>
+            <BaseButton tone="ghost" :disabled="!canSaveModel || !canSaveTrainingRuntime" @click="saveSettings('model')">
               <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />
               <FolderIcon v-else class="h-4 w-4" aria-hidden="true" />
               <span>{{ isSaving ? '保存中...' : '保存资源配置' }}</span>

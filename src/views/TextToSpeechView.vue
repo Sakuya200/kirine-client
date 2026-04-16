@@ -14,7 +14,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
-import { BASE_MODEL_TEXT, BaseModel, HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
+import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
 import {
   TEXT_TO_SPEECH_FORMATS,
   TEXT_TO_SPEECH_LANGUAGES,
@@ -37,7 +37,6 @@ interface TtsResult {
   speakerId: number;
   speakerLabel: string;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
@@ -56,7 +55,6 @@ interface TextToSpeechTaskResultPayload {
   speakerId: number;
   speakerLabel: string;
   baseModel: BaseModel;
-  hardwareType: HardwareType;
   language: AppLanguage;
   format: TextToSpeechFormat;
   text: string;
@@ -77,19 +75,13 @@ interface TextToSpeechAudioAssetPayload {
 const form = reactive({
   speakerId: null as number | null,
   baseModel: BaseModel.Qwen3Tts,
-  hardwareType: HardwareType.Cuda,
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   text: '',
   voicePrompt: ''
 });
-const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
-  label: HARDWARE_TYPE_TEXT[value],
-  value
-}));
 const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
-const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
 const isGenerating = ref(false);
@@ -123,7 +115,6 @@ const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Bool
 const canGenerate = computed(() => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value);
 const generationTips = computed(() => [
   `当前基础模型为 ${BASE_MODEL_TEXT[form.baseModel]}。`,
-  `当前硬件类型为 ${HARDWARE_TYPE_TEXT[form.hardwareType]}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，生成结果会写入本地数据库与输出目录。`,
   trimmedVoicePrompt.value ? `声音 Prompt：${trimmedVoicePrompt.value}` : '未填写声音 Prompt，将使用默认声音风格。'
@@ -147,13 +138,6 @@ const activeTaskBusyLabel = computed(() => {
 
   return '';
 });
-
-watch(
-  () => form.hardwareType,
-  value => {
-    taskPreferencesStore.ttsHardwareType = value;
-  }
-);
 
 watch(
   speakerOptions,
@@ -210,7 +194,6 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   speakerId: payload.speakerId,
   speakerLabel: payload.speakerLabel,
   baseModel: payload.baseModel,
-  hardwareType: payload.hardwareType,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
@@ -234,7 +217,6 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     speakerId: record.detail.speakerId,
     speakerLabel: record.speaker,
     baseModel: record.detail.baseModel,
-    hardwareType: record.detail.hardwareType,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
@@ -255,13 +237,11 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   activeResult.value = setAsActiveResult ? item : null;
   form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.baseModel = item.baseModel;
-  form.hardwareType = item.hardwareType;
   form.language = item.language;
   form.format = item.format;
   form.text = item.text;
   form.voicePrompt = item.voicePrompt;
   selectedSpeakerOption.value = matchedSpeakerOption;
-  selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === item.hardwareType) ?? null;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
 
@@ -386,7 +366,6 @@ const generateAudio = async () => {
       payload: {
         speakerId: form.speakerId,
         baseModel: form.baseModel,
-        hardwareType: form.hardwareType,
         language: form.language,
         format: form.format,
         text: trimmedText.value,
@@ -466,8 +445,6 @@ onBeforeUnmount(() => {
 
 onMounted(async () => {
   form.baseModel = taskPreferencesStore.fixedBaseModel;
-  form.hardwareType = taskPreferencesStore.ttsHardwareType;
-  selectedHardwareTypeOption.value = hardwareTypeOptions.find(option => option.value === form.hardwareType) ?? null;
   if (!speakerStore.initialized) {
     await speakerStore.loadSpeakers();
   }
@@ -497,12 +474,7 @@ onMounted(async () => {
 
         <div class="mt-4 grid gap-4 md:grid-cols-2">
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
-          <BaseListbox
-            v-model="form.hardwareType"
-            v-model:selected-option="selectedHardwareTypeOption"
-            label="硬件类型"
-            :options="hardwareTypeOptions"
-          />
+          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
         </div>
 
         <div class="mt-4">
@@ -530,10 +502,6 @@ onMounted(async () => {
           />
           <p class="mt-2 text-xs leading-5 text-stone-500">用于描述目标语气、情绪、节奏或播报风格，提交任务时会一并写入数据库记录。</p>
         </label>
-
-        <div class="mt-4">
-          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
-        </div>
 
         <div class="mt-4">
           <div class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
@@ -564,8 +532,7 @@ onMounted(async () => {
               <div>
                 <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
                 <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.speakerLabel }} · {{ BASE_MODEL_TEXT[activeResult.baseModel] }} ·
-                  {{ HARDWARE_TYPE_TEXT[activeResult.hardwareType] }} · {{ activeResult.languageLabel }} ·
+                  {{ activeResult.speakerLabel }} · {{ BASE_MODEL_TEXT[activeResult.baseModel] }} · {{ activeResult.languageLabel }} ·
                   {{ activeResult.formatLabel }}
                 </p>
               </div>

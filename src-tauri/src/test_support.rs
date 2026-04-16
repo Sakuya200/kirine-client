@@ -415,17 +415,16 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO tts_tasks (
-            history_id, speaker_id, model_path, base_model, hardware_type, language, format,
+            history_id, speaker_id, model_path, base_model, language, format,
             text, voice_prompt, char_count, file_name, output_file_path, create_time,
             modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(101_i64)
     .bind(1_i64)
     .bind(Option::<String>::None)
     .bind("qwen3_tts")
-    .bind("cpu")
     .bind("chinese")
     .bind("wav")
     .bind("hello")
@@ -442,16 +441,15 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_training_tasks (
-            history_id, language, base_model, hardware_type, model_name, epoch_count,
+            history_id, language, base_model, model_name, epoch_count,
             batch_size, sample_count, samples_json, notes_json, output_speaker_id,
             create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(102_i64)
     .bind("chinese")
     .bind("qwen3_tts")
-    .bind("cpu")
     .bind("legacy-model")
     .bind(1_i64)
     .bind(1_i64)
@@ -468,15 +466,14 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO voice_clone_tasks (
-            history_id, base_model, hardware_type, language, format, ref_audio_name,
+            history_id, base_model, language, format, ref_audio_name,
             ref_audio_path, ref_text, text, char_count, file_name, output_file_path,
             create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(103_i64)
     .bind("qwen3_tts")
-    .bind("cpu")
     .bind("chinese")
     .bind("wav")
     .bind("ref.wav")

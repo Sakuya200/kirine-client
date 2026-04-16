@@ -35,6 +35,13 @@ impl ScriptPlatform {
         }
     }
 
+    pub(crate) const fn lora_toggle_relative_path(self) -> &'static str {
+        match self {
+            Self::Windows => "scripts/windows/toggle_lora_dependencies.ps1",
+            Self::Unix => "scripts/unix/toggle_lora_dependencies.sh",
+        }
+    }
+
     pub(crate) const fn venv_python_relative_path(self) -> &'static str {
         match self {
             Self::Windows => "venv/Scripts/python.exe",
@@ -82,6 +89,10 @@ pub(crate) fn src_model_model_python_script_path(
 
 pub(crate) fn src_model_venv_python_path(src_model_root: &Path) -> PathBuf {
     src_model_root.join(ScriptPlatform::current().venv_python_relative_path())
+}
+
+pub(crate) fn src_model_lora_toggle_script_path(src_model_root: &Path) -> PathBuf {
+    src_model_root.join(ScriptPlatform::current().lora_toggle_relative_path())
 }
 
 pub(crate) fn resolve_src_model_root(app_dir: &Path) -> Result<PathBuf> {
