@@ -14,7 +14,10 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
-import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
+import Qwen3TtsTextToSpeechParamsForm from '@/components/qwen3_tts/Qwen3TtsTextToSpeechParamsForm.vue';
+import { AppLanguage } from '@/enums/language';
+import { TaskStatus } from '@/enums/status';
+import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import {
   TEXT_TO_SPEECH_FORMATS,
   TEXT_TO_SPEECH_LANGUAGES,
@@ -22,12 +25,9 @@ import {
   type TextToSpeechOption,
   type TextToSpeechSpeakerOption
 } from '@/enums/textToSpeech';
-import { AppLanguage } from '@/enums/language';
-import { TaskStatus } from '@/enums/status';
-import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
-import { useTaskPreferencesStore } from '@/stores/taskPreferences';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 
@@ -36,14 +36,16 @@ interface TtsResult {
   fileName: string;
   speakerId: number;
   speakerLabel: string;
-  baseModel: BaseModel;
+  baseModel: string;
+  modelScale: string;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
   formatLabel: string;
+  exportAudioName: string;
   durationSeconds: number;
   text: string;
-  voicePrompt: string;
+  modelParams: Record<string, unknown>;
   createdAt: string;
   status: TaskStatus;
   outputFilePath: string;
@@ -54,11 +56,13 @@ interface TextToSpeechTaskResultPayload {
   fileName: string;
   speakerId: number;
   speakerLabel: string;
-  baseModel: BaseModel;
+  baseModel: string;
+  modelScale: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
+  exportAudioName: string;
   text: string;
-  voicePrompt: string;
+  modelParams: Record<string, unknown>;
   durationSeconds: number;
   createdAt: string;
   status: TaskStatus;
@@ -74,13 +78,17 @@ interface TextToSpeechAudioAssetPayload {
 
 const form = reactive({
   speakerId: null as number | null,
-  baseModel: BaseModel.Qwen3Tts,
+  baseModel: 'qwen3_tts',
+  modelScale: '1.7B',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
+  exportAudioName: 'kirine_tts',
   text: '',
-  voicePrompt: ''
+  modelParams: {
+    voicePrompt: ''
+  } as Record<string, unknown>
 });
-const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
+
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
 const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
@@ -90,7 +98,7 @@ const activeResult = ref<TtsResult | null>(null);
 const generationHistory = ref<TtsResult[]>([]);
 const showClearDialog = ref(false);
 const speakerStore = useSpeakerStore();
-const taskPreferencesStore = useTaskPreferencesStore();
+const modelStore = useModelStore();
 const uiStore = useUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -100,7 +108,14 @@ let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 
 const trimmedText = computed(() => form.text.trim());
-const trimmedVoicePrompt = computed(() => form.voicePrompt.trim());
+const trimmedVoicePrompt = computed(() => String(form.modelParams.voicePrompt ?? '').trim());
+const modelOptions = computed(() =>
+  modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
+    label: item.modelName,
+    value: item.baseModel
+  }))
+);
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel as never));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
   speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
@@ -112,11 +127,13 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
 );
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const canGenerate = computed(() => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value);
+const canGenerate = computed(
+  () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
+);
 const generationTips = computed(() => [
-  `当前基础模型为 ${BASE_MODEL_TEXT[form.baseModel]}。`,
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel as never)} ${form.modelScale}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，生成结果会写入本地数据库与输出目录。`,
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_tts'}。`,
   trimmedVoicePrompt.value ? `声音 Prompt：${trimmedVoicePrompt.value}` : '未填写声音 Prompt，将使用默认声音风格。'
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
@@ -138,6 +155,35 @@ const activeTaskBusyLabel = computed(() => {
 
   return '';
 });
+
+watch(
+  modelOptions,
+  options => {
+    if (options.length === 0) {
+      return;
+    }
+
+    if (!options.some(option => option.value === form.baseModel)) {
+      form.baseModel = String(options[0]?.value ?? 'qwen3_tts');
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  modelScaleOptions,
+  options => {
+    if (options.length === 0) {
+      form.modelScale = '';
+      return;
+    }
+
+    if (!options.some(option => option.value === form.modelScale)) {
+      form.modelScale = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
 
 watch(
   speakerOptions,
@@ -175,7 +221,6 @@ const syncActiveTaskStatusRefresh = () => {
 };
 
 const findLanguageLabel = (language: AppLanguage) => TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === language)?.label ?? language;
-
 const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
 
 const clearReplayTaskId = async () => {
@@ -194,13 +239,15 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   speakerId: payload.speakerId,
   speakerLabel: payload.speakerLabel,
   baseModel: payload.baseModel,
+  modelScale: payload.modelScale,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
   formatLabel: findFormatLabel(payload.format),
+  exportAudioName: payload.exportAudioName,
   durationSeconds: payload.durationSeconds,
   text: payload.text,
-  voicePrompt: payload.voicePrompt,
+  modelParams: payload.modelParams,
   createdAt: payload.createdAt,
   status: payload.status,
   outputFilePath: payload.outputFilePath
@@ -217,13 +264,15 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     speakerId: record.detail.speakerId,
     speakerLabel: record.speaker,
     baseModel: record.detail.baseModel,
+    modelScale: record.detail.modelScale,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
     formatLabel: findFormatLabel(record.detail.format),
+    exportAudioName: record.detail.exportAudioName,
     durationSeconds: record.durationSeconds,
     text: record.detail.text,
-    voicePrompt: record.detail.voicePrompt,
+    modelParams: record.detail.modelParams,
     createdAt: record.createTime,
     status: record.status,
     outputFilePath: record.detail.outputFilePath
@@ -237,10 +286,12 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   activeResult.value = setAsActiveResult ? item : null;
   form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.baseModel = item.baseModel;
+  form.modelScale = item.modelScale;
   form.language = item.language;
   form.format = item.format;
+  form.exportAudioName = item.exportAudioName;
   form.text = item.text;
-  form.voicePrompt = item.voicePrompt;
+  form.modelParams = { ...item.modelParams };
   selectedSpeakerOption.value = matchedSpeakerOption;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
@@ -292,12 +343,10 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
 
   try {
     const records = await invoke<HistoryRecord[]>('list_history_records');
-    const historyItems = records
+    generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is TtsResult => item !== null)
       .slice(0, 5);
-
-    generationHistory.value = historyItems;
 
     if (notifyOnSuccess) {
       uiStore.notifySuccess('文本转语音任务状态已刷新。', 2200);
@@ -350,11 +399,7 @@ const refreshActiveTaskStatus = async () => {
 };
 
 const generateAudio = async () => {
-  if (!canGenerate.value) {
-    return;
-  }
-
-  if (form.speakerId === null) {
+  if (!canGenerate.value || form.speakerId === null) {
     return;
   }
 
@@ -366,10 +411,12 @@ const generateAudio = async () => {
       payload: {
         speakerId: form.speakerId,
         baseModel: form.baseModel,
+        modelScale: form.modelScale,
         language: form.language,
         format: form.format,
+        exportAudioName: form.exportAudioName,
         text: trimmedText.value,
-        voicePrompt: trimmedVoicePrompt.value
+        modelParams: form.modelParams
       }
     });
     const result = mapResultPayload(payload);
@@ -444,7 +491,7 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
-  form.baseModel = taskPreferencesStore.fixedBaseModel;
+  await modelStore.ensureLoaded();
   if (!speakerStore.initialized) {
     await speakerStore.loadSpeakers();
   }
@@ -455,12 +502,12 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="文本转语音" description="选择说话人和语言，输入文本并配置语气参数，生成目标音频。" eyebrow="Text-to-Speech" />
+    <PageHeader title="文本转语音" description="选择说话人和模型，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="文本与参数">
+      <PanelCard title="基础参数">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox
             v-model="form.speakerId"
@@ -470,11 +517,17 @@ onMounted(async () => {
             :placeholder="speakerOptions.length > 0 ? '请选择说话人' : '暂无可用说话人'"
           />
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
-        </div>
-
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-          <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
+          <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
+          <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
+          <label class="block text-sm text-slate-700">
+            <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
+            <input
+              v-model="form.exportAudioName"
+              class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+              placeholder="例如 news_broadcast"
+            />
+          </label>
         </div>
 
         <div class="mt-4">
@@ -492,24 +545,16 @@ onMounted(async () => {
           </label>
         </div>
 
-        <label class="mt-4 block text-sm text-slate-700">
-          <span class="mb-1 block text-xs text-stone-500">声音 Prompt</span>
-          <textarea
-            v-model="form.voicePrompt"
-            rows="4"
-            class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2"
-            placeholder="例如：温柔、自然、轻微微笑感，适合长句播报。"
-          />
-          <p class="mt-2 text-xs leading-5 text-stone-500">用于描述目标语气、情绪、节奏或播报风格，提交任务时会一并写入数据库记录。</p>
-        </label>
-
         <div class="mt-4">
-          <div class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
-            <p class="font-semibold text-slate-700">生成摘要</p>
-            <ul class="mt-2 space-y-1.5">
-              <li v-for="tip in generationTips" :key="tip">{{ tip }}</li>
-            </ul>
-          </div>
+          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <Qwen3TtsTextToSpeechParamsForm class="mt-4" v-model="form.modelParams" />
+        </div>
+
+        <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
+          <p class="font-semibold text-slate-700">生成摘要</p>
+          <ul class="mt-2 space-y-1.5">
+            <li v-for="tip in generationTips" :key="tip">{{ tip }}</li>
+          </ul>
         </div>
 
         <div class="mt-4 flex flex-wrap gap-2">
@@ -532,8 +577,8 @@ onMounted(async () => {
               <div>
                 <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
                 <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.speakerLabel }} · {{ BASE_MODEL_TEXT[activeResult.baseModel] }} · {{ activeResult.languageLabel }} ·
-                  {{ activeResult.formatLabel }}
+                  {{ activeResult.speakerLabel }} · {{ modelStore.getModelLabel(activeResult.baseModel as never) }} · {{ activeResult.modelScale }} ·
+                  {{ activeResult.languageLabel }} · {{ activeResult.formatLabel }}
                 </p>
               </div>
               <StatusPill :status="activeResult.status" />
@@ -552,7 +597,8 @@ onMounted(async () => {
             <div class="mt-3 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>任务 ID：{{ activeResult.taskId }}</p>
               <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
-              <p v-if="activeResult.voicePrompt" class="mt-1">声音 Prompt：{{ activeResult.voicePrompt }}</p>
+              <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
+              <p v-if="activeResult.modelParams.voicePrompt" class="mt-1">声音 Prompt：{{ activeResult.modelParams.voicePrompt }}</p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
 

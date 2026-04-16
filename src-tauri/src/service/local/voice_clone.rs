@@ -56,6 +56,8 @@ impl LocalService {
         } else {
             payload.ref_audio_name.trim().to_string()
         };
+        let model_scale = payload.model_scale.trim().to_string();
+        let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
         let char_count = text.chars().count();
         let speaker_snapshot = "-";
         let title = super::build_task_title("声音克隆", None, &create_time);
@@ -83,7 +85,7 @@ impl LocalService {
             HistoryTaskType::VoiceClone,
             task_id,
         )?;
-        let file_name = format!("kirine_voice_clone_{}.{}", task_id, payload.format.as_str());
+        let file_name = format!("{}_{}.{}", export_audio_name, task_id, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let ref_audio_target_path =
             sample_dir.join(super::build_task_audio_file_name(&resolved_ref_audio_path));
@@ -102,12 +104,15 @@ impl LocalService {
             id: NotSet,
             history_id: Set(task_id),
             base_model: Set(payload.base_model.as_str().to_string()),
+            model_scale: Set(model_scale.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
+            export_audio_name: Set(export_audio_name.clone()),
             ref_audio_name: Set(ref_audio_name.clone()),
             ref_audio_path: Set(serialized_ref_audio_path.clone()),
             ref_text: Set(ref_text.clone()),
             text: Set(text.clone()),
+            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
             char_count: Set(char_count as i64),
             file_name: Set(file_name.clone()),
             output_file_path: Set(Some(serialized_output_path.clone())),
@@ -126,11 +131,14 @@ impl LocalService {
             file_name,
             ref_audio_name,
             base_model: payload.base_model,
+            model_scale,
             language: payload.language,
             format: payload.format,
+            export_audio_name,
             duration_seconds: 0,
             ref_text,
             text,
+            model_params: payload.model_params,
             created_at: create_time,
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,

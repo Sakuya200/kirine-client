@@ -338,6 +338,7 @@ impl LocalService {
                 .base_model
                 .parse::<BaseModel>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            model_scale: row.model_scale,
             language: row
                 .language
                 .parse()
@@ -346,8 +347,9 @@ impl LocalService {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            export_audio_name: row.export_audio_name,
             text: row.text,
-            voice_prompt: row.voice_prompt,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             char_count: row.char_count as usize,
             file_name: row.file_name,
             output_file_path: row.output_file_path.unwrap_or_default(),
@@ -377,11 +379,9 @@ impl LocalService {
                 .base_model
                 .parse::<BaseModel>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            model_scale: row.model_scale,
             model_name: row.model_name,
-            epoch_count: row.epoch_count,
-            batch_size: row.batch_size,
-            gradient_accumulation_steps: row.gradient_accumulation_steps,
-            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             sample_count: row.sample_count,
             samples,
             notes,
@@ -404,6 +404,7 @@ impl LocalService {
                 .base_model
                 .parse::<BaseModel>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            model_scale: row.model_scale,
             language: row
                 .language
                 .parse()
@@ -412,10 +413,12 @@ impl LocalService {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            export_audio_name: row.export_audio_name,
             ref_audio_name: row.ref_audio_name,
             ref_audio_path: row.ref_audio_path,
             ref_text: row.ref_text,
             text: row.text,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             char_count: row.char_count as usize,
             file_name: row.file_name,
             output_file_path: row.output_file_path.unwrap_or_default(),

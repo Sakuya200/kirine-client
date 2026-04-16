@@ -1,6 +1,7 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::config::BaseModel;
 
@@ -357,13 +358,44 @@ pub struct UpdateTaskStatusPayload {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: i64,
+    pub base_model: BaseModel,
+    pub model_name: String,
+    pub model_scale_list: Vec<String>,
+    pub required_model_name_list: Vec<String>,
+    pub required_model_repo_id_list: Vec<String>,
+    pub supported_feature_list: Vec<HistoryTaskType>,
+    pub create_time: String,
+    pub modify_time: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Qwen3TtsTextToSpeechModelParams {
+    pub voice_prompt: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Qwen3TtsTrainingModelParams {
+    pub epoch_count: i64,
+    pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TextToSpeechTaskDetail {
     pub speaker_id: i64,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub text: String,
-    pub voice_prompt: String,
+    pub model_params: Value,
     pub char_count: usize,
     pub file_name: String,
     pub output_file_path: String,
@@ -374,11 +406,9 @@ pub struct TextToSpeechTaskDetail {
 pub struct ModelTrainingTaskDetail {
     pub language: AppLanguage,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub model_name: String,
-    pub epoch_count: i64,
-    pub batch_size: i64,
-    pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
+    pub model_params: Value,
     pub sample_count: i64,
     pub samples: Vec<ModelTrainingSampleInput>,
     pub notes: Vec<String>,
@@ -388,12 +418,15 @@ pub struct ModelTrainingTaskDetail {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceCloneTaskDetail {
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub ref_audio_name: String,
     pub ref_audio_path: String,
     pub ref_text: String,
     pub text: String,
+    pub model_params: Value,
     pub char_count: usize,
     pub file_name: String,
     pub output_file_path: String,
@@ -419,10 +452,12 @@ pub struct HistoryRecord {
 pub struct CreateTextToSpeechTaskPayload {
     pub speaker_id: i64,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub text: String,
-    pub voice_prompt: String,
+    pub model_params: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -433,11 +468,13 @@ pub struct TextToSpeechTaskResult {
     pub speaker_id: i64,
     pub speaker_label: String,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub duration_seconds: i64,
     pub text: String,
-    pub voice_prompt: String,
+    pub model_params: Value,
     pub created_at: String,
     pub status: TaskStatus,
     pub output_file_path: String,
@@ -486,11 +523,9 @@ pub struct ModelTrainingSampleInput {
 pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub model_name: String,
-    pub epoch_count: i64,
-    pub batch_size: i64,
-    pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
+    pub model_params: Value,
     pub samples: Vec<ModelTrainingSampleInput>,
 }
 
@@ -498,12 +533,15 @@ pub struct CreateModelTrainingTaskPayload {
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceCloneTaskPayload {
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub ref_audio_name: String,
     pub ref_audio_path: String,
     pub ref_text: String,
     pub text: String,
+    pub model_params: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -511,7 +549,9 @@ pub struct CreateVoiceCloneTaskPayload {
 pub struct ModelTrainingTaskResult {
     pub task_id: i64,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub model_name: String,
+    pub model_params: Value,
     pub sample_count: i64,
     pub create_time: String,
     pub status: TaskStatus,
@@ -524,11 +564,14 @@ pub struct VoiceCloneTaskResult {
     pub file_name: String,
     pub ref_audio_name: String,
     pub base_model: BaseModel,
+    pub model_scale: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
     pub duration_seconds: i64,
     pub ref_text: String,
     pub text: String,
+    pub model_params: Value,
     pub created_at: String,
     pub status: TaskStatus,
     pub output_file_path: String,

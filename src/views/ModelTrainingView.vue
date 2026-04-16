@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -21,6 +21,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
+import Qwen3TtsTrainingParamsForm from '@/components/qwen3_tts/Qwen3TtsTrainingParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -32,11 +33,10 @@ import {
   ModelTrainingSampleType,
   type ModelTrainingOption
 } from '@/enums/modelTraining';
-import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
-import { useTaskPreferencesStore } from '@/stores/taskPreferences';
+import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
 
@@ -60,8 +60,10 @@ interface ImportedSampleItem {
 
 interface ModelTrainingTaskResultPayload {
   taskId: number;
-  baseModel: BaseModel;
+  baseModel: string;
+  modelScale: string;
   modelName: string;
+  modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
   status: TaskStatus;
@@ -69,25 +71,27 @@ interface ModelTrainingTaskResultPayload {
 
 const form = reactive({
   language: AppLanguage.Chinese,
-  baseModel: BaseModel.Qwen3Tts,
+  baseModel: 'qwen3_tts',
+  modelScale: '1.7B',
   modelName: 'speaker_a_custom',
-  epochCount: 4,
-  batchSize: 2,
-  gradientAccumulationSteps: 4,
-  enableGradientCheckpointing: false,
+  modelParams: {
+    epochCount: 30,
+    batchSize: 8,
+    gradientAccumulationSteps: 4,
+    enableGradientCheckpointing: false
+  } as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
-const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
 const isStarting = ref(false);
 const isRefreshingHistory = ref(false);
 const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
 const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
 const isTemplateDialogOpen = ref(false);
-const taskPreferencesStore = useTaskPreferencesStore();
+const modelStore = useModelStore();
 const uiStore = useUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -103,18 +107,31 @@ const trainingChecklist = [
 ];
 
 const importedSamples = ref<ImportedSampleItem[]>([]);
+const modelOptions = computed(() =>
+  modelStore.getModelsByFeature(HistoryTaskType.ModelTraining).map(item => ({
+    label: item.modelName,
+    value: item.baseModel
+  }))
+);
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel as never));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
-const canStartTraining = computed(
-  () =>
+const canStartTraining = computed(() => {
+  const epochCount = Number(form.modelParams.epochCount ?? 0);
+  const batchSize = Number(form.modelParams.batchSize ?? 0);
+  const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
+
+  return (
     form.modelName.trim().length > 0 &&
     importedSamples.value.length > 0 &&
-    form.epochCount > 0 &&
-    form.batchSize > 0 &&
-    form.gradientAccumulationSteps > 0 &&
-    !isStarting.value
-);
+    epochCount > 0 &&
+    batchSize > 0 &&
+    gradientAccumulationSteps > 0 &&
+    !isStarting.value &&
+    !!form.modelScale
+  );
+});
 
 const sampleSummary = computed(() => ({
   total: importedSamples.value.length
@@ -123,7 +140,7 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.modelName,
-    subtitle: `任务 ${item.id} · ${BASE_MODEL_TEXT[item.detail.baseModel]}`,
+    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelScale}`,
     status: item.status
   }))
 );
@@ -142,6 +159,35 @@ const trainingBusyLabel = computed(() => {
 
   return '';
 });
+
+watch(
+  modelOptions,
+  options => {
+    if (options.length === 0) {
+      return;
+    }
+
+    if (!options.some(option => option.value === form.baseModel)) {
+      form.baseModel = String(options[0]?.value ?? 'qwen3_tts');
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  modelScaleOptions,
+  options => {
+    if (options.length === 0) {
+      form.modelScale = '';
+      return;
+    }
+
+    if (!options.some(option => option.value === form.modelScale)) {
+      form.modelScale = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
 
 const extractFileName = (filePath: string) => {
   const parts = filePath.split(/[/\\]/);
@@ -185,7 +231,9 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
   return {
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
+    modelScale: trainingRecord.detail.modelScale,
     modelName: trainingRecord.detail.modelName,
+    modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
     status: trainingRecord.status
@@ -283,16 +331,17 @@ const removeImportedSample = (sampleId: number) => {
   importedSamples.value = importedSamples.value.filter(sample => sample.id !== sampleId);
 };
 
-form.baseModel = taskPreferencesStore.fixedBaseModel;
-
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
-  form.baseModel = taskPreferencesStore.fixedBaseModel;
+  form.baseModel = String(modelOptions.value[0]?.value ?? 'qwen3_tts');
+  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '1.7B');
   form.modelName = 'speaker_a_custom';
-  form.epochCount = 30;
-  form.batchSize = 8;
-  form.gradientAccumulationSteps = 4;
-  form.enableGradientCheckpointing = false;
+  form.modelParams = {
+    epochCount: 30,
+    batchSize: 8,
+    gradientAccumulationSteps: 4,
+    enableGradientCheckpointing: false
+  };
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -325,11 +374,9 @@ const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): Im
 const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
+  form.modelScale = record.detail.modelScale;
   form.modelName = record.detail.modelName;
-  form.epochCount = record.detail.epochCount;
-  form.batchSize = record.detail.batchSize;
-  form.gradientAccumulationSteps = record.detail.gradientAccumulationSteps;
-  form.enableGradientCheckpointing = record.detail.enableGradientCheckpointing;
+  form.modelParams = { ...record.detail.modelParams };
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -445,11 +492,9 @@ const startTraining = async () => {
       payload: {
         language: form.language,
         baseModel: form.baseModel,
+        modelScale: form.modelScale,
         modelName: form.modelName.trim(),
-        epochCount: form.epochCount,
-        batchSize: form.batchSize,
-        gradientAccumulationSteps: form.gradientAccumulationSteps,
-        enableGradientCheckpointing: form.enableGradientCheckpointing,
+        modelParams: form.modelParams,
         samples: importedSamples.value.map(sample => ({
           id: sample.id,
           sampleType: sample.type,
@@ -467,7 +512,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${BASE_MODEL_TEXT[payload.baseModel]}，共 ${payload.sampleCount} 项样本。`,
+      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel as never)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -490,6 +535,7 @@ const loadHistoryItem = (taskId: number) => {
 };
 
 onMounted(async () => {
+  await modelStore.ensureLoaded();
   await loadRecentTasks({ silentOnError: true });
   await hydrateReplayTaskFromRoute();
 });
@@ -636,65 +682,32 @@ onBeforeUnmount(() => {
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard class="z-20" title="训练参数">
+        <PanelCard class="z-20" title="基础参数">
           <div class="space-y-3 text-sm text-slate-700">
             <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">模型名称</span>
+              <span class="mb-1 block text-xs text-stone-500">训练输出名称</span>
               <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
             </label>
-            <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">训练轮次</span>
-                <input
-                  v-model.number="form.epochCount"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">批次大小</span>
-                <input
-                  v-model.number="form.batchSize"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-            </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">梯度累积步数</span>
-                <input
-                  v-model.number="form.gradientAccumulationSteps"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-              <label class="flex items-center gap-3 rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
-                <input
-                  v-model="form.enableGradientCheckpointing"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-brand-300 text-brand-500 focus:ring-brand-200"
-                />
-                <span>启用梯度检查点</span>
-              </label>
-            </div>
+            <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
+            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
             <BaseListbox
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
               label="语种"
               :options="MODEL_TRAINING_LANGUAGE_OPTIONS"
             />
+            <div>
+              <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+              <Qwen3TtsTrainingParamsForm class="mt-4" v-model="form.modelParams" />
+            </div>
             <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>训练摘要</p>
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-              <p class="mt-1">基础模型 {{ BASE_MODEL_TEXT[form.baseModel] }}。{{ baseModelSummary }}</p>
+              <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel as never) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
               <p class="mt-1">
-                当前梯度累积 {{ form.gradientAccumulationSteps }}，梯度检查点 {{ form.enableGradientCheckpointing ? '已启用' : '未启用' }}。
+                当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
+                {{ form.modelParams.enableGradientCheckpointing ? '已启用' : '未启用' }}。
               </p>
             </div>
           </div>

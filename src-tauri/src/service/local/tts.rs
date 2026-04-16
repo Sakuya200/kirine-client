@@ -19,8 +19,8 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
-            TextToSpeechTaskResult,
+            CreateTextToSpeechTaskPayload, HistoryTaskType, Qwen3TtsTextToSpeechModelParams,
+            SpeakerStatus, TaskStatus, TextToSpeechTaskResult,
         },
         pipeline::{resolve_inference_model_path, script_paths::resolve_src_model_root},
         LocalService,
@@ -80,7 +80,9 @@ impl LocalService {
                 resolve_inference_model_path(base_model, &resolved_model_root_path)?
             };
         let text = payload.text.trim().to_string();
-        let voice_prompt = payload.voice_prompt.trim().to_string();
+        let model_scale = payload.model_scale.trim().to_string();
+        let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
+        let model_params = serde_json::from_value::<Qwen3TtsTextToSpeechModelParams>(payload.model_params.clone())?;
         let char_count = text.chars().count();
         let title = super::build_task_title("文本转语音", Some(&speaker_label), &create_time);
         let output_dir = ensure_child_dir(Path::new(self.data_dir()), "generated")?;
@@ -107,7 +109,7 @@ impl LocalService {
             HistoryTaskType::TextToSpeech,
             task_id,
         )?;
-        let file_name = format!("kirine_tts_{}.{}", task_id, payload.format.as_str());
+        let file_name = format!("{}_{}.{}", export_audio_name, task_id, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
         let serialized_model_path = serialize_runtime_model_path(
@@ -122,10 +124,12 @@ impl LocalService {
             speaker_id: Set(speaker_id),
             model_path: Set(Some(serialized_model_path)),
             base_model: Set(base_model.as_str().to_string()),
+            model_scale: Set(model_scale.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
+            export_audio_name: Set(export_audio_name.clone()),
             text: Set(text.clone()),
-            voice_prompt: Set(voice_prompt.clone()),
+            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
             char_count: Set(char_count as i64),
             file_name: Set(file_name.clone()),
             output_file_path: Set(Some(serialized_output_path.clone())),
@@ -145,11 +149,13 @@ impl LocalService {
             speaker_id,
             speaker_label,
             base_model,
+            model_scale,
             language: payload.language,
             format: payload.format,
+            export_audio_name,
             duration_seconds: 0,
             text,
-            voice_prompt,
+            model_params: serde_json::to_value(model_params)?,
             created_at: create_time,
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,

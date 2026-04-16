@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::from_str;
 use tracing::{error, info};
 
 use crate::{
@@ -19,7 +20,10 @@ use crate::{
             entity::{task_history as task_history_entity, tts_task as tts_task_entity},
             LocalService,
         },
-        models::{HistoryTaskType, TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload},
+        models::{
+            HistoryTaskType, Qwen3TtsTextToSpeechModelParams, TaskStatus,
+            TextToSpeechFormat, UpdateTaskStatusPayload,
+        },
         pipeline::{
             model_paths::{llm_model_display_name, llm_model_paths},
             qwen3_tts::Qwen3TTSModelTaskPipeline,
@@ -223,7 +227,9 @@ impl Qwen3TTSModelTaskPipeline {
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             text: task_detail.text,
-            voice_prompt: task_detail.voice_prompt,
+            voice_prompt: from_str::<Qwen3TtsTextToSpeechModelParams>(&task_detail.model_params_json)
+                .map(|params| params.voice_prompt)
+                .unwrap_or_default(),
             output_file_path: resolve_task_path(
                 Path::new(service.data_dir()),
                 &task_detail

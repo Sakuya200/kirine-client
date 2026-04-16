@@ -1,20 +1,16 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "model_training_tasks")]
+#[sea_orm(table_name = "model_info")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub history_id: i64,
-    pub language: String,
     pub base_model: String,
-    pub model_scale: String,
     pub model_name: String,
-    pub model_params_json: String,
-    pub sample_count: i64,
-    pub samples_json: String,
-    pub notes_json: String,
-    pub output_speaker_id: Option<i64>,
+    pub model_scale_list_json: String,
+    pub required_model_name_list_json: String,
+    pub required_model_repo_id_list_json: String,
+    pub supported_feature_list_json: String,
     pub create_time: String,
     pub modify_time: String,
     pub deleted: i32,

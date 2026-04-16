@@ -24,7 +24,10 @@ use crate::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
             sanitize_path_segment, LocalService,
         },
-        models::{HistoryTaskType, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
+        models::{
+            HistoryTaskType, Qwen3TtsTrainingModelParams, SpeakerStatus, TaskStatus,
+            UpdateTaskStatusPayload,
+        },
         pipeline::{
             model_paths::{llm_model_display_name, llm_model_paths},
             qwen3_tts::Qwen3TTSModelTaskPipeline,
@@ -223,16 +226,18 @@ impl Qwen3TTSModelTaskPipeline {
             .await
             .with_context(|| format!("failed to load training params for task {}", task_id))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务参数"))?;
+        let params = serde_json::from_str::<Qwen3TtsTrainingModelParams>(&row.model_params_json)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
         Ok(TrainingParams {
             base_model: row
                 .base_model
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            batch_size: row.batch_size,
-            epoch_count: row.epoch_count,
-            gradient_accumulation_steps: row.gradient_accumulation_steps,
-            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
+            batch_size: params.batch_size,
+            epoch_count: params.epoch_count,
+            gradient_accumulation_steps: params.gradient_accumulation_steps,
+            enable_gradient_checkpointing: params.enable_gradient_checkpointing,
         })
     }
 

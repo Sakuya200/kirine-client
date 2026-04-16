@@ -26,6 +26,7 @@ impl MigrationTrait for Migration {
 async fn run_up_flow(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     create_meta_node(manager).await?;
     create_speakers_node(manager).await?;
+    create_model_info_node(manager).await?;
     create_task_history_node(manager).await?;
     create_tts_tasks_node(manager).await?;
     create_model_training_tasks_node(manager).await?;
@@ -151,6 +152,54 @@ async fn create_task_history_node(manager: &SchemaManager<'_>) -> Result<(), DbE
         .await
 }
 
+async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(ModelInfo::Table)
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(ModelInfo::Id)
+                        .integer()
+                        .not_null()
+                        .auto_increment()
+                        .primary_key(),
+                )
+                .col(ColumnDef::new(ModelInfo::BaseModel).string().not_null())
+                .col(ColumnDef::new(ModelInfo::ModelName).string().not_null())
+                .col(
+                    ColumnDef::new(ModelInfo::ModelScaleListJson)
+                        .text()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelInfo::RequiredModelNameListJson)
+                        .text()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelInfo::RequiredModelRepoIdListJson)
+                        .text()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelInfo::SupportedFeatureListJson)
+                        .text()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(ModelInfo::CreateTime).string().not_null())
+                .col(ColumnDef::new(ModelInfo::ModifyTime).string().not_null())
+                .col(
+                    ColumnDef::new(ModelInfo::Deleted)
+                        .integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        )
+        .await
+}
+
 async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_table(
@@ -173,14 +222,25 @@ async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                         .not_null()
                         .default("qwen3_tts"),
                 )
+                .col(
+                    ColumnDef::new(TtsTasks::ModelScale)
+                        .string()
+                        .not_null()
+                        .default("1.7B"),
+                )
                 .col(ColumnDef::new(TtsTasks::Language).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Format).string().not_null())
+                .col(
+                    ColumnDef::new(TtsTasks::ExportAudioName)
+                        .string()
+                        .not_null(),
+                )
                 .col(ColumnDef::new(TtsTasks::Text).text().not_null())
                 .col(
-                    ColumnDef::new(TtsTasks::VoicePrompt)
+                    ColumnDef::new(TtsTasks::ModelParamsJson)
                         .text()
                         .not_null()
-                        .default(""),
+                        .default("{}"),
                 )
                 .col(ColumnDef::new(TtsTasks::CharCount).integer().not_null())
                 .col(ColumnDef::new(TtsTasks::FileName).string().not_null())
@@ -241,31 +301,21 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .default("qwen3_tts"),
                 )
                 .col(
+                    ColumnDef::new(ModelTrainingTasks::ModelScale)
+                        .string()
+                        .not_null()
+                        .default("1.7B"),
+                )
+                .col(
                     ColumnDef::new(ModelTrainingTasks::ModelName)
                         .string()
                         .not_null(),
                 )
                 .col(
-                    ColumnDef::new(ModelTrainingTasks::EpochCount)
-                        .integer()
-                        .not_null(),
-                )
-                .col(
-                    ColumnDef::new(ModelTrainingTasks::BatchSize)
-                        .integer()
-                        .not_null(),
-                )
-                .col(
-                    ColumnDef::new(ModelTrainingTasks::GradientAccumulationSteps)
-                        .integer()
+                    ColumnDef::new(ModelTrainingTasks::ModelParamsJson)
+                        .text()
                         .not_null()
-                        .default(4),
-                )
-                .col(
-                    ColumnDef::new(ModelTrainingTasks::EnableGradientCheckpointing)
-                        .boolean()
-                        .not_null()
-                        .default(false),
+                        .default("{}"),
                 )
                 .col(
                     ColumnDef::new(ModelTrainingTasks::SampleCount)
@@ -346,6 +396,12 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                         .default("qwen3_tts"),
                 )
                 .col(
+                    ColumnDef::new(VoiceCloneTasks::ModelScale)
+                        .string()
+                        .not_null()
+                        .default("1.7B"),
+                )
+                .col(
                     ColumnDef::new(VoiceCloneTasks::Language)
                         .string()
                         .not_null(),
@@ -355,6 +411,11 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                         .string()
                         .not_null()
                         .default("wav"),
+                )
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::ExportAudioName)
+                        .string()
+                        .not_null(),
                 )
                 .col(
                     ColumnDef::new(VoiceCloneTasks::RefAudioName)
@@ -368,6 +429,12 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                 )
                 .col(ColumnDef::new(VoiceCloneTasks::RefText).text().not_null())
                 .col(ColumnDef::new(VoiceCloneTasks::Text).text().not_null())
+                .col(
+                    ColumnDef::new(VoiceCloneTasks::ModelParamsJson)
+                        .text()
+                        .not_null()
+                        .default("{}"),
+                )
                 .col(
                     ColumnDef::new(VoiceCloneTasks::CharCount)
                         .integer()
@@ -408,6 +475,18 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
 }
 
 async fn create_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_index(
+            Index::create()
+                .name("idx_model_info_base_model")
+                .table(ModelInfo::Table)
+                .col(ModelInfo::BaseModel)
+                .unique()
+                .if_not_exists()
+                .to_owned(),
+        )
+        .await?;
+
     manager
         .create_index(
             Index::create()
@@ -498,6 +577,9 @@ async fn persist_schema_version_node(manager: &SchemaManager<'_>) -> Result<(), 
 
 async fn drop_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
+        .drop_index(Index::drop().name("idx_model_info_base_model").to_owned())
+        .await?;
+    manager
         .drop_index(
             Index::drop()
                 .name("idx_voice_clone_tasks_history_id")
@@ -537,6 +619,9 @@ async fn drop_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 async fn drop_tables_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .drop_table(Table::drop().table(VoiceCloneTasks::Table).to_owned())
+        .await?;
+    manager
+        .drop_table(Table::drop().table(ModelInfo::Table).to_owned())
         .await?;
     manager
         .drop_table(Table::drop().table(ModelTrainingTasks::Table).to_owned())
@@ -598,6 +683,21 @@ enum TaskHistory {
 }
 
 #[derive(DeriveIden)]
+enum ModelInfo {
+    Table,
+    Id,
+    BaseModel,
+    ModelName,
+    ModelScaleListJson,
+    RequiredModelNameListJson,
+    RequiredModelRepoIdListJson,
+    SupportedFeatureListJson,
+    CreateTime,
+    ModifyTime,
+    Deleted,
+}
+
+#[derive(DeriveIden)]
 enum TtsTasks {
     Table,
     Id,
@@ -605,10 +705,12 @@ enum TtsTasks {
     SpeakerId,
     ModelPath,
     BaseModel,
+    ModelScale,
     Language,
     Format,
+    ExportAudioName,
     Text,
-    VoicePrompt,
+    ModelParamsJson,
     CharCount,
     FileName,
     OutputFilePath,
@@ -624,11 +726,9 @@ enum ModelTrainingTasks {
     HistoryId,
     Language,
     BaseModel,
+    ModelScale,
     ModelName,
-    EpochCount,
-    BatchSize,
-    GradientAccumulationSteps,
-    EnableGradientCheckpointing,
+    ModelParamsJson,
     SampleCount,
     SamplesJson,
     NotesJson,
@@ -644,12 +744,15 @@ enum VoiceCloneTasks {
     Id,
     HistoryId,
     BaseModel,
+    ModelScale,
     Language,
     Format,
+    ExportAudioName,
     RefAudioName,
     RefAudioPath,
     RefText,
     Text,
+    ModelParamsJson,
     CharCount,
     FileName,
     OutputFilePath,

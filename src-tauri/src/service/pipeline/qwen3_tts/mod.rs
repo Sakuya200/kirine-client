@@ -31,7 +31,7 @@ const QWEN3_TTS_BASE_MODEL_REPO_ID: &str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base";
 const QWEN3_TTS_TOKENIZER_REPO_ID: &str = "Qwen/Qwen3-TTS-Tokenizer-12Hz";
 pub(crate) const QWEN3_TTS_CUSTOM_VOICE_MODEL_NAME: &str = "Qwen3-TTS-12Hz-1.7B-CustomVoice";
 const QWEN3_TTS_CUSTOM_VOICE_MODEL_REPO_ID: &str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice";
-const QWEN3_TTS_DISPLAY_NAME: &str = "Qwen3-TTS";
+pub(crate) const QWEN3_TTS_DISPLAY_NAME: &str = "Qwen3-TTS";
 const QWEN3_TTS_MODEL_PYTHON_SCRIPT_DIR: &str = "qwen3_tts";
 const QWEN3_TTS_MODEL_ARTIFACTS_DIR: &str = "base-models";
 

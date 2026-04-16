@@ -1,6 +1,7 @@
 mod db;
 pub(crate) mod entity;
 mod history;
+mod model_info;
 mod speaker;
 mod training;
 mod tts;
@@ -22,9 +23,10 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelTrainingTaskResult,
-            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
+            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
@@ -74,6 +76,10 @@ impl Service for LocalService {
 
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
         self.delete_speaker_info_impl(speaker_id).await
+    }
+
+    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
+        self.list_model_infos_impl().await
     }
 
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
@@ -320,5 +326,16 @@ pub(crate) fn sanitize_path_segment(value: &str) -> String {
         "speaker".to_string()
     } else {
         sanitized
+    }
+}
+
+pub(crate) fn sanitize_file_stem(value: &str, default_stem: &str) -> String {
+    let sanitized = sanitize_path_segment(value);
+    let trimmed = sanitized.trim_matches('.').trim();
+
+    if trimmed.is_empty() || trimmed == "speaker" {
+        default_stem.to_string()
+    } else {
+        trimmed.to_string()
     }
 }
