@@ -17,7 +17,7 @@ use crate::{
             training_index_jsonl_path,
         },
     },
-    config::{load_configs, BaseModel, HardwareType},
+    config::{load_configs, save_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
@@ -43,7 +43,11 @@ use crate::{
     Result,
 };
 
-use super::{vox_cpm2_base_model_path, VoxCpm2ModelTaskPipeline};
+use super::{
+    vox_cpm2_base_model_path, vox_cpm2_download_script_args,
+    vox_cpm2_prepared_model_download_paths, vox_cpm2_prepared_variant_key,
+    VoxCpm2ModelTaskPipeline,
+};
 
 #[derive(Debug)]
 struct TrainingParams {
@@ -90,9 +94,11 @@ impl TrainingRuntimeOptions {
 #[derive(Debug)]
 struct TrainingPaths {
     base_model: BaseModel,
+    model_scale: String,
     src_model_root: PathBuf,
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
+    download_models_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
     train_python_script_path: PathBuf,
     init_model_path: PathBuf,
@@ -104,6 +110,7 @@ struct TrainingPaths {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrainingCommandLabel {
     InitTaskRuntime,
+    DownloadModels,
     NormalizeAudio,
     RunTraining,
 }
@@ -112,6 +119,7 @@ impl TrainingCommandLabel {
     const fn as_str(self) -> &'static str {
         match self {
             Self::InitTaskRuntime => "initialize voxcpm2 training runtime",
+            Self::DownloadModels => "download voxcpm2 base models",
             Self::NormalizeAudio => "normalize voxcpm2 training audio",
             Self::RunTraining => "run voxcpm2 training pipeline",
         }
@@ -143,7 +151,7 @@ impl VoxCpm2ModelTaskPipeline {
             )?;
             let log_dir = resolve_local_log_dir()?;
 
-            self.prepare_model_env(&paths, request.task_id, &log_dir, runtime)
+            self.prepare_model_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
             self.normalize_training_audio_inputs(&paths, request.task_id, &log_dir)
                 .await?;
@@ -228,6 +236,8 @@ impl VoxCpm2ModelTaskPipeline {
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
+        let download_models_script_path =
+            src_model_root.join(platform.download_models_relative_path());
         let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let train_python_script_path = src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
         let init_model_path = vox_cpm2_base_model_path(&src_model_root, model_scale)?;
@@ -238,6 +248,7 @@ impl VoxCpm2ModelTaskPipeline {
 
         for (label, path) in [
             ("init-task-runtime script", &init_task_runtime_script_path),
+            ("download-models script", &download_models_script_path),
             ("ffmpeg python script", &ffmpeg_python_script_path),
             ("train python script", &train_python_script_path),
         ] {
@@ -254,9 +265,11 @@ impl VoxCpm2ModelTaskPipeline {
 
         Ok(TrainingPaths {
             base_model: base_model.to_string(),
+            model_scale: model_scale.to_string(),
             src_model_root,
             venv_python_path,
             init_task_runtime_script_path,
+            download_models_script_path,
             ffmpeg_python_script_path,
             train_python_script_path,
             init_model_path,
@@ -268,6 +281,7 @@ impl VoxCpm2ModelTaskPipeline {
 
     async fn prepare_model_env(
         &self,
+        service: &LocalService,
         paths: &TrainingPaths,
         task_id: i64,
         log_dir: &Path,
@@ -286,7 +300,93 @@ impl VoxCpm2ModelTaskPipeline {
             init_script_args,
             TrainingCommandLabel::InitTaskRuntime,
         )
-        .await
+        .await?;
+
+        if self.training_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
+            info!(
+                base_model = %paths.base_model,
+                training_mode = %runtime.mode_label(&paths.base_model)?,
+                "base model is already marked as downloaded; skipping download-models stage"
+            );
+            self.validate_prepared_model_downloads(paths)?;
+            return Ok(());
+        }
+
+        let mut download_script_args =
+            vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(vox_cpm2_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
+
+        self.run_training_script(
+            &paths.download_models_script_path,
+            &paths.src_model_root,
+            task_id,
+            log_dir,
+            download_script_args,
+            TrainingCommandLabel::DownloadModels,
+        )
+        .await?;
+
+        self.validate_prepared_model_downloads(paths)?;
+        self.mark_training_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
+
+        Ok(())
+    }
+
+    fn training_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
+        let config = load_configs()
+            .context("failed to load config.toml before checking base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+
+        Ok(config
+            .prepared_base_models()
+            .iter()
+            .any(|prepared| prepared == &variant_key || prepared == base_model))
+    }
+
+    fn mark_training_base_model_downloaded(
+        &self,
+        _service: &LocalService,
+        _base_model: &str,
+        model_scale: &str,
+    ) -> Result<()> {
+        let mut config = load_configs()
+            .context("failed to load config.toml before updating prepared base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+        if config
+            .training
+            .prepared_base_models
+            .iter()
+            .any(|prepared| prepared == &variant_key)
+        {
+            return Ok(());
+        }
+
+        config.training.prepared_base_models.push(variant_key);
+
+        save_configs(&config)
+            .context("failed to persist training.prepared_base_models to config.toml")
+    }
+
+    fn validate_prepared_model_downloads(&self, paths: &TrainingPaths) -> Result<()> {
+        let mut missing_paths = Vec::new();
+
+        for path in vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+            if !path.exists() {
+                missing_paths.push(path.display().to_string());
+            }
+        }
+
+        if missing_paths.is_empty() {
+            return Ok(());
+        }
+
+        bail!(
+            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            missing_paths.join(", ")
+        )
     }
 
     async fn normalize_training_audio_inputs(

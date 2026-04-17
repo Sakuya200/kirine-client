@@ -10,8 +10,10 @@ def ensure_src_root_on_path() -> None:
         sys.path.insert(0, src_root_str)
 
 
+ensure_src_root_on_path()
+
+
 def resolve_training_module(argv: list[str] | None = None):
-    ensure_src_root_on_path()
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--use-lora",

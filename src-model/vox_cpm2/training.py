@@ -9,6 +9,16 @@ from pathlib import Path
 
 import yaml
 
+
+def ensure_src_root_on_path() -> None:
+    src_root = Path(__file__).resolve().parents[1]
+    src_root_str = str(src_root)
+    if src_root_str not in sys.path:
+        sys.path.insert(0, src_root_str)
+
+
+ensure_src_root_on_path()
+
 from vox_cpm2 import RUNTIME_METADATA_FILE_NAME
 
 LORA_DEFAULTS = {

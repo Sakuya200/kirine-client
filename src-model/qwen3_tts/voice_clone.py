@@ -1,7 +1,18 @@
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from types import SimpleNamespace
+
+
+def ensure_src_root_on_path() -> None:
+    src_root = Path(__file__).resolve().parents[1]
+    src_root_str = str(src_root)
+    if src_root_str not in sys.path:
+        sys.path.insert(0, src_root_str)
+
+
+ensure_src_root_on_path()
 
 
 @dataclass

@@ -13,7 +13,7 @@ use crate::{
         local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
         task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
     },
-    config::{load_configs, BaseModel, HardwareType},
+    config::{load_configs, save_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{task_history as task_history_entity, tts_task as tts_task_entity},
@@ -39,7 +39,11 @@ use crate::{
     Result,
 };
 
-use super::{VoxCpm2ModelTaskPipeline, VOX_CPM2_RUNTIME_METADATA_FILE_NAME};
+use super::{
+    vox_cpm2_download_script_args, vox_cpm2_prepared_model_download_paths,
+    vox_cpm2_prepared_variant_key, VoxCpm2ModelTaskPipeline,
+    VOX_CPM2_RUNTIME_METADATA_FILE_NAME,
+};
 
 #[derive(Debug, Clone, Copy)]
 struct TtsRuntimeOptions {
@@ -75,9 +79,11 @@ impl TtsRuntimeOptions {
 #[derive(Debug)]
 struct TtsPaths {
     base_model: BaseModel,
+    model_scale: String,
     src_model_root: PathBuf,
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
+    download_models_script_path: PathBuf,
     tts_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
 }
@@ -85,6 +91,7 @@ struct TtsPaths {
 #[derive(Debug)]
 struct TtsTaskExecution {
     base_model: BaseModel,
+    model_scale: String,
     model_path: String,
     format: TextToSpeechFormat,
     text: String,
@@ -96,6 +103,7 @@ struct TtsTaskExecution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TtsCommandLabel {
     InitTaskRuntime,
+    DownloadModels,
     RunInference,
     ConvertAudio,
 }
@@ -104,6 +112,7 @@ impl TtsCommandLabel {
     const fn as_str(self) -> &'static str {
         match self {
             Self::InitTaskRuntime => "initialize voxcpm2 tts runtime",
+            Self::DownloadModels => "download voxcpm2 base models",
             Self::RunInference => "run voxcpm2 tts inference",
             Self::ConvertAudio => "convert voxcpm2 audio",
         }
@@ -123,11 +132,11 @@ impl VoxCpm2ModelTaskPipeline {
             let params = self
                 .load_tts_task_execution(service, request.task_id)
                 .await?;
-            let paths = self.resolve_tts_paths(service, &params.base_model)?;
+            let paths = self.resolve_tts_paths(service, &params.base_model, &params.model_scale)?;
             let log_dir = resolve_local_log_dir()?;
             let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
 
-            self.prepare_tts_env(&paths, request.task_id, &log_dir, runtime)
+            self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
             self.validate_tts_environment(&paths, &params)?;
 
@@ -211,6 +220,7 @@ impl VoxCpm2ModelTaskPipeline {
 
         Ok(TtsTaskExecution {
             base_model: task_detail.base_model,
+            model_scale: task_detail.model_scale.trim().to_string(),
             model_path: resolve_runtime_model_path(
                 Path::new(service.model_dir()),
                 &src_model_root,
@@ -234,12 +244,19 @@ impl VoxCpm2ModelTaskPipeline {
         })
     }
 
-    fn resolve_tts_paths(&self, service: &LocalService, base_model: &str) -> Result<TtsPaths> {
+    fn resolve_tts_paths(
+        &self,
+        service: &LocalService,
+        base_model: &str,
+        model_scale: &str,
+    ) -> Result<TtsPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path =
             src_model_root.join(platform.init_task_runtime_relative_path());
+        let download_models_script_path =
+            src_model_root.join(platform.download_models_relative_path());
         let tts_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
         let ffmpeg_python_script_path =
@@ -247,9 +264,11 @@ impl VoxCpm2ModelTaskPipeline {
 
         Ok(TtsPaths {
             base_model: base_model.to_string(),
+            model_scale: model_scale.to_string(),
             src_model_root,
             venv_python_path,
             init_task_runtime_script_path,
+            download_models_script_path,
             tts_python_script_path,
             ffmpeg_python_script_path,
         })
@@ -257,6 +276,7 @@ impl VoxCpm2ModelTaskPipeline {
 
     async fn prepare_tts_env(
         &self,
+        service: &LocalService,
         paths: &TtsPaths,
         task_id: i64,
         log_dir: &Path,
@@ -275,7 +295,93 @@ impl VoxCpm2ModelTaskPipeline {
             init_script_args,
             TtsCommandLabel::InitTaskRuntime,
         )
-        .await
+        .await?;
+
+        if self.tts_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
+            info!(
+                base_model = %paths.base_model,
+                training_mode = %runtime.mode_label(&paths.base_model)?,
+                "base model is already marked as downloaded; skipping download-models stage"
+            );
+            self.validate_prepared_tts_downloads(paths)?;
+            return Ok(());
+        }
+
+        let mut download_script_args =
+            vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(vox_cpm2_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
+
+        self.run_tts_stage_script(
+            &paths.download_models_script_path,
+            &paths.src_model_root,
+            task_id,
+            log_dir,
+            download_script_args,
+            TtsCommandLabel::DownloadModels,
+        )
+        .await?;
+
+        self.validate_prepared_tts_downloads(paths)?;
+        self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
+
+        Ok(())
+    }
+
+    fn tts_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
+        let config = load_configs()
+            .context("failed to load config.toml before checking tts base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+
+        Ok(config
+            .prepared_base_models()
+            .iter()
+            .any(|prepared| prepared == &variant_key || prepared == base_model))
+    }
+
+    fn mark_tts_base_model_downloaded(
+        &self,
+        _service: &LocalService,
+        _base_model: &str,
+        model_scale: &str,
+    ) -> Result<()> {
+        let mut config = load_configs()
+            .context("failed to load config.toml before updating prepared base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+        if config
+            .training
+            .prepared_base_models
+            .iter()
+            .any(|prepared| prepared == &variant_key)
+        {
+            return Ok(());
+        }
+
+        config.training.prepared_base_models.push(variant_key);
+
+        save_configs(&config)
+            .context("failed to persist training.prepared_base_models to config.toml")
+    }
+
+    fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
+        let mut missing_paths = Vec::new();
+
+        for path in vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+            if !path.exists() {
+                missing_paths.push(path.display().to_string());
+            }
+        }
+
+        if missing_paths.is_empty() {
+            return Ok(());
+        }
+
+        bail!(
+            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            missing_paths.join(", ")
+        )
     }
 
     fn validate_tts_environment(&self, paths: &TtsPaths, params: &TtsTaskExecution) -> Result<()> {
@@ -284,6 +390,10 @@ impl VoxCpm2ModelTaskPipeline {
             (
                 "VoxCPM2 init-task-runtime script",
                 &paths.init_task_runtime_script_path,
+            ),
+            (
+                "VoxCPM2 download-models script",
+                &paths.download_models_script_path,
             ),
             ("VoxCPM2 tts python script", &paths.tts_python_script_path),
             (
