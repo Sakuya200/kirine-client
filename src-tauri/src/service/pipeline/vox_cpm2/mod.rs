@@ -26,6 +26,7 @@ use crate::{
 
 pub(crate) const VOX_CPM2_DISPLAY_NAME: &str = "VoxCPM2";
 pub(crate) const VOX_CPM2_BASE_MODEL: &str = "vox_cpm2";
+pub(crate) const VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE: u32 = 16_000;
 const VOX_CPM2_MODEL_PYTHON_SCRIPT_DIR: &str = "vox_cpm2";
 const VOX_CPM2_MODEL_ARTIFACTS_DIR: &str = "base-models";
 const VOX_CPM2_MODEL_NAME: &str = "VoxCPM2";
@@ -41,8 +42,7 @@ pub(crate) static VOX_CPM2_MODEL_DEFINITION: LazyLock<LlmModelDefinition> =
 
 pub(crate) static VOX_CPM2_MODEL_PATHS: VoxCpm2ModelPaths = VoxCpm2ModelPaths;
 
-pub(crate) static VOX_CPM2_MODEL_TASK_PIPELINE: VoxCpm2ModelTaskPipeline =
-    VoxCpm2ModelTaskPipeline;
+pub(crate) static VOX_CPM2_MODEL_TASK_PIPELINE: VoxCpm2ModelTaskPipeline = VoxCpm2ModelTaskPipeline;
 
 pub(crate) struct VoxCpm2ModelPaths;
 
@@ -96,7 +96,10 @@ fn validate_vox_cpm2_model_scale(model_scale: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn vox_cpm2_base_model_path(src_model_root: &Path, model_scale: &str) -> Result<PathBuf> {
+pub(crate) fn vox_cpm2_base_model_path(
+    src_model_root: &Path,
+    model_scale: &str,
+) -> Result<PathBuf> {
     validate_vox_cpm2_model_scale(model_scale)?;
 
     Ok(src_model_root

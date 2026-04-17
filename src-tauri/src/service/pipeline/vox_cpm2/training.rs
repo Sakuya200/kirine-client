@@ -36,7 +36,7 @@ use crate::{
         },
     },
     utils::{
-        audio::{is_ogg_audio_path, resolve_normalized_wav_sidecar_path},
+        audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
         process::{run_logged_command, run_logged_python_script},
         time::now_string,
     },
@@ -46,7 +46,7 @@ use crate::{
 use super::{
     vox_cpm2_base_model_path, vox_cpm2_download_script_args,
     vox_cpm2_prepared_model_download_paths, vox_cpm2_prepared_variant_key,
-    VoxCpm2ModelTaskPipeline,
+    VoxCpm2ModelTaskPipeline, VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE,
 };
 
 #[derive(Debug)]
@@ -450,9 +450,6 @@ impl VoxCpm2ModelTaskPipeline {
         normalized_paths: &mut HashMap<String, String>,
     ) -> Result<String> {
         let input_string = input_path.to_string_lossy().to_string();
-        if !is_ogg_audio_path(input_path) {
-            return Ok(input_string);
-        }
         if let Some(normalized) = normalized_paths.get(&input_string) {
             return Ok(normalized.clone());
         }
@@ -470,14 +467,12 @@ impl VoxCpm2ModelTaskPipeline {
             TrainingCommandLabel::NormalizeAudio.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--input-path".to_string(),
-                input_path.to_string_lossy().to_string(),
-                "--output-path".to_string(),
-                output_path.to_string_lossy().to_string(),
-                "--format".to_string(),
-                "wav".to_string(),
-            ],
+            build_ffmpeg_transcode_args(
+                input_path,
+                &output_path,
+                "wav",
+                Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
         )
         .await?;
 

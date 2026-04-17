@@ -34,7 +34,10 @@ use crate::{
         },
     },
     utils::{
-        audio::{is_ogg_audio_path, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path},
+        audio::{
+            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path,
+            resolve_temp_wav_path,
+        },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
         process::{run_logged_command, run_logged_python_script},
     },
@@ -44,7 +47,7 @@ use crate::{
 use super::{
     vox_cpm2_base_model_path, vox_cpm2_download_script_args,
     vox_cpm2_prepared_model_download_paths, vox_cpm2_prepared_variant_key,
-    VoxCpm2ModelTaskPipeline,
+    VoxCpm2ModelTaskPipeline, VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -521,9 +524,6 @@ impl VoxCpm2ModelTaskPipeline {
         log_dir: &Path,
         input_path: &Path,
     ) -> Result<PathBuf> {
-        if !is_ogg_audio_path(input_path) {
-            return Ok(input_path.to_path_buf());
-        }
         let output_path = resolve_normalized_wav_sidecar_path(input_path);
         let task_log_path = task_log_file_path(
             log_dir,
@@ -538,14 +538,12 @@ impl VoxCpm2ModelTaskPipeline {
             VoiceCloneCommandLabel::NormalizeReferenceAudio.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--input-path".to_string(),
-                input_path.to_string_lossy().to_string(),
-                "--output-path".to_string(),
-                output_path.to_string_lossy().to_string(),
-                "--format".to_string(),
-                "wav".to_string(),
-            ],
+            build_ffmpeg_transcode_args(
+                input_path,
+                &output_path,
+                "wav",
+                Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
         )
         .await?;
 
@@ -583,14 +581,12 @@ impl VoxCpm2ModelTaskPipeline {
             VoiceCloneCommandLabel::ConvertAudio.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--input-path".to_string(),
-                temp_wav_path.to_string_lossy().to_string(),
-                "--output-path".to_string(),
-                final_output_path.to_string_lossy().to_string(),
-                "--format".to_string(),
-                format.as_str().to_string(),
-            ],
+            build_ffmpeg_transcode_args(
+                temp_wav_path,
+                final_output_path,
+                format.as_str(),
+                Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
         )
         .await?;
         remove_file_if_exists(temp_wav_path, "temporary voxcpm2 voice clone wav file")?;

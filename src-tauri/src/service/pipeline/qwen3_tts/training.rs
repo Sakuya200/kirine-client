@@ -43,12 +43,14 @@ use crate::{
         },
     },
     utils::{
-        audio::{is_ogg_audio_path, resolve_normalized_wav_sidecar_path},
+        audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
         process::{run_logged_command, run_logged_python_script},
         time::now_string,
     },
     Result,
 };
+
+use super::QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TrainingIndexEntry {
@@ -423,9 +425,6 @@ impl Qwen3TTSModelTaskPipeline {
         normalized_paths: &mut HashMap<String, String>,
     ) -> Result<String> {
         let input_string = input_path.to_string_lossy().to_string();
-        if !is_ogg_audio_path(input_path) {
-            return Ok(input_string);
-        }
         if let Some(normalized) = normalized_paths.get(&input_string) {
             return Ok(normalized.clone());
         }
@@ -443,14 +442,12 @@ impl Qwen3TTSModelTaskPipeline {
             TrainingCommandLabel::NormalizeAudio.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--input-path".to_string(),
-                input_path.to_string_lossy().to_string(),
-                "--output-path".to_string(),
-                output_path.to_string_lossy().to_string(),
-                "--format".to_string(),
-                "wav".to_string(),
-            ],
+            build_ffmpeg_transcode_args(
+                input_path,
+                &output_path,
+                "wav",
+                Some(QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
         )
         .await?;
 
@@ -504,8 +501,7 @@ impl Qwen3TTSModelTaskPipeline {
             return Ok(());
         }
 
-        let mut download_script_args =
-            vec!["--base-model".to_string(), paths.base_model.clone()];
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         download_script_args.extend(qwen3_tts_download_script_args(
             &paths.src_model_root,
             &paths.model_scale,
@@ -565,7 +561,9 @@ impl Qwen3TTSModelTaskPipeline {
     fn validate_prepared_model_downloads(&self, paths: &TrainingPaths) -> Result<()> {
         let mut missing_paths = Vec::new();
 
-        for path in qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+        for path in
+            qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
+        {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
             }

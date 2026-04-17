@@ -38,12 +38,14 @@ use crate::{
         },
     },
     utils::{
-        audio::resolve_temp_wav_path,
+        audio::{build_ffmpeg_transcode_args, resolve_temp_wav_path},
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
         process::{run_logged_command, run_logged_python_script},
     },
     Result,
 };
+
+use super::QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE;
 
 #[derive(Debug, Clone, Copy)]
 struct TtsRuntimeOptions {
@@ -527,14 +529,12 @@ impl Qwen3TTSModelTaskPipeline {
         final_output_path: &Path,
         format: TextToSpeechFormat,
     ) -> Result<()> {
-        let script_args = vec![
-            "--input-path".to_string(),
-            input_wav_path.to_string_lossy().to_string(),
-            "--output-path".to_string(),
-            final_output_path.to_string_lossy().to_string(),
-            "--format".to_string(),
-            format.as_str().to_string(),
-        ];
+        let script_args = build_ffmpeg_transcode_args(
+            input_wav_path,
+            final_output_path,
+            format.as_str(),
+            Some(QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE),
+        );
 
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
 
