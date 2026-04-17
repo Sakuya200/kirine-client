@@ -3,16 +3,27 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
-$venvDir = Join-Path $srcModelRoot 'venv'
-$venvPython = Join-Path $venvDir 'Scripts\python.exe'
+$modelRoot = $null
+$venvDir = $null
+$venvPython = $null
 
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--model-id-list', '--model-name-list', '--target-root-dir', '--log-path', '--task-log-file') -ActionName 'download-models'
+    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--model-id-list', '--model-name-list', '--target-root-dir', '--log-path', '--task-log-file') -ActionName 'download-models'
 }
 catch {
     Write-Error $_.Exception.Message
     exit 64
 }
+
+$baseModel = $parsed['--base-model']
+if ([string]::IsNullOrWhiteSpace($baseModel)) {
+    Write-Error 'Missing --base-model argument.'
+    exit 64
+}
+
+$modelRoot = Join-Path $srcModelRoot $baseModel
+$venvDir = Join-Path $modelRoot 'venv'
+$venvPython = Join-Path $venvDir 'Scripts\python.exe'
 
 $modelIdListJson = $parsed['--model-id-list']
 $modelNameListJson = $parsed['--model-name-list']

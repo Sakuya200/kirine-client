@@ -15,7 +15,6 @@ pub(crate) trait LlmModelPaths: Send + Sync {
 
     fn python_script_path(&self, src_model_root: &Path, script_name: &str) -> PathBuf {
         src_model_root
-            .join("src")
             .join(self.definition().python_script_dir)
             .join(script_name)
     }

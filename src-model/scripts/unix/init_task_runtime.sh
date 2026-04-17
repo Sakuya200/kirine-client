@@ -3,14 +3,20 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 SRC_MODEL_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-REQUIREMENTS_FILE="$SRC_MODEL_ROOT/requirements.txt"
-VENV_DIR="$SRC_MODEL_ROOT/venv"
-VENV_PYTHON="$VENV_DIR/bin/python"
+BASE_MODEL=""
+MODEL_ROOT=""
+REQUIREMENTS_FILE=""
+VENV_DIR=""
+VENV_PYTHON=""
 CPU_MODE=0
 TASK_LOG_FILE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --base-model)
+            BASE_MODEL=$2
+            shift 2
+            ;;
         --requirements-file)
             REQUIREMENTS_FILE=$2
             shift 2
@@ -32,6 +38,18 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$BASE_MODEL" ]; then
+    echo "init-task-runtime requires --base-model." >&2
+    exit 64
+fi
+
+MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
+if [ -z "$REQUIREMENTS_FILE" ]; then
+    REQUIREMENTS_FILE="$MODEL_ROOT/requirements.txt"
+fi
+VENV_DIR="$MODEL_ROOT/venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 ensure_task_log_file() {
     if [ -z "$TASK_LOG_FILE" ]; then

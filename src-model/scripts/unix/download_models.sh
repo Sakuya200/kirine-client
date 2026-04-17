@@ -3,8 +3,10 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 SRC_MODEL_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-VENV_DIR="$SRC_MODEL_ROOT/venv"
-VENV_PYTHON="$VENV_DIR/bin/python"
+BASE_MODEL=""
+MODEL_ROOT=""
+VENV_DIR=""
+VENV_PYTHON=""
 TASK_LOG_FILE=""
 MODEL_ID_LIST_JSON=""
 MODEL_NAME_LIST_JSON=""
@@ -12,6 +14,10 @@ TARGET_ROOT_DIR=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --base-model)
+            BASE_MODEL=$2
+            shift 2
+            ;;
         --model-id-list)
             MODEL_ID_LIST_JSON=$2
             shift 2
@@ -37,6 +43,15 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$BASE_MODEL" ]; then
+    echo "download-models requires --base-model." >&2
+    exit 64
+fi
+
+MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
+VENV_DIR="$MODEL_ROOT/venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 ensure_task_log_file() {
     if [ -z "$TASK_LOG_FILE" ]; then

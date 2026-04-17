@@ -4,8 +4,6 @@ use anyhow::{bail, Context, Result};
 
 use crate::service::pipeline::model_paths::llm_model_paths;
 
-const SRC_MODEL_PYTHON_ROOT_DIR: &str = "src";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScriptPlatform {
     Windows,
@@ -72,11 +70,10 @@ impl ScriptPlatform {
 
 pub(crate) fn src_model_shared_python_script_path(
     src_model_root: &Path,
+    base_model: &str,
     script_name: &str,
 ) -> PathBuf {
-    src_model_root
-        .join(SRC_MODEL_PYTHON_ROOT_DIR)
-        .join(script_name)
+    src_model_root.join(base_model).join(script_name)
 }
 
 pub(crate) fn src_model_model_python_script_path(
@@ -87,8 +84,10 @@ pub(crate) fn src_model_model_python_script_path(
     Ok(llm_model_paths(base_model)?.python_script_path(src_model_root, script_name))
 }
 
-pub(crate) fn src_model_venv_python_path(src_model_root: &Path) -> PathBuf {
-    src_model_root.join(ScriptPlatform::current().venv_python_relative_path())
+pub(crate) fn src_model_venv_python_path(src_model_root: &Path, base_model: &str) -> PathBuf {
+    src_model_root
+        .join(base_model)
+        .join(ScriptPlatform::current().venv_python_relative_path())
 }
 
 pub(crate) fn src_model_lora_toggle_script_path(src_model_root: &Path) -> PathBuf {

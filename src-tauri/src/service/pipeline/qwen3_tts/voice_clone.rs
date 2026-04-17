@@ -235,7 +235,7 @@ impl Qwen3TTSModelTaskPipeline {
     ) -> Result<VoiceClonePaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
-        let venv_python_path = src_model_venv_python_path(&src_model_root);
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path =
             src_model_root.join(platform.init_task_runtime_relative_path());
         let download_models_script_path =
@@ -243,7 +243,7 @@ impl Qwen3TTSModelTaskPipeline {
         let voice_clone_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "voice_clone.py")?;
         let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let base_model_path = qwen3_tts_voice_clone_init_model_path(&src_model_root, model_scale)?;
 
         Ok(VoiceClonePaths {
@@ -267,7 +267,7 @@ impl Qwen3TTSModelTaskPipeline {
         log_dir: &Path,
         runtime: VoiceCloneRuntimeOptions,
     ) -> Result<()> {
-        let mut init_script_args = Vec::new();
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         if runtime.is_cpu() {
             init_script_args.push("--cpu-mode".to_string());
         }
@@ -292,8 +292,12 @@ impl Qwen3TTSModelTaskPipeline {
             return Ok(());
         }
 
-        let download_script_args =
-            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?;
+        let mut download_script_args =
+            vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(qwen3_tts_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
 
         self.run_voice_clone_stage_script(
             &paths.download_models_script_path,

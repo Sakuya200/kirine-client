@@ -26,8 +26,7 @@ output_file = Path(os.environ["OUTPUT_FILE"]).resolve()
 
 exclude_directory_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 exclude_suffixes = {".pyc", ".pyo"}
-source_directories = ("scripts", "src")
-source_files = ("requirements.txt",)
+source_directories = ("scripts", "qwen3_tts", "vox_cpm2")
 
 output_file.parent.mkdir(parents=True, exist_ok=True)
 if output_file.exists():
@@ -50,13 +49,5 @@ with ZipFile(output_file, "w", compression=ZIP_DEFLATED) as archive:
                 continue
 
             archive.write(file_path, relative_path.as_posix())
-
-    for file_name in source_files:
-        file_path = src_model_root / file_name
-        if not file_path.exists():
-            raise SystemExit(f"Source file not found: {file_path}")
-
-        archive.write(file_path, file_path.relative_to(src_model_root).as_posix())
-
 print(f"Created model runtime archive: {output_file}")
 PY

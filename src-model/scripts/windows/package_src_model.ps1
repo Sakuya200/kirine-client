@@ -40,8 +40,7 @@ function Get-RelativeArchivePath {
 
 $excludeDirectoryNames = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache')
 $excludeExtensions = @('.pyc', '.pyo')
-$sourceDirectories = @('scripts', 'src')
-$sourceFiles = @('requirements.txt')
+$sourceDirectories = @('scripts', 'qwen3_tts', 'vox_cpm2')
 
 if (Test-Path -LiteralPath $OutputFile) {
     Remove-Item -LiteralPath $OutputFile -Force
@@ -86,30 +85,6 @@ try {
                 finally {
                     $entryStream.Dispose()
                 }
-            }
-        }
-
-        foreach ($fileName in $sourceFiles) {
-            $filePath = Join-Path $srcModelRoot $fileName
-            if (-not (Test-Path -LiteralPath $filePath)) {
-                throw "Source file not found: $filePath"
-            }
-
-            $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $filePath
-            $entryPath = $relativePath -replace '\\', '/'
-            $entry = $archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
-            $entryStream = $entry.Open()
-            try {
-                $fileStream = [System.IO.File]::OpenRead($filePath)
-                try {
-                    $fileStream.CopyTo($entryStream)
-                }
-                finally {
-                    $fileStream.Dispose()
-                }
-            }
-            finally {
-                $entryStream.Dispose()
             }
         }
     }

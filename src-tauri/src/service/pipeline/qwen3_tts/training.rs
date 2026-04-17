@@ -257,13 +257,13 @@ impl Qwen3TTSModelTaskPipeline {
     ) -> Result<TrainingPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
-        let venv_python_path = src_model_venv_python_path(&src_model_root);
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path =
             src_model_root.join(platform.init_task_runtime_relative_path());
         let download_models_script_path =
             src_model_root.join(platform.download_models_relative_path());
         let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let encode_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "encode_audio.py")?;
         let train_python_script_path =
@@ -479,7 +479,7 @@ impl Qwen3TTSModelTaskPipeline {
             "preparing local model environment via required init-task-runtime and optional download-models stages"
         );
 
-        let mut init_script_args = Vec::new();
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         if runtime.is_cpu() {
             init_script_args.push("--cpu-mode".to_string());
         }
@@ -504,8 +504,12 @@ impl Qwen3TTSModelTaskPipeline {
             return Ok(());
         }
 
-        let download_script_args =
-            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?;
+        let mut download_script_args =
+            vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(qwen3_tts_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
 
         self.run_training_script(
             &paths.download_models_script_path,

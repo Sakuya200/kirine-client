@@ -20,8 +20,7 @@ use crate::{
             LocalService,
         },
         models::{
-            TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload,
-            VoxCpm2TextToSpeechModelParams,
+            TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload, VoxCpm2TextToSpeechModelParams,
         },
         pipeline::{
             model_paths::llm_model_display_name,
@@ -121,7 +120,9 @@ impl VoxCpm2ModelTaskPipeline {
 
         let result = async {
             self.mark_tts_running(service, request.task_id).await?;
-            let params = self.load_tts_task_execution(service, request.task_id).await?;
+            let params = self
+                .load_tts_task_execution(service, request.task_id)
+                .await?;
             let paths = self.resolve_tts_paths(service, &params.base_model)?;
             let log_dir = resolve_local_log_dir()?;
             let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
@@ -150,8 +151,12 @@ impl VoxCpm2ModelTaskPipeline {
             )
             .await?;
 
-            self.mark_tts_completed(service, request.task_id, started_at.elapsed().as_secs() as i64)
-                .await
+            self.mark_tts_completed(
+                service,
+                request.task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await
         }
         .await;
 
@@ -180,17 +185,28 @@ impl VoxCpm2ModelTaskPipeline {
             .filter(tts_task_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| format!("failed to load voxcpm2 tts execution params for task {}", task_id))?
+            .with_context(|| {
+                format!(
+                    "failed to load voxcpm2 tts execution params for task {}",
+                    task_id
+                )
+            })?
             .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 TTS 任务执行参数: {}", task_id))?;
 
         task_history_entity::Entity::find_by_id(task_id)
             .filter(task_history_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| format!("failed to load voxcpm2 tts task history for task {}", task_id))?
+            .with_context(|| {
+                format!(
+                    "failed to load voxcpm2 tts task history for task {}",
+                    task_id
+                )
+            })?
             .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 TTS 历史任务记录: {}", task_id))?;
 
-        let params = serde_json::from_str::<VoxCpm2TextToSpeechModelParams>(&task_detail.model_params_json)?;
+        let params =
+            serde_json::from_str::<VoxCpm2TextToSpeechModelParams>(&task_detail.model_params_json)?;
         let src_model_root = resolve_src_model_root(service.app_dir())?;
 
         Ok(TtsTaskExecution {
@@ -211,10 +227,7 @@ impl VoxCpm2ModelTaskPipeline {
             inference_timesteps: params.inference_timesteps,
             output_file_path: resolve_task_path(
                 Path::new(service.data_dir()),
-                &task_detail
-                    .output_file_path
-                    .clone()
-                    .unwrap_or_default(),
+                &task_detail.output_file_path.clone().unwrap_or_default(),
             )
             .to_string_lossy()
             .to_string(),
@@ -224,10 +237,13 @@ impl VoxCpm2ModelTaskPipeline {
     fn resolve_tts_paths(&self, service: &LocalService, base_model: &str) -> Result<TtsPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
-        let venv_python_path = src_model_venv_python_path(&src_model_root);
-        let init_task_runtime_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
-        let tts_python_script_path = src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
-        let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
+        let init_task_runtime_script_path =
+            src_model_root.join(platform.init_task_runtime_relative_path());
+        let tts_python_script_path =
+            src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
+        let ffmpeg_python_script_path =
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
 
         Ok(TtsPaths {
             base_model: base_model.to_string(),
@@ -246,7 +262,7 @@ impl VoxCpm2ModelTaskPipeline {
         log_dir: &Path,
         runtime: TtsRuntimeOptions,
     ) -> Result<()> {
-        let mut init_script_args = Vec::new();
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         if runtime.is_cpu() {
             init_script_args.push("--cpu-mode".to_string());
         }
@@ -265,9 +281,15 @@ impl VoxCpm2ModelTaskPipeline {
     fn validate_tts_environment(&self, paths: &TtsPaths, params: &TtsTaskExecution) -> Result<()> {
         for (label, path) in [
             ("VoxCPM2 tts venv python", &paths.venv_python_path),
-            ("VoxCPM2 init-task-runtime script", &paths.init_task_runtime_script_path),
+            (
+                "VoxCPM2 init-task-runtime script",
+                &paths.init_task_runtime_script_path,
+            ),
             ("VoxCPM2 tts python script", &paths.tts_python_script_path),
-            ("VoxCPM2 ffmpeg python script", &paths.ffmpeg_python_script_path),
+            (
+                "VoxCPM2 ffmpeg python script",
+                &paths.ffmpeg_python_script_path,
+            ),
         ] {
             if !path.exists() {
                 bail!("{} not found: {}", label, path.display());
@@ -300,7 +322,11 @@ impl VoxCpm2ModelTaskPipeline {
             "starting local voxcpm2 tts inference through direct python invocation"
         );
 
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::TextToSpeech, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
         run_logged_python_script(
@@ -330,7 +356,10 @@ impl VoxCpm2ModelTaskPipeline {
         .await?;
 
         if !temp_wav_path.exists() {
-            bail!("VoxCPM2 output file not found after inference: {}", temp_wav_path.display());
+            bail!(
+                "VoxCPM2 output file not found after inference: {}",
+                temp_wav_path.display()
+            );
         }
 
         Ok(())
@@ -351,7 +380,11 @@ impl VoxCpm2ModelTaskPipeline {
             return Ok(());
         }
 
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::TextToSpeech, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -385,7 +418,11 @@ impl VoxCpm2ModelTaskPipeline {
         label: TtsCommandLabel,
     ) -> Result<()> {
         let platform = ScriptPlatform::current();
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::TextToSpeech, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
         let mut args = platform.shell_args(script_path);
         args.push("--log-path".to_string());
         args.push(log_dir.to_string_lossy().to_string());
@@ -416,7 +453,12 @@ impl VoxCpm2ModelTaskPipeline {
         Ok(())
     }
 
-    async fn mark_tts_completed(&self, service: &LocalService, task_id: i64, duration_seconds: i64) -> Result<()> {
+    async fn mark_tts_completed(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        duration_seconds: i64,
+    ) -> Result<()> {
         service
             .update_task_status_impl(UpdateTaskStatusPayload {
                 task_id,
@@ -449,10 +491,16 @@ impl VoxCpm2ModelTaskPipeline {
 
 pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<PathBuf> {
     if !model_root_path.exists() {
-        bail!("VoxCPM2 model root path not found: {}", model_root_path.display());
+        bail!(
+            "VoxCPM2 model root path not found: {}",
+            model_root_path.display()
+        );
     }
 
-    if model_root_path.join(VOX_CPM2_RUNTIME_METADATA_FILE_NAME).exists() {
+    if model_root_path
+        .join(VOX_CPM2_RUNTIME_METADATA_FILE_NAME)
+        .exists()
+    {
         return Ok(model_root_path.to_path_buf());
     }
 
@@ -461,7 +509,12 @@ pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<Pat
     }
 
     let mut checkpoint_dirs = fs::read_dir(model_root_path)
-        .with_context(|| format!("failed to inspect voxcpm2 model root: {}", model_root_path.display()))?
+        .with_context(|| {
+            format!(
+                "failed to inspect voxcpm2 model root: {}",
+                model_root_path.display()
+            )
+        })?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             let file_type = entry.file_type().ok()?;

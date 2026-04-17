@@ -226,9 +226,9 @@ impl VoxCpm2ModelTaskPipeline {
     ) -> Result<TrainingPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
-        let venv_python_path = src_model_venv_python_path(&src_model_root);
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
-        let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+        let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let train_python_script_path = src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
         let init_model_path = vox_cpm2_base_model_path(&src_model_root, model_scale)?;
         let resource_name = format!("{}_{}", speaker_id, crate::service::local::sanitize_path_segment(speaker_name));
@@ -273,7 +273,7 @@ impl VoxCpm2ModelTaskPipeline {
         log_dir: &Path,
         runtime: TrainingRuntimeOptions,
     ) -> Result<()> {
-        let mut init_script_args = Vec::new();
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         if runtime.is_cpu() {
             init_script_args.push("--cpu-mode".to_string());
         }

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import BaseListbox from '../common/BaseListbox.vue';
+
 interface Props {
   modelValue: Record<string, unknown>;
 }
@@ -21,6 +23,11 @@ const trainingMode = computed({
   get: () => String(props.modelValue.trainingMode ?? 'lora'),
   set: value => updateValue('trainingMode', value)
 });
+
+const trainingModeOptions = [
+  { label: 'LoRA 微调', value: 'lora' },
+  { label: '全量微调', value: 'full' }
+];
 
 const epochCount = computed({
   get: () => Number(props.modelValue.epochCount ?? 2),
@@ -47,10 +54,7 @@ const enableGradientCheckpointing = computed({
   <div class="space-y-3 text-sm text-slate-700">
     <label class="block">
       <span class="mb-1 block text-xs text-stone-500">微调模式</span>
-      <select v-model="trainingMode" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2">
-        <option value="lora">LoRA 微调</option>
-        <option value="full">全量微调</option>
-      </select>
+      <BaseListbox v-model="trainingMode" :options="trainingModeOptions" />
     </label>
 
     <div class="grid gap-3 md:grid-cols-2">

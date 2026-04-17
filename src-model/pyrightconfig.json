@@ -1,14 +1,16 @@
 {
-  "venvPath": ".",
-  "venv": "venv",
-  "include": ["src"],
-  "exclude": ["venv", "**/__pycache__", "**/node_modules", "**/.*"],
-  "extraPaths": ["src"],
+  "include": ["qwen3_tts", "vox_cpm2"],
+  "exclude": ["venv", "qwen3_tts/venv", "vox_cpm2/venv", "**/__pycache__", "**/node_modules", "**/.*"],
+  "extraPaths": ["."],
   "typeCheckingMode": "basic",
   "executionEnvironments": [
     {
-      "root": "src",
-      "extraPaths": ["src"]
+      "root": "qwen3_tts",
+      "extraPaths": ["."]
+    },
+    {
+      "root": "vox_cpm2",
+      "extraPaths": ["."]
     }
   ]
 }

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import BaseListbox from '../common/BaseListbox.vue';
+
 interface Props {
   modelValue: Record<string, unknown>;
 }
@@ -22,6 +24,11 @@ const mode = computed({
   set: value => updateValue('mode', value)
 });
 
+const modeOptions = [
+  { label: '参考音频克隆', value: 'reference' },
+  { label: 'Ultimate 克隆', value: 'ultimate' }
+];
+
 const stylePrompt = computed({
   get: () => String(props.modelValue.stylePrompt ?? ''),
   set: value => updateValue('stylePrompt', value)
@@ -42,10 +49,7 @@ const inferenceTimesteps = computed({
   <div class="space-y-3 text-sm text-slate-700">
     <label class="block">
       <span class="mb-1 block text-xs text-stone-500">克隆模式</span>
-      <select v-model="mode" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2">
-        <option value="reference">参考音频克隆</option>
-        <option value="ultimate">Ultimate 克隆</option>
-      </select>
+      <BaseListbox v-model="mode" :options="modeOptions" />
     </label>
 
     <label class="block">

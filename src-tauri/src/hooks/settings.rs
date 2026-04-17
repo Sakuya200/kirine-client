@@ -7,8 +7,9 @@ use crate::config::{
     load_configs, resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation,
     BasicConfig, EnvConfig, HardwareType, LoraMode, RemoteConfig,
 };
-use crate::service::pipeline::script_paths::{
-    resolve_src_model_root, src_model_lora_toggle_script_path, ScriptPlatform,
+use crate::service::pipeline::{
+    qwen3_tts::QWEN3_TTS_BASE_MODEL,
+    script_paths::{resolve_src_model_root, src_model_lora_toggle_script_path, ScriptPlatform},
 };
 use crate::utils::file_ops::migrate_directory;
 use crate::utils::process::run_logged_command;
@@ -88,6 +89,8 @@ fn sync_lora_runtime_dependencies(
     let task_log_path = log_dir.join("settings").join("lora_dependency_sync.log");
     let platform = ScriptPlatform::current();
     let mut args = platform.shell_args(&script_path);
+    args.push("--base-model".to_string());
+    args.push(QWEN3_TTS_BASE_MODEL.to_string());
     args.push("--task-log-file".to_string());
     args.push(task_log_path.to_string_lossy().to_string());
     args.push("--mode".to_string());

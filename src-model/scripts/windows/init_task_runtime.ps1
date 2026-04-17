@@ -3,17 +3,29 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
-$requirementsFile = Join-Path $srcModelRoot 'requirements.txt'
-$venvDir = Join-Path $srcModelRoot 'venv'
-$venvPython = Join-Path $venvDir 'Scripts\python.exe'
+$modelRoot = $null
+$requirementsFile = $null
+$venvDir = $null
+$venvPython = $null
 
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--requirements-file', '--log-path', '--task-log-file') -SwitchOptions @('--cpu-mode') -ActionName 'init-task-runtime'
+    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--requirements-file', '--log-path', '--task-log-file') -SwitchOptions @('--cpu-mode') -ActionName 'init-task-runtime'
 }
 catch {
     Write-Error $_.Exception.Message
     exit 64
 }
+
+$baseModel = $parsed['--base-model']
+if ([string]::IsNullOrWhiteSpace($baseModel)) {
+    Write-Error 'Missing --base-model argument.'
+    exit 64
+}
+
+$modelRoot = Join-Path $srcModelRoot $baseModel
+$requirementsFile = Join-Path $modelRoot 'requirements.txt'
+$venvDir = Join-Path $modelRoot 'venv'
+$venvPython = Join-Path $venvDir 'Scripts\python.exe'
 
 if (-not [string]::IsNullOrWhiteSpace($parsed['--requirements-file'])) {
     $requirementsFile = $parsed['--requirements-file']
