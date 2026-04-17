@@ -41,7 +41,9 @@ impl LocalService {
             bail!("目标台词不能为空");
         }
         if base_model == "vox_cpm2" {
-            let params = serde_json::from_value::<VoxCpm2VoiceCloneModelParams>(payload.model_params.clone())?;
+            let params = serde_json::from_value::<VoxCpm2VoiceCloneModelParams>(
+                payload.model_params.clone(),
+            )?;
             if matches!(params.mode, VoxCpm2VoiceCloneMode::Ultimate) && ref_text.is_empty() {
                 bail!("Ultimate 克隆模式要求填写参考音频台词");
             }
@@ -64,7 +66,8 @@ impl LocalService {
             payload.ref_audio_name.trim().to_string()
         };
         let model_scale = payload.model_scale.trim().to_string();
-        let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
+        let export_audio_name =
+            super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
         let char_count = text.chars().count();
         let speaker_snapshot = "-";
         let title = super::build_task_title("声音克隆", None, &create_time);
@@ -92,7 +95,7 @@ impl LocalService {
             HistoryTaskType::VoiceClone,
             task_id,
         )?;
-        let file_name = format!("{}_{}.{}", export_audio_name, task_id, payload.format.as_str());
+        let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let ref_audio_target_path =
             sample_dir.join(super::build_task_audio_file_name(&resolved_ref_audio_path));

@@ -10,11 +10,11 @@ api_token = ""
 
 [training]
 prepared_base_models = [
-    "qwen3_tts:0.6B",
     "qwen3_tts:1.7B",
+    "qwen3_tts:0.6B",
     "vox_cpm2:2B",
 ]
-hardware_type = "cpu"
+hardware_type = "cuda"
 attn_implementation = "sdpa"
 lora_mode = "disabled"
 lora_rank = 16

@@ -141,12 +141,7 @@ impl LocalService {
             HistoryTaskType::TextToSpeech,
             task_id,
         )?;
-        let file_name = format!(
-            "{}_{}.{}",
-            export_audio_name,
-            task_id,
-            payload.format.as_str()
-        );
+        let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
         let serialized_model_path = serialize_runtime_model_path(
