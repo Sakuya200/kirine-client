@@ -22,6 +22,7 @@ import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import Qwen3TtsTrainingParamsForm from '@/components/qwen3_tts/Qwen3TtsTrainingParamsForm.vue';
+import VoxCpm2TrainingParamsForm from '@/components/vox_cpm2/VoxCpm2TrainingParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -69,17 +70,32 @@ interface ModelTrainingTaskResultPayload {
   status: TaskStatus;
 }
 
+const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+
+const createQwen3TrainingParams = () => ({
+  epochCount: 30,
+  batchSize: 8,
+  gradientAccumulationSteps: 4,
+  enableGradientCheckpointing: false
+});
+
+const createVoxCpm2TrainingParams = () => ({
+  trainingMode: 'lora',
+  epochCount: 2,
+  batchSize: 4,
+  gradientAccumulationSteps: 1,
+  enableGradientCheckpointing: false
+});
+
+const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
+  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2TrainingParams(), ...modelParams } : { ...createQwen3TrainingParams(), ...modelParams };
+
 const form = reactive({
   language: AppLanguage.Chinese,
-  baseModel: 'qwen3_tts',
-  modelScale: '1.7B',
+  baseModel: '',
+  modelScale: '',
   modelName: 'speaker_a_custom',
-  modelParams: {
-    epochCount: 30,
-    batchSize: 8,
-    gradientAccumulationSteps: 4,
-    enableGradientCheckpointing: false
-  } as Record<string, unknown>,
+  modelParams: createQwen3TrainingParams() as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
@@ -113,7 +129,9 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel as never));
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const activeTrainingParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : Qwen3TtsTrainingParamsForm));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -168,7 +186,7 @@ watch(
     }
 
     if (!options.some(option => option.value === form.baseModel)) {
-      form.baseModel = String(options[0]?.value ?? 'qwen3_tts');
+      form.baseModel = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -185,6 +203,14 @@ watch(
     if (!options.some(option => option.value === form.modelScale)) {
       form.modelScale = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => form.baseModel,
+  nextBaseModel => {
+    form.modelParams = normalizeTrainingModelParams(nextBaseModel, form.modelParams);
   },
   { immediate: true }
 );
@@ -333,15 +359,10 @@ const removeImportedSample = (sampleId: number) => {
 
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
-  form.baseModel = String(modelOptions.value[0]?.value ?? 'qwen3_tts');
-  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '1.7B');
+  form.baseModel = String(modelOptions.value[0]?.value ?? '');
+  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '');
   form.modelName = 'speaker_a_custom';
-  form.modelParams = {
-    epochCount: 30,
-    batchSize: 8,
-    gradientAccumulationSteps: 4,
-    enableGradientCheckpointing: false
-  };
+  form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -376,7 +397,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.baseModel = record.detail.baseModel;
   form.modelScale = record.detail.modelScale;
   form.modelName = record.detail.modelName;
-  form.modelParams = { ...record.detail.modelParams };
+  form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -512,7 +533,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel as never)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
+      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -698,12 +719,13 @@ onBeforeUnmount(() => {
             />
             <div>
               <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-              <Qwen3TtsTrainingParamsForm class="mt-4" v-model="form.modelParams" />
+              <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" />
             </div>
             <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>训练摘要</p>
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-              <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel as never) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+              <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+              <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.trainingMode === 'full' ? '全量微调' : 'LoRA 微调' }}。</p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
               <p class="mt-1">
                 当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点

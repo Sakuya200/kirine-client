@@ -7,7 +7,6 @@ use sea_orm::{
 
 use crate::{
     common::local_paths::resolve_task_path,
-    config::BaseModel,
     service::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
@@ -334,10 +333,7 @@ impl LocalService {
 
         Ok(serde_json::to_value(TextToSpeechTaskDetail {
             speaker_id: row.speaker_id,
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
             model_scale: row.model_scale,
             language: row
                 .language
@@ -375,10 +371,7 @@ impl LocalService {
                 .language
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
             model_scale: row.model_scale,
             model_name: row.model_name,
             model_params: serde_json::from_str(&row.model_params_json)?,
@@ -400,10 +393,7 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到声音克隆任务详情"))?;
 
         Ok(serde_json::to_value(VoiceCloneTaskDetail {
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
             model_scale: row.model_scale,
             language: row
                 .language

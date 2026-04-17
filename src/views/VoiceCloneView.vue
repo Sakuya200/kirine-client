@@ -15,6 +15,7 @@ import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import Qwen3TtsVoiceCloneParamsForm from '@/components/qwen3_tts/Qwen3TtsVoiceCloneParamsForm.vue';
+import VoxCpm2VoiceCloneParamsForm from '@/components/vox_cpm2/VoxCpm2VoiceCloneParamsForm.vue';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
@@ -75,20 +76,34 @@ interface SelectedAudioFile {
   filePath: string;
 }
 
+const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+
+const createQwen3VoiceCloneParams = () => ({});
+
+const createVoxCpm2VoiceCloneParams = () => ({
+  mode: 'reference',
+  stylePrompt: '',
+  cfgValue: 2.0,
+  inferenceTimesteps: 10
+});
+
+const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
+  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2VoiceCloneParams(), ...modelParams } : { ...createQwen3VoiceCloneParams(), ...modelParams };
+
 const uiStore = useUiStore();
 const modelStore = useModelStore();
 const route = useRoute();
 const router = useRouter();
 const form = reactive({
-  baseModel: 'qwen3_tts',
-  modelScale: '1.7B',
+  baseModel: '',
+  modelScale: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   exportAudioName: 'kirine_voice_clone',
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
-  modelParams: {} as Record<string, unknown>
+  modelParams: createQwen3VoiceCloneParams() as Record<string, unknown>
 });
 const languageOptions = Object.values(AppLanguage).map(value => ({
   label: APP_LANGUAGE_LABELS[value],
@@ -116,13 +131,30 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel as never));
-const canGenerate = computed(() => Boolean(form.refAudioFile) && Boolean(trimmedRefText.value) && Boolean(trimmedText.value) && !isGenerating.value);
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const currentCloneMode = computed(() => String(form.modelParams.mode ?? 'reference'));
+const requiresReferenceText = computed(() => !isVoxCpm2Model.value || currentCloneMode.value === 'ultimate');
+const activeVoiceCloneParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2VoiceCloneParamsForm : Qwen3TtsVoiceCloneParamsForm));
+const canGenerate = computed(
+  () =>
+    Boolean(form.baseModel) &&
+    Boolean(form.modelScale) &&
+    Boolean(form.refAudioFile) &&
+    (!requiresReferenceText.value || Boolean(trimmedRefText.value)) &&
+    Boolean(trimmedText.value) &&
+    !isGenerating.value
+);
 const cloneSummary = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel as never)} ${form.modelScale}。`,
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
+  isVoxCpm2Model.value
+    ? `当前克隆模式为 ${currentCloneMode.value === 'ultimate' ? 'Ultimate 克隆' : '参考音频克隆'}。`
+    : '当前克隆模式为参考音频 + 参考台词克隆。',
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
-  `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`,
+  requiresReferenceText.value
+    ? `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
+    : `当前模式不要求参考台词，目标台词 ${charCount.value} 字。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_voice_clone'}。`
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
@@ -153,7 +185,7 @@ watch(
     }
 
     if (!options.some(option => option.value === form.baseModel)) {
-      form.baseModel = String(options[0]?.value ?? 'qwen3_tts');
+      form.baseModel = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -170,6 +202,14 @@ watch(
     if (!options.some(option => option.value === form.modelScale)) {
       form.modelScale = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => form.baseModel,
+  nextBaseModel => {
+    form.modelParams = normalizeVoiceCloneModelParams(nextBaseModel, form.modelParams);
   },
   { immediate: true }
 );
@@ -247,7 +287,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   };
   form.refText = result.refText;
   form.text = result.text;
-  form.modelParams = { ...result.modelParams };
+  form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   uiStore.notifyInfo(notifyMessage, 2800);
 };
 
@@ -490,12 +530,12 @@ onBeforeUnmount(() => {
           </label>
 
           <label class="block md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">参考台词</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ requiresReferenceText ? '参考台词' : '参考台词（当前模式可选）' }}</span>
             <textarea
               v-model="form.refText"
               rows="4"
               class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-              placeholder="填写参考音频中实际说出的文本"
+              :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : 'Ultimate 模式需要与参考音频逐字对应的文本；当前模式可留空'"
             />
           </label>
 
@@ -515,7 +555,7 @@ onBeforeUnmount(() => {
 
         <div class="mt-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <Qwen3TtsVoiceCloneParamsForm class="mt-4" v-model="form.modelParams" />
+          <component :is="activeVoiceCloneParamsComponent" class="mt-4" v-model="form.modelParams" />
         </div>
 
         <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
@@ -541,7 +581,7 @@ onBeforeUnmount(() => {
               <div>
                 <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
                 <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.refAudioName }} · {{ modelStore.getModelLabel(activeResult.baseModel as never) }} · {{ activeResult.modelScale }} ·
+                  {{ activeResult.refAudioName }} · {{ modelStore.getModelLabel(activeResult.baseModel) }} · {{ activeResult.modelScale }} ·
                   {{ activeResult.languageLabel }} · {{ activeResult.formatLabel }}
                 </p>
               </div>
@@ -563,6 +603,9 @@ onBeforeUnmount(() => {
               <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
               <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
               <p class="mt-1">参考音频：{{ activeResult.refAudioName }}</p>
+              <p v-if="activeResult.modelParams.mode" class="mt-1">
+                克隆模式：{{ activeResult.modelParams.mode === 'ultimate' ? 'Ultimate' : 'Reference' }}
+              </p>
               <p v-if="activeResult.refText" class="mt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>

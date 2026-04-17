@@ -362,7 +362,7 @@ pub struct ModelInfo {
     pub id: i64,
     pub base_model: BaseModel,
     pub model_name: String,
-    pub model_scale_list: Vec<String>,
+    pub model_scale: String,
     pub required_model_name_list: Vec<String>,
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<HistoryTaskType>,
@@ -379,6 +379,100 @@ pub struct Qwen3TtsTextToSpeechModelParams {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Qwen3TtsTrainingModelParams {
+    pub epoch_count: i64,
+    pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoxCpm2VoiceCloneMode {
+    Reference,
+    Ultimate,
+}
+
+impl VoxCpm2VoiceCloneMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reference => "reference",
+            Self::Ultimate => "ultimate",
+        }
+    }
+}
+
+impl fmt::Display for VoxCpm2VoiceCloneMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for VoxCpm2VoiceCloneMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "reference" => Ok(Self::Reference),
+            "ultimate" => Ok(Self::Ultimate),
+            other => Err(format!("不支持的 VoxCPM2 克隆模式: {}", other)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoxCpm2TrainingMode {
+    Full,
+    Lora,
+}
+
+impl VoxCpm2TrainingMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Lora => "lora",
+        }
+    }
+}
+
+impl fmt::Display for VoxCpm2TrainingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for VoxCpm2TrainingMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "full" => Ok(Self::Full),
+            "lora" => Ok(Self::Lora),
+            other => Err(format!("不支持的 VoxCPM2 训练模式: {}", other)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VoxCpm2TextToSpeechModelParams {
+    pub cfg_value: f64,
+    pub inference_timesteps: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VoxCpm2VoiceCloneModelParams {
+    pub mode: VoxCpm2VoiceCloneMode,
+    pub style_prompt: String,
+    pub cfg_value: f64,
+    pub inference_timesteps: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VoxCpm2TrainingModelParams {
+    pub training_mode: VoxCpm2TrainingMode,
     pub epoch_count: i64,
     pub batch_size: i64,
     pub gradient_accumulation_steps: i64,

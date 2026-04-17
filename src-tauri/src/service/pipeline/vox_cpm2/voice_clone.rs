@@ -13,22 +13,17 @@ use crate::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
         task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, BaseModel, HardwareType},
     service::{
         local::{
-            entity::{
-                task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
-            },
+            entity::{task_history as task_history_entity, voice_clone_task as voice_clone_task_entity},
             LocalService,
         },
-        models::{HistoryTaskType, TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload},
+        models::{
+            TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload, VoxCpm2VoiceCloneModelParams,
+        },
         pipeline::{
             model_paths::llm_model_display_name,
-            qwen3_tts::{
-                qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
-                qwen3_tts_prepared_variant_key, qwen3_tts_voice_clone_init_model_path,
-                Qwen3TTSModelTaskPipeline,
-            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -43,6 +38,8 @@ use crate::{
     },
     Result,
 };
+
+use super::{vox_cpm2_base_model_path, VoxCpm2ModelTaskPipeline};
 
 #[derive(Debug, Clone, Copy)]
 struct VoiceCloneRuntimeOptions {
@@ -78,11 +75,9 @@ impl VoiceCloneRuntimeOptions {
 #[derive(Debug)]
 struct VoiceClonePaths {
     base_model: BaseModel,
-    model_scale: String,
     src_model_root: PathBuf,
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
-    download_models_script_path: PathBuf,
     voice_clone_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
     base_model_path: PathBuf,
@@ -91,20 +86,22 @@ struct VoiceClonePaths {
 #[derive(Debug)]
 struct VoiceCloneTaskExecution {
     base_model: BaseModel,
-    model_scale: String,
     language: String,
     format: TextToSpeechFormat,
     ref_audio_name: String,
     ref_audio_path: String,
     ref_text: String,
     text: String,
+    mode: String,
+    style_prompt: String,
+    cfg_value: f64,
+    inference_timesteps: i64,
     output_file_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VoiceCloneCommandLabel {
     InitTaskRuntime,
-    DownloadModels,
     RunInference,
     NormalizeReferenceAudio,
     ConvertAudio,
@@ -113,16 +110,15 @@ enum VoiceCloneCommandLabel {
 impl VoiceCloneCommandLabel {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::InitTaskRuntime => "initialize voice clone runtime",
-            Self::DownloadModels => "download voice clone base models",
-            Self::RunInference => "run voice clone inference",
-            Self::NormalizeReferenceAudio => "normalize voice clone reference audio",
-            Self::ConvertAudio => "convert voice clone audio",
+            Self::InitTaskRuntime => "initialize voxcpm2 voice clone runtime",
+            Self::RunInference => "run voxcpm2 voice clone inference",
+            Self::NormalizeReferenceAudio => "normalize voxcpm2 reference audio",
+            Self::ConvertAudio => "convert voxcpm2 voice clone audio",
         }
     }
 }
 
-impl Qwen3TTSModelTaskPipeline {
+impl VoxCpm2ModelTaskPipeline {
     pub(super) async fn run_voice_clone_pipeline_impl(
         &self,
         service: &LocalService,
@@ -131,28 +127,22 @@ impl Qwen3TTSModelTaskPipeline {
         let started_at = Instant::now();
 
         let result = async {
-            self.mark_voice_clone_running(service, request.task_id)
-                .await?;
+            self.mark_voice_clone_running(service, request.task_id).await?;
             let params = self
                 .load_voice_clone_task_execution(service, request.task_id)
                 .await?;
-            let runtime =
-                VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
-            let paths = self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
+            let runtime = VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
+            let paths = self.resolve_voice_clone_paths(service, &params.base_model)?;
             let log_dir = resolve_local_log_dir()?;
 
-            self.prepare_voice_clone_env(service, &paths, request.task_id, &log_dir, runtime)
+            self.prepare_voice_clone_env(&paths, request.task_id, &log_dir, runtime)
                 .await?;
             self.validate_voice_clone_environment(&paths, &params)?;
             self.run_voice_clone_command(&paths, request.task_id, &log_dir, &params, runtime)
                 .await?;
 
-            self.mark_voice_clone_completed(
-                service,
-                request.task_id,
-                started_at.elapsed().as_secs() as i64,
-            )
-            .await
+            self.mark_voice_clone_completed(service, request.task_id, started_at.elapsed().as_secs() as i64)
+                .await
         }
         .await;
 
@@ -163,7 +153,7 @@ impl Qwen3TTSModelTaskPipeline {
                 .mark_voice_clone_failed(service, request.task_id, duration_seconds, &error_message)
                 .await
             {
-                error!(error = %update_err, task_id = request.task_id, "failed to persist voice clone failure state");
+                error!(error = %update_err, task_id = request.task_id, "failed to persist voxcpm2 voice clone failure state");
             }
             return Err(err);
         }
@@ -181,29 +171,20 @@ impl Qwen3TTSModelTaskPipeline {
             .filter(voice_clone_task_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| {
-                format!(
-                    "failed to load voice clone execution params for task {}",
-                    task_id
-                )
-            })?
-            .ok_or_else(|| anyhow::anyhow!("未找到声音克隆任务执行参数: {}", task_id))?;
+            .with_context(|| format!("failed to load voxcpm2 voice clone params for task {}", task_id))?
+            .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 声音克隆任务执行参数: {}", task_id))?;
 
         task_history_entity::Entity::find_by_id(task_id)
             .filter(task_history_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| {
-                format!(
-                    "failed to load voice clone task history for task {}",
-                    task_id
-                )
-            })?
-            .ok_or_else(|| anyhow::anyhow!("未找到声音克隆历史任务记录: {}", task_id))?;
+            .with_context(|| format!("failed to load voxcpm2 voice clone history for task {}", task_id))?
+            .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 声音克隆历史任务记录: {}", task_id))?;
+
+        let params = serde_json::from_str::<VoxCpm2VoiceCloneModelParams>(&row.model_params_json)?;
 
         Ok(VoiceCloneTaskExecution {
             base_model: row.base_model,
-            model_scale: row.model_scale.trim().to_string(),
             language: row.language,
             format: row
                 .format
@@ -215,12 +196,13 @@ impl Qwen3TTSModelTaskPipeline {
                 .to_string(),
             ref_text: row.ref_text,
             text: row.text,
+            mode: params.mode.to_string(),
+            style_prompt: params.style_prompt,
+            cfg_value: params.cfg_value,
+            inference_timesteps: params.inference_timesteps,
             output_file_path: resolve_task_path(
                 Path::new(service.data_dir()),
-                &row.output_file_path
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| anyhow::anyhow!("当前声音克隆任务缺少输出文件路径"))?,
+                &row.output_file_path.clone().unwrap_or_default(),
             )
             .to_string_lossy()
             .to_string(),
@@ -231,28 +213,20 @@ impl Qwen3TTSModelTaskPipeline {
         &self,
         service: &LocalService,
         base_model: &str,
-        model_scale: &str,
     ) -> Result<VoiceClonePaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root);
-        let init_task_runtime_script_path =
-            src_model_root.join(platform.init_task_runtime_relative_path());
-        let download_models_script_path =
-            src_model_root.join(platform.download_models_relative_path());
-        let voice_clone_python_script_path =
-            src_model_model_python_script_path(&src_model_root, base_model, "voice_clone.py")?;
-        let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
-        let base_model_path = qwen3_tts_voice_clone_init_model_path(&src_model_root, model_scale)?;
+        let init_task_runtime_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
+        let voice_clone_python_script_path = src_model_model_python_script_path(&src_model_root, base_model, "voice_clone.py")?;
+        let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+        let base_model_path = vox_cpm2_base_model_path(&src_model_root, crate::service::pipeline::vox_cpm2::VOX_CPM2_MODEL_SCALE)?;
 
         Ok(VoiceClonePaths {
             base_model: base_model.to_string(),
-            model_scale: model_scale.to_string(),
             src_model_root,
             venv_python_path,
             init_task_runtime_script_path,
-            download_models_script_path,
             voice_clone_python_script_path,
             ffmpeg_python_script_path,
             base_model_path,
@@ -261,7 +235,6 @@ impl Qwen3TTSModelTaskPipeline {
 
     async fn prepare_voice_clone_env(
         &self,
-        service: &LocalService,
         paths: &VoiceClonePaths,
         task_id: i64,
         log_dir: &Path,
@@ -280,88 +253,7 @@ impl Qwen3TTSModelTaskPipeline {
             init_script_args,
             VoiceCloneCommandLabel::InitTaskRuntime,
         )
-        .await?;
-
-        if self.voice_clone_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
-            info!(
-                base_model = %paths.base_model,
-                training_mode = %runtime.mode_label(&paths.base_model)?,
-                "base model is already marked as downloaded; skipping download-models stage"
-            );
-            self.validate_prepared_voice_clone_downloads(paths)?;
-            return Ok(());
-        }
-
-        let download_script_args =
-            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?;
-
-        self.run_voice_clone_stage_script(
-            &paths.download_models_script_path,
-            &paths.src_model_root,
-            task_id,
-            log_dir,
-            download_script_args,
-            VoiceCloneCommandLabel::DownloadModels,
-        )
-        .await?;
-
-        self.validate_prepared_voice_clone_downloads(paths)?;
-        self.mark_voice_clone_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
-        Ok(())
-    }
-
-    fn voice_clone_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
-        let config = load_configs()
-            .context("failed to load config.toml before checking voice clone base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-
-        Ok(config
-            .prepared_base_models()
-            .iter()
-            .any(|prepared| prepared == &variant_key || prepared == base_model))
-    }
-
-    fn mark_voice_clone_base_model_downloaded(
-        &self,
-        _service: &LocalService,
-        _base_model: &str,
-        model_scale: &str,
-    ) -> Result<()> {
-        let mut config = load_configs()
-            .context("failed to load config.toml before updating prepared base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-        if config
-            .training
-            .prepared_base_models
-            .iter()
-            .any(|prepared| prepared == &variant_key)
-        {
-            return Ok(());
-        }
-
-        config.training.prepared_base_models.push(variant_key);
-
-        save_configs(&config)
-            .context("failed to persist training.prepared_base_models to config.toml")
-    }
-
-    fn validate_prepared_voice_clone_downloads(&self, paths: &VoiceClonePaths) -> Result<()> {
-        let mut missing_paths = Vec::new();
-
-        for path in qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
-            if !path.exists() {
-                missing_paths.push(path.display().to_string());
-            }
-        }
-
-        if missing_paths.is_empty() {
-            return Ok(());
-        }
-
-        bail!(
-            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
-            missing_paths.join(", ")
-        )
+        .await
     }
 
     fn validate_voice_clone_environment(
@@ -369,47 +261,22 @@ impl Qwen3TTSModelTaskPipeline {
         paths: &VoiceClonePaths,
         params: &VoiceCloneTaskExecution,
     ) -> Result<()> {
-        if !paths.init_task_runtime_script_path.exists() {
-            bail!(
-                "Voice clone init-task-runtime script not found: {}",
-                paths.init_task_runtime_script_path.display()
-            );
-        }
-        if !paths.download_models_script_path.exists() {
-            bail!(
-                "Voice clone download-models script not found: {}",
-                paths.download_models_script_path.display()
-            );
-        }
-        if !paths.venv_python_path.exists() {
-            bail!(
-                "Voice clone venv python not found: {}",
-                paths.venv_python_path.display()
-            );
-        }
-        if !paths.voice_clone_python_script_path.exists() {
-            bail!(
-                "Voice clone python script not found: {}",
-                paths.voice_clone_python_script_path.display()
-            );
-        }
-        if !paths.ffmpeg_python_script_path.exists() {
-            bail!(
-                "Voice clone ffmpeg python script not found: {}",
-                paths.ffmpeg_python_script_path.display()
-            );
-        }
-        if !paths.base_model_path.exists() {
-            bail!(
-                "Voice clone base model path not found: {}",
-                paths.base_model_path.display()
-            );
+        for (label, path) in [
+            ("VoxCPM2 init-task-runtime script", &paths.init_task_runtime_script_path),
+            ("VoxCPM2 venv python", &paths.venv_python_path),
+            ("VoxCPM2 voice clone python script", &paths.voice_clone_python_script_path),
+            ("VoxCPM2 ffmpeg python script", &paths.ffmpeg_python_script_path),
+            ("VoxCPM2 base model path", &paths.base_model_path),
+        ] {
+            if !path.exists() {
+                bail!("{} not found: {}", label, path.display());
+            }
         }
         if !Path::new(&params.ref_audio_path).exists() {
             bail!("Reference audio file not found: {}", params.ref_audio_path);
         }
-        ensure_parent_dir(Path::new(&params.output_file_path), "voice clone output")?;
 
+        ensure_parent_dir(Path::new(&params.output_file_path), "voxcpm2 voice clone output")?;
         Ok(())
     }
 
@@ -422,18 +289,11 @@ impl Qwen3TTSModelTaskPipeline {
         runtime: VoiceCloneRuntimeOptions,
     ) -> Result<()> {
         let ref_audio_path = self
-            .normalize_voice_clone_reference_audio(
-                paths,
-                task_id,
-                log_dir,
-                Path::new(&params.ref_audio_path),
-            )
+            .normalize_reference_audio(paths, task_id, log_dir, Path::new(&params.ref_audio_path))
             .await?;
-        let attn_implementation = load_configs()
-            .context(
-                "failed to load config.toml before resolving voice clone attention implementation",
-            )?
-            .attn_implementation();
+        let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
+        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::VoiceClone, task_id);
+        let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
         info!(
             script = %paths.voice_clone_python_script_path.display(),
@@ -442,12 +302,8 @@ impl Qwen3TTSModelTaskPipeline {
             output_path = %params.output_file_path,
             mode = %runtime.mode_label(&params.base_model)?,
             device = runtime.device(),
-            "starting local voice clone inference through direct python invocation"
+            "starting local voxcpm2 voice clone inference through direct python invocation"
         );
-
-        let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
-        let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -459,12 +315,20 @@ impl Qwen3TTSModelTaskPipeline {
             vec![
                 "--init-model-path".to_string(),
                 paths.base_model_path.to_string_lossy().to_string(),
+                "--mode".to_string(),
+                params.mode.clone(),
                 "--ref-audio-path".to_string(),
                 ref_audio_path.to_string_lossy().to_string(),
                 "--ref-text".to_string(),
                 params.ref_text.clone(),
                 "--text".to_string(),
                 params.text.clone(),
+                "--style-prompt".to_string(),
+                params.style_prompt.clone(),
+                "--cfg-value".to_string(),
+                params.cfg_value.to_string(),
+                "--inference-timesteps".to_string(),
+                params.inference_timesteps.to_string(),
                 "--language".to_string(),
                 params.language.clone(),
                 "--output-path".to_string(),
@@ -473,8 +337,6 @@ impl Qwen3TTSModelTaskPipeline {
                 metrics_log_dir.to_string_lossy().to_string(),
                 "--device".to_string(),
                 runtime.device().to_string(),
-                "--attn-implementation".to_string(),
-                attn_implementation.as_str().to_string(),
             ],
         )
         .await?;
@@ -490,16 +352,13 @@ impl Qwen3TTSModelTaskPipeline {
         .await?;
 
         if !Path::new(&params.output_file_path).exists() {
-            bail!(
-                "Voice clone output file not found after inference: {}",
-                params.output_file_path
-            );
+            bail!("VoxCPM2 voice clone output file not found after inference: {}", params.output_file_path);
         }
 
         Ok(())
     }
 
-    async fn normalize_voice_clone_reference_audio(
+    async fn normalize_reference_audio(
         &self,
         paths: &VoiceClonePaths,
         task_id: i64,
@@ -509,12 +368,8 @@ impl Qwen3TTSModelTaskPipeline {
         if !is_ogg_audio_path(input_path) {
             return Ok(input_path.to_path_buf());
         }
-        if !input_path.exists() {
-            bail!("Reference audio file not found: {}", input_path.display());
-        }
-
         let output_path = resolve_normalized_wav_sidecar_path(input_path);
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
+        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::VoiceClone, task_id);
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -534,13 +389,6 @@ impl Qwen3TTSModelTaskPipeline {
         )
         .await?;
 
-        if !output_path.exists() {
-            bail!(
-                "Normalized reference audio not found after conversion: {}",
-                output_path.display()
-            );
-        }
-
         Ok(output_path)
     }
 
@@ -555,32 +403,11 @@ impl Qwen3TTSModelTaskPipeline {
     ) -> Result<()> {
         let final_output_path = Path::new(final_output_path);
         if format == TextToSpeechFormat::Wav {
-            replace_output_file(temp_wav_path, final_output_path, "voice clone output")?;
+            replace_output_file(temp_wav_path, final_output_path, "voxcpm2 voice clone output")?;
             return Ok(());
         }
 
-        self.transcode_voice_clone_audio(
-            paths,
-            task_id,
-            log_dir,
-            temp_wav_path,
-            final_output_path,
-            format,
-        )
-        .await
-    }
-
-    async fn transcode_voice_clone_audio(
-        &self,
-        paths: &VoiceClonePaths,
-        task_id: i64,
-        log_dir: &Path,
-        input_wav_path: &Path,
-        final_output_path: &Path,
-        format: TextToSpeechFormat,
-    ) -> Result<()> {
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
-
+        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::VoiceClone, task_id);
         run_logged_python_script(
             &paths.venv_python_path,
             &paths.ffmpeg_python_script_path,
@@ -590,7 +417,7 @@ impl Qwen3TTSModelTaskPipeline {
             "python command completed successfully",
             vec![
                 "--input-path".to_string(),
-                input_wav_path.to_string_lossy().to_string(),
+                temp_wav_path.to_string_lossy().to_string(),
                 "--output-path".to_string(),
                 final_output_path.to_string_lossy().to_string(),
                 "--format".to_string(),
@@ -598,9 +425,7 @@ impl Qwen3TTSModelTaskPipeline {
             ],
         )
         .await?;
-
-        remove_file_if_exists(input_wav_path, "temporary voice clone wav file")?;
-
+        remove_file_if_exists(temp_wav_path, "temporary voxcpm2 voice clone wav file")?;
         Ok(())
     }
 
@@ -614,7 +439,7 @@ impl Qwen3TTSModelTaskPipeline {
         label: VoiceCloneCommandLabel,
     ) -> Result<()> {
         let platform = ScriptPlatform::current();
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
+        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::VoiceClone, task_id);
         let mut args = platform.shell_args(script_path);
         args.push("--log-path".to_string());
         args.push(log_dir.to_string_lossy().to_string());
@@ -622,30 +447,13 @@ impl Qwen3TTSModelTaskPipeline {
         args.push(task_log_path.to_string_lossy().to_string());
         args.extend(script_args);
 
-        Self::run_voice_clone_process(
+        run_logged_command(
             Path::new(platform.shell_program()),
             &args,
             current_dir,
-            label,
-            &task_log_path,
-        )
-        .await
-    }
-
-    async fn run_voice_clone_process(
-        program: &Path,
-        args: &[String],
-        current_dir: &Path,
-        label: VoiceCloneCommandLabel,
-        task_log_path: &Path,
-    ) -> Result<()> {
-        run_logged_command(
-            program,
-            args,
-            current_dir,
             label.as_str(),
-            task_log_path,
-            "voice clone command completed successfully",
+            &task_log_path,
+            "voxcpm2 voice clone command completed successfully",
         )
         .await
     }

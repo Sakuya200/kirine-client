@@ -15,6 +15,7 @@ import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import Qwen3TtsTextToSpeechParamsForm from '@/components/qwen3_tts/Qwen3TtsTextToSpeechParamsForm.vue';
+import VoxCpm2TextToSpeechParamsForm from '@/components/vox_cpm2/VoxCpm2TextToSpeechParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
@@ -76,17 +77,29 @@ interface TextToSpeechAudioAssetPayload {
   bytes: number[];
 }
 
+const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+
+const createQwen3TtsModelParams = () => ({
+  voicePrompt: ''
+});
+
+const createVoxCpm2TtsModelParams = () => ({
+  cfgValue: 2.0,
+  inferenceTimesteps: 10
+});
+
+const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
+  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2TtsModelParams(), ...modelParams } : { ...createQwen3TtsModelParams(), ...modelParams };
+
 const form = reactive({
   speakerId: null as number | null,
-  baseModel: 'qwen3_tts',
-  modelScale: '1.7B',
+  baseModel: '',
+  modelScale: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   exportAudioName: 'kirine_tts',
   text: '',
-  modelParams: {
-    voicePrompt: ''
-  } as Record<string, unknown>
+  modelParams: createQwen3TtsModelParams() as Record<string, unknown>
 });
 
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
@@ -115,7 +128,7 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel as never));
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
   speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
@@ -127,14 +140,29 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
 );
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
+const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const requiresSpeakerSelection = computed(() => !isVoxCpm2Model.value);
+const activeTextToSpeechParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TextToSpeechParamsForm : Qwen3TtsTextToSpeechParamsForm));
 const canGenerate = computed(
-  () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
+  () =>
+    (!requiresSpeakerSelection.value || form.speakerId !== null) &&
+    Boolean(form.language) &&
+    charCount.value > 0 &&
+    !isGenerating.value &&
+    !!form.modelScale
 );
 const generationTips = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel as never)} ${form.modelScale}。`,
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
+  requiresSpeakerSelection.value
+    ? `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`
+    : '当前模型不依赖预设说话人，将直接使用 VoxCPM2 基础模型。',
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_tts'}。`,
-  trimmedVoicePrompt.value ? `声音 Prompt：${trimmedVoicePrompt.value}` : '未填写声音 Prompt，将使用默认声音风格。'
+  isVoxCpm2Model.value
+    ? `当前 CFG=${Number(form.modelParams.cfgValue ?? 2.0)}，推理步数=${Number(form.modelParams.inferenceTimesteps ?? 10)}。`
+    : trimmedVoicePrompt.value
+      ? `声音 Prompt：${trimmedVoicePrompt.value}`
+      : '未填写声音 Prompt，将使用默认声音风格。'
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -164,7 +192,7 @@ watch(
     }
 
     if (!options.some(option => option.value === form.baseModel)) {
-      form.baseModel = String(options[0]?.value ?? 'qwen3_tts');
+      form.baseModel = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -188,6 +216,12 @@ watch(
 watch(
   speakerOptions,
   options => {
+    if (!requiresSpeakerSelection.value) {
+      form.speakerId = null;
+      selectedSpeakerOption.value = null;
+      return;
+    }
+
     if (options.length === 0) {
       form.speakerId = null;
       selectedSpeakerOption.value = null;
@@ -197,6 +231,18 @@ watch(
     const matched = options.find(option => option.value === form.speakerId) ?? options[0];
     form.speakerId = typeof matched.value === 'number' ? matched.value : Number(matched.value);
     selectedSpeakerOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
+  () => form.baseModel,
+  nextBaseModel => {
+    form.modelParams = normalizeTtsModelParams(nextBaseModel, form.modelParams);
+    if (nextBaseModel === VOX_CPM2_BASE_MODEL) {
+      form.speakerId = null;
+      selectedSpeakerOption.value = null;
+    }
   },
   { immediate: true }
 );
@@ -280,7 +326,8 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
 };
 
 const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
-  const matchedSpeakerOption = speakerOptions.value.find(option => option.value === item.speakerId) ?? null;
+  const matchedSpeakerOption =
+    item.baseModel === VOX_CPM2_BASE_MODEL ? null : (speakerOptions.value.find(option => option.value === item.speakerId) ?? null);
 
   stopActiveTaskStatusRefresh();
   activeResult.value = setAsActiveResult ? item : null;
@@ -291,7 +338,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.format = item.format;
   form.exportAudioName = item.exportAudioName;
   form.text = item.text;
-  form.modelParams = { ...item.modelParams };
+  form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
@@ -399,7 +446,7 @@ const refreshActiveTaskStatus = async () => {
 };
 
 const generateAudio = async () => {
-  if (!canGenerate.value || form.speakerId === null) {
+  if (!canGenerate.value) {
     return;
   }
 
@@ -409,7 +456,7 @@ const generateAudio = async () => {
   try {
     const payload = await invoke<TextToSpeechTaskResultPayload>('create_text_to_speech_task', {
       payload: {
-        speakerId: form.speakerId,
+        speakerId: form.speakerId ?? 0,
         baseModel: form.baseModel,
         modelScale: form.modelScale,
         language: form.language,
@@ -510,12 +557,17 @@ onMounted(async () => {
       <PanelCard title="基础参数">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox
+            v-if="requiresSpeakerSelection"
             v-model="form.speakerId"
             v-model:selected-option="selectedSpeakerOption"
             label="说话人"
             :options="speakerOptions"
             :placeholder="speakerOptions.length > 0 ? '请选择说话人' : '暂无可用说话人'"
           />
+          <div v-else class="rounded-2xl border border-brand-200 bg-white/85 px-3 py-2 text-sm text-stone-600">
+            <span class="mb-1 block text-xs text-stone-500">说话人</span>
+            VoxCPM2 直接使用基础模型推理，不需要选择现有说话人。
+          </div>
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
@@ -547,7 +599,7 @@ onMounted(async () => {
 
         <div class="mt-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <Qwen3TtsTextToSpeechParamsForm class="mt-4" v-model="form.modelParams" />
+          <component :is="activeTextToSpeechParamsComponent" class="mt-4" v-model="form.modelParams" />
         </div>
 
         <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
@@ -577,7 +629,7 @@ onMounted(async () => {
               <div>
                 <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
                 <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.speakerLabel }} · {{ modelStore.getModelLabel(activeResult.baseModel as never) }} · {{ activeResult.modelScale }} ·
+                  {{ activeResult.speakerLabel }} · {{ modelStore.getModelLabel(activeResult.baseModel) }} · {{ activeResult.modelScale }} ·
                   {{ activeResult.languageLabel }} · {{ activeResult.formatLabel }}
                 </p>
               </div>
@@ -599,6 +651,9 @@ onMounted(async () => {
               <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
               <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
               <p v-if="activeResult.modelParams.voicePrompt" class="mt-1">声音 Prompt：{{ activeResult.modelParams.voicePrompt }}</p>
+              <p v-if="activeResult.baseModel === VOX_CPM2_BASE_MODEL" class="mt-1">
+                CFG {{ activeResult.modelParams.cfgValue ?? 2.0 }} · 步数 {{ activeResult.modelParams.inferenceTimesteps ?? 10 }}
+              </p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
 

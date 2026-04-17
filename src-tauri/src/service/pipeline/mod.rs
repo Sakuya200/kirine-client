@@ -3,12 +3,16 @@ pub mod llm_models;
 pub mod model_paths;
 pub mod qwen3_tts;
 pub mod script_paths;
+pub mod vox_cpm2;
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::{config::BaseModel, service::local::LocalService, Result};
+use crate::{service::local::LocalService, Result};
+
+use self::{qwen3_tts::QWEN3_TTS_BASE_MODEL, vox_cpm2::VOX_CPM2_BASE_MODEL};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TrainingPipelineRequest {
@@ -49,17 +53,31 @@ pub(crate) trait ModelTaskPipeline: Send + Sync {
     ) -> Result<()>;
 }
 
-pub(crate) fn resolve_model_task_pipeline(base_model: BaseModel) -> &'static dyn ModelTaskPipeline {
-    match base_model {
-        BaseModel::Qwen3Tts => &qwen3_tts::QWEN3_TTS_MODEL_TASK_PIPELINE,
+pub(crate) fn resolve_model_task_pipeline(
+    base_model: &str,
+) -> Result<&'static dyn ModelTaskPipeline> {
+    match base_model.trim() {
+        QWEN3_TTS_BASE_MODEL => Ok(&qwen3_tts::QWEN3_TTS_MODEL_TASK_PIPELINE),
+        VOX_CPM2_BASE_MODEL => Ok(&vox_cpm2::VOX_CPM2_MODEL_TASK_PIPELINE),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("不支持的基础模型类型: {}", other),
+        )
+        .into()),
     }
 }
 
 pub(crate) fn resolve_inference_model_path(
-    base_model: BaseModel,
+    base_model: &str,
     model_root_path: &Path,
 ) -> Result<PathBuf> {
-    match base_model {
-        BaseModel::Qwen3Tts => qwen3_tts::resolve_inference_model_path(model_root_path),
+    match base_model.trim() {
+        QWEN3_TTS_BASE_MODEL => qwen3_tts::resolve_inference_model_path(model_root_path),
+        VOX_CPM2_BASE_MODEL => vox_cpm2::resolve_inference_model_path(model_root_path),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("不支持的基础模型类型: {}", other),
+        )
+        .into()),
     }
 }

@@ -1,6 +1,4 @@
-export enum BaseModel {
-  Qwen3Tts = 'qwen3_tts'
-}
+export type BaseModel = string;
 
 export enum HardwareType {
   Cpu = 'cpu',
@@ -17,10 +15,6 @@ export enum LoraMode {
   Enabled = 'enabled',
   Disabled = 'disabled'
 }
-
-export const BASE_MODEL_TEXT: Record<BaseModel, string> = {
-  [BaseModel.Qwen3Tts]: 'Qwen3-TTS'
-};
 
 export const HARDWARE_TYPE_TEXT: Record<HardwareType, string> = {
   [HardwareType.Cpu]: 'CPU',

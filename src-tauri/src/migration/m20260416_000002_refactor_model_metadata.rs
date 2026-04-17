@@ -3,7 +3,6 @@ use sea_orm_migration::{prelude::*, sea_orm::Statement};
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-const DEFAULT_MODEL_SCALE: &str = "1.7B";
 const DEFAULT_MODEL_PARAMS_JSON: &str = "{}";
 const DEFAULT_TIMESTAMP: &str = "2026-04-16 00:00:00";
 
@@ -12,8 +11,8 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         add_task_columns(manager).await?;
         create_model_info_table(manager).await?;
-        migrate_existing_task_rows(manager).await?;
         seed_default_model_info(manager).await?;
+        migrate_existing_task_rows(manager).await?;
         drop_legacy_columns(manager).await?;
         Ok(())
     }
@@ -33,7 +32,7 @@ async fn add_task_columns(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                         ColumnDef::new(TtsTasks::ModelScale)
                             .string()
                             .not_null()
-                            .default(DEFAULT_MODEL_SCALE),
+                            .default(""),
                     )
                     .to_owned(),
             )
@@ -79,7 +78,7 @@ async fn add_task_columns(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                         ColumnDef::new(ModelTrainingTasks::ModelScale)
                             .string()
                             .not_null()
-                            .default(DEFAULT_MODEL_SCALE),
+                            .default(""),
                     )
                     .to_owned(),
             )
@@ -113,7 +112,7 @@ async fn add_task_columns(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                         ColumnDef::new(VoiceCloneTasks::ModelScale)
                             .string()
                             .not_null()
-                            .default(DEFAULT_MODEL_SCALE),
+                            .default(""),
                     )
                     .to_owned(),
             )
@@ -225,13 +224,36 @@ async fn create_model_info_table(manager: &SchemaManager<'_>) -> Result<(), DbEr
 
 async fn migrate_existing_task_rows(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let backend = manager.get_database_backend();
+    let tts_model_params_sql = if manager.has_column("tts_tasks", "voice_prompt").await? {
+        "CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' OR model_params_json = '{}' THEN json_object('voicePrompt', COALESCE(voice_prompt, '')) ELSE model_params_json END".to_string()
+    } else {
+        "CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' THEN '{}' ELSE model_params_json END".to_string()
+    };
+    let training_model_params_sql = if manager
+        .has_column("model_training_tasks", "epoch_count")
+        .await?
+        && manager.has_column("model_training_tasks", "batch_size").await?
+        && manager
+            .has_column("model_training_tasks", "gradient_accumulation_steps")
+            .await?
+        && manager
+            .has_column("model_training_tasks", "enable_gradient_checkpointing")
+            .await?
+    {
+        "CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' OR model_params_json = '{}' THEN json_object('epochCount', epoch_count, 'batchSize', batch_size, 'gradientAccumulationSteps', gradient_accumulation_steps, 'enableGradientCheckpointing', enable_gradient_checkpointing) ELSE model_params_json END".to_string()
+    } else {
+        format!(
+            "CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' OR model_params_json = '{{}}' THEN '{}' ELSE model_params_json END",
+            DEFAULT_MODEL_PARAMS_JSON
+        )
+    };
 
     manager
         .get_connection()
         .execute(Statement::from_string(
             backend,
             format!(
-                "UPDATE tts_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), '{DEFAULT_MODEL_SCALE}'), export_audio_name = COALESCE(NULLIF(export_audio_name, ''), file_name), model_params_json = CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' OR model_params_json = '{{}}' THEN json_object('voicePrompt', COALESCE(voice_prompt, '')) ELSE model_params_json END"
+                "UPDATE tts_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), (SELECT COALESCE(NULLIF(json_extract(model_scale_list_json, '$[0]'), ''), '') FROM model_info WHERE base_model = tts_tasks.base_model AND deleted = 0 ORDER BY id ASC LIMIT 1), ''), export_audio_name = COALESCE(NULLIF(export_audio_name, ''), file_name), model_params_json = {tts_model_params_sql}"
             ),
         ))
         .await?;
@@ -241,7 +263,7 @@ async fn migrate_existing_task_rows(manager: &SchemaManager<'_>) -> Result<(), D
         .execute(Statement::from_string(
             backend,
             format!(
-                "UPDATE model_training_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), '{DEFAULT_MODEL_SCALE}'), model_params_json = CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' OR model_params_json = '{{}}' THEN json_object('epochCount', epoch_count, 'batchSize', batch_size, 'gradientAccumulationSteps', gradient_accumulation_steps, 'enableGradientCheckpointing', enable_gradient_checkpointing) ELSE model_params_json END"
+                "UPDATE model_training_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), (SELECT COALESCE(NULLIF(json_extract(model_scale_list_json, '$[0]'), ''), '') FROM model_info WHERE base_model = model_training_tasks.base_model AND deleted = 0 ORDER BY id ASC LIMIT 1), ''), model_params_json = {training_model_params_sql}"
             ),
         ))
         .await?;
@@ -251,7 +273,7 @@ async fn migrate_existing_task_rows(manager: &SchemaManager<'_>) -> Result<(), D
         .execute(Statement::from_string(
             backend,
             format!(
-                "UPDATE voice_clone_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), '{DEFAULT_MODEL_SCALE}'), export_audio_name = COALESCE(NULLIF(export_audio_name, ''), file_name), model_params_json = CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' THEN '{{}}' ELSE model_params_json END"
+                "UPDATE voice_clone_tasks SET model_scale = COALESCE(NULLIF(model_scale, ''), (SELECT COALESCE(NULLIF(json_extract(model_scale_list_json, '$[0]'), ''), '') FROM model_info WHERE base_model = voice_clone_tasks.base_model AND deleted = 0 ORDER BY id ASC LIMIT 1), ''), export_audio_name = COALESCE(NULLIF(export_audio_name, ''), file_name), model_params_json = CASE WHEN model_params_json IS NULL OR TRIM(model_params_json) = '' THEN '{{}}' ELSE model_params_json END"
             ),
         ))
         .await?;
@@ -265,7 +287,7 @@ async fn seed_default_model_info(manager: &SchemaManager<'_>) -> Result<(), DbEr
         .execute(Statement::from_string(
             manager.get_database_backend(),
             format!(
-                "INSERT OR REPLACE INTO model_info (id, base_model, model_name, model_scale_list_json, required_model_name_list_json, required_model_repo_id_list_json, supported_feature_list_json, create_time, modify_time, deleted) VALUES (1, 'qwen3_tts', 'Qwen3-TTS', '[\"1.7B\"]', '[\"Qwen3-TTS-12Hz-1.7B-Base\",\"Qwen3-TTS-Tokenizer-12Hz\",\"Qwen3-TTS-12Hz-1.7B-CustomVoice\"]', '[\"Qwen/Qwen3-TTS-12Hz-1.7B-Base\",\"Qwen/Qwen3-TTS-Tokenizer-12Hz\",\"Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice\"]', '[\"text-to-speech\",\"voice-clone\",\"model-training\"]', '{DEFAULT_TIMESTAMP}', '{DEFAULT_TIMESTAMP}', 0)"
+                r#"INSERT OR REPLACE INTO model_info (id, base_model, model_name, model_scale_list_json, required_model_name_list_json, required_model_repo_id_list_json, supported_feature_list_json, create_time, modify_time, deleted) VALUES (1, 'qwen3_tts', 'Qwen3-TTS', '["1.7B"]', '["Qwen3-TTS-12Hz-1.7B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-1.7B-CustomVoice"]', '["Qwen/Qwen3-TTS-12Hz-1.7B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]', '["text-to-speech","voice-clone","model-training"]', '{DEFAULT_TIMESTAMP}', '{DEFAULT_TIMESTAMP}', 0)"#
             ),
         ))
         .await?;

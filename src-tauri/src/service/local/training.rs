@@ -34,7 +34,7 @@ use crate::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, Qwen3TtsTrainingModelParams, SpeakerSource,
-            SpeakerStatus, TaskStatus,
+            SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
         },
         pipeline::model_paths::{llm_model_display_name, speaker_model_dir},
         LocalService,
@@ -99,11 +99,16 @@ impl LocalService {
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
+        let base_model = payload.base_model.trim().to_string();
         let model_scale = payload.model_scale.trim().to_string();
-        let model_params = serde_json::from_value::<Qwen3TtsTrainingModelParams>(payload.model_params.clone())?;
+        let model_params = if base_model == "vox_cpm2" {
+            serde_json::to_value(serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?)?
+        } else {
+            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(payload.model_params.clone())?)?
+        };
         let selected_training_mode_text = format!(
             "{} / {}",
-            llm_model_display_name(payload.base_model),
+            llm_model_display_name(&base_model)?,
             match selected_training_hardware {
                 HardwareType::Cuda => "CUDA",
                 HardwareType::Cpu => "CPU",
@@ -117,7 +122,7 @@ impl LocalService {
             name: Set(speaker_name.clone()),
             languages_json: Set(languages_json),
             samples: Set(0),
-            base_model: Set(payload.base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
             description: Set("通过模型训练任务自动创建".to_string()),
             model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
@@ -171,12 +176,24 @@ impl LocalService {
             format!("共导入 {} 项样本。", sample_count),
             format!(
                 "训练语言 {}，批次大小 {}，梯度累积 {}。",
-                payload.language, model_params.batch_size, model_params.gradient_accumulation_steps
+                payload.language,
+                model_params
+                    .get("batchSize")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+                model_params
+                    .get("gradientAccumulationSteps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
             ),
             format!("训练模式: {}。", selected_training_mode_text),
             format!(
                 "梯度检查点: {}。",
-                if model_params.enable_gradient_checkpointing {
+                if model_params
+                    .get("enableGradientCheckpointing")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     "启用"
                 } else {
                     "禁用"
@@ -212,7 +229,7 @@ impl LocalService {
             id: NotSet,
             history_id: Set(task_id),
             language: Set(payload.language.as_str().to_string()),
-            base_model: Set(payload.base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
             model_scale: Set(model_scale.clone()),
             model_name: Set(speaker_name.clone()),
             model_params_json: Set(serde_json::to_string(&payload.model_params)?),
@@ -228,14 +245,14 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
-        self.start_training(payload.base_model, task_id, speaker_id, &speaker_name)?;
+        self.start_training(base_model.clone(), task_id, speaker_id, &speaker_name)?;
 
         Ok(ModelTrainingTaskResult {
             task_id,
-            base_model: payload.base_model,
+            base_model,
             model_scale,
             model_name: speaker_name,
-            model_params: serde_json::to_value(model_params)?,
+            model_params,
             sample_count,
             create_time,
             status: TaskStatus::Running,

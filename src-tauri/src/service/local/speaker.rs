@@ -108,10 +108,7 @@ fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
         name: model.name,
         languages,
         samples: model.samples as u32,
-        base_model: model
-            .base_model
-            .parse::<crate::config::BaseModel>()
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+        base_model: model.base_model,
         create_time: model.create_time,
         modify_time: model.modify_time,
         description: model.description,

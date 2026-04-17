@@ -7,7 +7,7 @@ pub struct Model {
     pub id: i64,
     pub base_model: String,
     pub model_name: String,
-    pub model_scale_list_json: String,
+    pub model_scale: String,
     pub required_model_name_list_json: String,
     pub required_model_repo_id_list_json: String,
     pub supported_feature_list_json: String,

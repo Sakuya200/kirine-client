@@ -25,8 +25,11 @@ use crate::{
             TextToSpeechFormat, UpdateTaskStatusPayload,
         },
         pipeline::{
-            model_paths::{llm_model_display_name, llm_model_paths},
-            qwen3_tts::Qwen3TTSModelTaskPipeline,
+            model_paths::llm_model_display_name,
+            qwen3_tts::{
+                qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
+                qwen3_tts_prepared_variant_key, Qwen3TTSModelTaskPipeline,
+            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -64,18 +67,19 @@ impl TtsRuntimeOptions {
         }
     }
 
-    fn mode_label(self, base_model: BaseModel) -> String {
-        format!(
+    fn mode_label(self, base_model: &str) -> Result<String> {
+        Ok(format!(
             "{} / {}",
-            llm_model_display_name(base_model),
+            llm_model_display_name(base_model)?,
             if self.is_cpu() { "CPU" } else { "CUDA" }
-        )
+        ))
     }
 }
 
 #[derive(Debug)]
 struct TtsPaths {
     base_model: BaseModel,
+    model_scale: String,
     src_model_root: PathBuf,
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
@@ -87,6 +91,7 @@ struct TtsPaths {
 #[derive(Debug)]
 struct TtsTaskExecution {
     base_model: BaseModel,
+    model_scale: String,
     speaker_name: String,
     model_path: String,
     language: String,
@@ -128,7 +133,7 @@ impl Qwen3TTSModelTaskPipeline {
             let params = self
                 .load_tts_task_execution(service, request.task_id, request.speaker_id)
                 .await?;
-            let paths = self.resolve_tts_paths(service, params.base_model)?;
+            let paths = self.resolve_tts_paths(service, &params.base_model, &params.model_scale)?;
             let log_dir = resolve_local_log_dir()?;
             let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
             self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -205,10 +210,8 @@ impl Qwen3TTSModelTaskPipeline {
         let src_model_root = resolve_src_model_root(service.app_dir())?;
 
         Ok(TtsTaskExecution {
-            base_model: task_detail
-                .base_model
-                .parse()
-                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: task_detail.base_model,
+            model_scale: task_detail.model_scale.trim().to_string(),
             speaker_name: task_history.speaker_name_snapshot.trim().to_string(),
             model_path: resolve_runtime_model_path(
                 Path::new(service.model_dir()),
@@ -243,7 +246,7 @@ impl Qwen3TTSModelTaskPipeline {
         })
     }
 
-    fn resolve_tts_paths(&self, service: &LocalService, base_model: BaseModel) -> Result<TtsPaths> {
+    fn resolve_tts_paths(&self, service: &LocalService, base_model: &str, model_scale: &str) -> Result<TtsPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root);
@@ -252,12 +255,13 @@ impl Qwen3TTSModelTaskPipeline {
         let download_models_script_path =
             src_model_root.join(platform.download_models_relative_path());
         let tts_python_script_path =
-            src_model_model_python_script_path(&src_model_root, base_model, "tts.py");
+            src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
 
         Ok(TtsPaths {
-            base_model,
+            base_model: base_model.to_string(),
+            model_scale: model_scale.to_string(),
             src_model_root,
             venv_python_path,
             init_task_runtime_script_path,
@@ -290,10 +294,10 @@ impl Qwen3TTSModelTaskPipeline {
         )
         .await?;
 
-        if self.tts_base_model_downloaded(paths.base_model)? {
+        if self.tts_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
             info!(
                 base_model = %paths.base_model,
-                training_mode = runtime.mode_label(paths.base_model),
+                training_mode = %runtime.mode_label(&paths.base_model)?,
                 "base model is already marked as downloaded; skipping download-models stage"
             );
             self.validate_prepared_tts_downloads(paths)?;
@@ -301,7 +305,7 @@ impl Qwen3TTSModelTaskPipeline {
         }
 
         let download_script_args =
-            llm_model_paths(paths.base_model).download_script_args(&paths.src_model_root);
+            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?;
 
         self.run_tts_stage_script(
             &paths.download_models_script_path,
@@ -314,43 +318,41 @@ impl Qwen3TTSModelTaskPipeline {
         .await?;
 
         self.validate_prepared_tts_downloads(paths)?;
-        self.mark_tts_base_model_downloaded(service, paths.base_model)?;
+        self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
 
         Ok(())
     }
 
-    fn tts_base_model_downloaded(&self, base_model: BaseModel) -> Result<bool> {
+    fn tts_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
         let config = load_configs()
             .context("failed to load config.toml before checking tts base model marker")?;
+        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
 
         Ok(config
             .prepared_base_models()
             .iter()
-            .any(|prepared| *prepared == base_model))
+            .any(|prepared| prepared == &variant_key || prepared == base_model))
     }
 
     fn mark_tts_base_model_downloaded(
         &self,
         _service: &LocalService,
-        base_model: BaseModel,
+        _base_model: &str,
+        model_scale: &str,
     ) -> Result<()> {
         let mut config = load_configs()
             .context("failed to load config.toml before updating prepared base model marker")?;
+        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
         if config
             .training
             .prepared_base_models
             .iter()
-            .any(|prepared| *prepared == base_model)
+            .any(|prepared| prepared == &variant_key)
         {
             return Ok(());
         }
 
-        config.training.prepared_base_models.push(base_model);
-        config
-            .training
-            .prepared_base_models
-            .sort_by_key(|value| value.as_str());
-        config.training.prepared_base_models.dedup();
+        config.training.prepared_base_models.push(variant_key);
 
         save_configs(&config)
             .context("failed to persist training.prepared_base_models to config.toml")
@@ -359,9 +361,7 @@ impl Qwen3TTSModelTaskPipeline {
     fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
         let mut missing_paths = Vec::new();
 
-        for path in
-            llm_model_paths(paths.base_model).prepared_model_download_paths(&paths.src_model_root)
-        {
+        for path in qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
             }
@@ -372,7 +372,7 @@ impl Qwen3TTSModelTaskPipeline {
         }
 
         bail!(
-            "基础模型已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
             missing_paths.join(", ")
         )
     }
@@ -437,7 +437,7 @@ impl Qwen3TTSModelTaskPipeline {
             speaker_name = %params.speaker_name,
             output_path = %temp_wav_path.display(),
             device = runtime.device(),
-            mode = runtime.mode_label(params.base_model),
+            mode = %runtime.mode_label(&params.base_model)?,
             "starting local tts inference through direct python invocation"
         );
 

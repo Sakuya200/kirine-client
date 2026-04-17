@@ -1,9 +1,10 @@
 import type { AppLanguage } from '@/enums/language';
 import type { ModelTrainingSampleType } from '@/enums/modelTraining';
-import type { BaseModel } from '@/enums/settings';
 import type { SpeakerStatus, TaskStatus } from '@/enums/status';
 import type { TextToSpeechFormat } from '@/enums/textToSpeech';
 import type { HistoryTaskType } from '@/enums/task';
+
+export type BaseModel = string;
 
 export type SpeakerSource = 'local' | 'remote';
 
@@ -93,7 +94,7 @@ export interface ModelInfo {
   id: number;
   baseModel: BaseModel;
   modelName: string;
-  modelScaleList: string[];
+  modelScale: string;
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
   supportedFeatureList: HistoryTaskType[];

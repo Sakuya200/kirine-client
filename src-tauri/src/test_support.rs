@@ -5,12 +5,11 @@ use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTr
 use sqlx::{sqlite::SqlitePoolOptions, Row};
 
 use crate::{
-    config::BaseModel,
     service::entity::{speaker, task_history, training_task, tts_task, voice_clone_task},
     service::{
         models::{
-            AppLanguage, CreateSpeakerPayload, SpeakerInfo, SpeakerSource, SpeakerStatus,
-            UpdateSpeakerPayload,
+            AppLanguage, CreateSpeakerPayload, ModelInfo, SpeakerInfo, SpeakerSource,
+            SpeakerStatus, UpdateSpeakerPayload,
         },
         LocalService, Service,
     },
@@ -53,7 +52,7 @@ impl LocalServiceHarness {
                 name: "SeaOrm Speaker".to_string(),
                 languages: vec![AppLanguage::Chinese, AppLanguage::English],
                 samples: 3,
-                base_model: BaseModel::Qwen3Tts,
+                base_model: "qwen3_tts".to_string(),
                 description: "created by test".to_string(),
                 status: SpeakerStatus::Ready,
                 source: SpeakerSource::Local,
@@ -63,6 +62,10 @@ impl LocalServiceHarness {
 
     pub async fn list_speakers(&self) -> Result<Vec<SpeakerInfo>> {
         self.service.list_speaker_infos().await
+    }
+
+    pub async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
+        self.service.list_model_infos().await
     }
 
     pub async fn speaker_model_path_by_name(&self, name: &str) -> Result<Option<String>> {
@@ -182,13 +185,6 @@ fn test_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("kirine-client-{label}-{unique}"))
 }
 
-struct SqliteTableColumn {
-    name: String,
-    data_type: String,
-    not_null: bool,
-    default_value: Option<String>,
-}
-
 fn sqlite_database_url(db_path: &PathBuf) -> String {
     let normalized = db_path.to_string_lossy().replace('\\', "/");
     format!("sqlite://{}?mode=rwc", normalized)
@@ -227,68 +223,8 @@ async fn create_current_task_detail_tables(db_path: &PathBuf) -> Result<()> {
     create_table_from_entity(&db, voice_clone_task::Entity).await
 }
 
-async fn load_sqlite_table_columns(
-    pool: &sqlx::SqlitePool,
-    table_name: &str,
-) -> Result<Vec<SqliteTableColumn>> {
-    let pragma = format!("PRAGMA table_info({table_name})");
-    let rows = sqlx::query(&pragma).fetch_all(pool).await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| SqliteTableColumn {
-            name: row.get::<String, _>("name"),
-            data_type: row.get::<String, _>("type"),
-            not_null: row.get::<i64, _>("notnull") != 0,
-            default_value: row.get::<Option<String>, _>("dflt_value"),
-        })
-        .collect())
-}
-
-fn build_legacy_task_table_sql(table_name: &str, columns: &[SqliteTableColumn]) -> String {
-    let column_defs = columns
-        .iter()
-        .filter(|column| column.name != "id")
-        .map(|column| {
-            if column.name == "history_id" {
-                return format!("{} {} NOT NULL PRIMARY KEY", column.name, column.data_type);
-            }
-
-            let mut column_def = format!("{} {}", column.name, column.data_type);
-            if column.not_null {
-                column_def.push_str(" NOT NULL");
-            }
-            if let Some(default_value) = column.default_value.as_deref() {
-                column_def.push_str(" DEFAULT ");
-                column_def.push_str(default_value);
-            }
-            column_def
-        })
-        .collect::<Vec<_>>();
-
-    format!(
-        "CREATE TABLE {} (\n            {}\n        )",
-        table_name,
-        column_defs.join(",\n            ")
-    )
-}
-
 async fn create_legacy_task_detail_tables_from_entities(db_path: &PathBuf) -> Result<()> {
-    create_current_task_detail_tables(db_path).await?;
-
-    let pool = open_sqlite_pool(db_path).await?;
-    for table_name in ["tts_tasks", "model_training_tasks", "voice_clone_tasks"] {
-        let columns = load_sqlite_table_columns(&pool, table_name).await?;
-        let legacy_sql = build_legacy_task_table_sql(table_name, &columns);
-
-        sqlx::query(&format!("DROP TABLE {table_name}"))
-            .execute(&pool)
-            .await?;
-        sqlx::query(&legacy_sql).execute(&pool).await?;
-    }
-    pool.close().await;
-
-    Ok(())
+    create_current_task_detail_tables(db_path).await
 }
 
 async fn seed_legacy_schema(db_path: &PathBuf) -> Result<()> {
@@ -415,20 +351,22 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO tts_tasks (
-            history_id, speaker_id, model_path, base_model, language, format,
-            text, voice_prompt, char_count, file_name, output_file_path, create_time,
-            modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            history_id, speaker_id, model_path, base_model, model_scale, language, format,
+            export_audio_name, text, model_params_json, char_count, file_name, output_file_path,
+            create_time, modify_time, deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(101_i64)
     .bind(1_i64)
     .bind(Option::<String>::None)
     .bind("qwen3_tts")
+    .bind("1.7B")
     .bind("chinese")
     .bind("wav")
+    .bind("legacy-tts")
     .bind("hello")
-    .bind("")
+    .bind("{}")
     .bind(5_i64)
     .bind("legacy-tts.wav")
     .bind(Option::<String>::None)
@@ -441,18 +379,18 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_training_tasks (
-            history_id, language, base_model, model_name, epoch_count,
-            batch_size, sample_count, samples_json, notes_json, output_speaker_id,
-            create_time, modify_time, deleted
+            history_id, language, base_model, model_scale, model_name, model_params_json,
+            sample_count, samples_json, notes_json, output_speaker_id, create_time,
+            modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(102_i64)
     .bind("chinese")
     .bind("qwen3_tts")
+    .bind("1.7B")
     .bind("legacy-model")
-    .bind(1_i64)
-    .bind(1_i64)
+    .bind("{}")
     .bind(1_i64)
     .bind("[]")
     .bind("[]")
@@ -466,20 +404,23 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO voice_clone_tasks (
-            history_id, base_model, language, format, ref_audio_name,
-            ref_audio_path, ref_text, text, char_count, file_name, output_file_path,
-            create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            history_id, base_model, model_scale, language, format, export_audio_name,
+            ref_audio_name, ref_audio_path, ref_text, text, model_params_json, char_count,
+            file_name, output_file_path, create_time, modify_time, deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(103_i64)
     .bind("qwen3_tts")
+    .bind("1.7B")
     .bind("chinese")
     .bind("wav")
+    .bind("legacy-voice-clone")
     .bind("ref.wav")
     .bind("/tmp/ref.wav")
     .bind("参考")
     .bind("生成")
+    .bind("{}")
     .bind(2_i64)
     .bind("legacy-voice-clone.wav")
     .bind(Option::<String>::None)

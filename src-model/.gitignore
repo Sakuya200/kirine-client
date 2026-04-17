@@ -4,3 +4,4 @@ tests/training-data
 tests/__pycache__
 base-models
 src/qwen3_tts/__pycache__
+src/vox_cpm2/__pycache__

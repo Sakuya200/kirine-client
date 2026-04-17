@@ -18,37 +18,7 @@ pub enum StorageMode {
     Remote,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum BaseModel {
-    #[default]
-    Qwen3Tts,
-}
-
-impl BaseModel {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Qwen3Tts => "qwen3_tts",
-        }
-    }
-}
-
-impl fmt::Display for BaseModel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for BaseModel {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim() {
-            "qwen3_tts" => Ok(Self::Qwen3Tts),
-            other => Err(format!("不支持的基础模型类型: {}", other)),
-        }
-    }
-}
+pub type BaseModel = String;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

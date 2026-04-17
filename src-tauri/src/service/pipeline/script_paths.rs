@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::{config::BaseModel, service::pipeline::model_paths::llm_model_paths};
+use crate::service::pipeline::model_paths::llm_model_paths;
 
 const SRC_MODEL_PYTHON_ROOT_DIR: &str = "src";
 
@@ -81,10 +81,10 @@ pub(crate) fn src_model_shared_python_script_path(
 
 pub(crate) fn src_model_model_python_script_path(
     src_model_root: &Path,
-    base_model: BaseModel,
+    base_model: &str,
     script_name: &str,
-) -> PathBuf {
-    llm_model_paths(base_model).python_script_path(src_model_root, script_name)
+) -> Result<PathBuf> {
+    Ok(llm_model_paths(base_model)?.python_script_path(src_model_root, script_name))
 }
 
 pub(crate) fn src_model_venv_python_path(src_model_root: &Path) -> PathBuf {

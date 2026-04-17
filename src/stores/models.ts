@@ -2,17 +2,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { BaseModel } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { ModelInfo } from '@/types/domain';
+import type { BaseModel, ModelInfo } from '@/types/domain';
 
 const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   id: typeof item.id === 'number' ? item.id : 0,
-  baseModel: item.baseModel === BaseModel.Qwen3Tts ? item.baseModel : BaseModel.Qwen3Tts,
+  baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
   modelName: item.modelName?.trim() || 'Unknown Model',
-  modelScaleList: Array.isArray(item.modelScaleList) ? item.modelScaleList.filter(scale => typeof scale === 'string') : [],
+  modelScale: typeof item.modelScale === 'string' ? item.modelScale.trim() : '',
   requiredModelNameList: Array.isArray(item.requiredModelNameList) ? item.requiredModelNameList.filter(name => typeof name === 'string') : [],
   requiredModelRepoIdList: Array.isArray(item.requiredModelRepoIdList) ? item.requiredModelRepoIdList.filter(name => typeof name === 'string') : [],
   supportedFeatureList: Array.isArray(item.supportedFeatureList)
@@ -30,7 +29,21 @@ export const useModelStore = defineStore('models', () => {
   const initialized = ref(false);
   const uiStore = useUiStore();
 
-  const byBaseModel = computed(() => new Map(items.value.map(item => [item.baseModel, item])));
+  const byBaseModel = computed(() => {
+    const grouped = new Map<BaseModel, ModelInfo[]>();
+
+    for (const item of items.value) {
+      if (!item.baseModel) {
+        continue;
+      }
+
+      const next = grouped.get(item.baseModel) ?? [];
+      next.push(item);
+      grouped.set(item.baseModel, next);
+    }
+
+    return grouped;
+  });
 
   const loadModels = async () => {
     isLoading.value = true;
@@ -53,14 +66,17 @@ export const useModelStore = defineStore('models', () => {
     }
   };
 
-  const getModelsByFeature = (feature: HistoryTaskType) => items.value.filter(item => item.supportedFeatureList.includes(feature));
+  const getModelsByFeature = (feature: HistoryTaskType) =>
+    Array.from(byBaseModel.value.values())
+      .map(variants => variants.find(item => item.supportedFeatureList.includes(feature)))
+      .filter((item): item is ModelInfo => Boolean(item));
 
-  const getModelLabel = (baseModel: BaseModel) => byBaseModel.value.get(baseModel)?.modelName ?? baseModel;
+  const getModelLabel = (baseModel: BaseModel) => byBaseModel.value.get(baseModel)?.[0]?.modelName ?? baseModel;
 
   const getModelScaleOptions = (baseModel: BaseModel) =>
-    (byBaseModel.value.get(baseModel)?.modelScaleList ?? []).map(scale => ({
-      label: scale,
-      value: scale
+    (byBaseModel.value.get(baseModel) ?? []).map(item => ({
+      label: item.modelScale,
+      value: item.modelScale
     }));
 
   return {

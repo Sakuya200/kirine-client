@@ -10,7 +10,7 @@ use tracing::{error, info};
 
 use crate::{
     config::{
-        resolve_base_log_dir, AttentionImplementation, BaseModel, HardwareType, LoraMode,
+        resolve_base_log_dir, AttentionImplementation, HardwareType, LoraMode,
         StorageMode,
     },
     Result,
@@ -46,7 +46,7 @@ pub struct RemoteConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
-    pub prepared_base_models: Vec<BaseModel>,
+    pub prepared_base_models: Vec<String>,
     pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
     pub lora_mode: LoraMode,
@@ -136,7 +136,7 @@ impl EnvConfig {
             .and_then(|remote| remote.api_token.as_deref())
     }
 
-    pub fn prepared_base_models(&self) -> &[BaseModel] {
+    pub fn prepared_base_models(&self) -> &[String] {
         &self.training.prepared_base_models
     }
 

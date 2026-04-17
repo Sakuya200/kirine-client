@@ -15,6 +15,7 @@ use crate::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
         models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
+        models::{VoxCpm2VoiceCloneMode, VoxCpm2VoiceCloneModelParams},
         LocalService,
     },
     utils::time::now_string,
@@ -28,6 +29,7 @@ impl LocalService {
     ) -> Result<VoiceCloneTaskResult> {
         let txn = self.orm().begin().await?;
         let create_time = now_string()?;
+        let base_model = payload.base_model.trim().to_string();
         let ref_audio_path = payload.ref_audio_path.trim().to_string();
         let ref_text = payload.ref_text.trim().to_string();
         let text = payload.text.trim().to_string();
@@ -35,11 +37,16 @@ impl LocalService {
         if ref_audio_path.is_empty() {
             bail!("参考音频不能为空");
         }
-        if ref_text.is_empty() {
-            bail!("参考音频台词不能为空");
-        }
         if text.is_empty() {
             bail!("目标台词不能为空");
+        }
+        if base_model == "vox_cpm2" {
+            let params = serde_json::from_value::<VoxCpm2VoiceCloneModelParams>(payload.model_params.clone())?;
+            if matches!(params.mode, VoxCpm2VoiceCloneMode::Ultimate) && ref_text.is_empty() {
+                bail!("Ultimate 克隆模式要求填写参考音频台词");
+            }
+        } else if ref_text.is_empty() {
+            bail!("参考音频台词不能为空");
         }
         let resolved_ref_audio_path =
             resolve_task_path(Path::new(self.data_dir()), &ref_audio_path);
@@ -103,7 +110,7 @@ impl LocalService {
         voice_clone_task_entity::Entity::insert(voice_clone_task_entity::ActiveModel {
             id: NotSet,
             history_id: Set(task_id),
-            base_model: Set(payload.base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
             model_scale: Set(model_scale.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
@@ -124,13 +131,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
-        self.start_voice_clone_inference(payload.base_model, task_id)?;
+        self.start_voice_clone_inference(base_model.clone(), task_id)?;
 
         Ok(VoiceCloneTaskResult {
             task_id,
             file_name,
             ref_audio_name,
-            base_model: payload.base_model,
+            base_model,
             model_scale,
             language: payload.language,
             format: payload.format,

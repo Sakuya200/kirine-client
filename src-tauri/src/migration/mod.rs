@@ -8,9 +8,10 @@ mod create_local_schema;
 mod m20260415_000001_drop_task_hardware_type;
 mod m20260416_000001_add_model_training_runtime_fields;
 mod m20260416_000002_refactor_model_metadata;
+mod m20260417_000001_seed_vox_cpm2_model_info;
 mod seed_qwen3_tts_preset_speakers;
 
-const LOCAL_SCHEMA_VERSION: &str = "13";
+const LOCAL_SCHEMA_VERSION: &str = "16";
 
 pub(crate) struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260415_000001_drop_task_hardware_type::Migration),
             Box::new(m20260416_000001_add_model_training_runtime_fields::Migration),
             Box::new(m20260416_000002_refactor_model_metadata::Migration),
+            Box::new(m20260417_000001_seed_vox_cpm2_model_info::Migration),
         ]
     }
 }

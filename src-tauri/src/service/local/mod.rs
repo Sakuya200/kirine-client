@@ -175,7 +175,7 @@ impl LocalService {
         speaker_id: i64,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
 
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
@@ -201,7 +201,7 @@ impl LocalService {
         task_id: i64,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
 
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
@@ -223,7 +223,7 @@ impl LocalService {
         speaker_name: &str,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
         let speaker_name = speaker_name.to_string();
 
         tauri::async_runtime::spawn(async move {

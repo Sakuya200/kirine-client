@@ -3,11 +3,10 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
-import { BaseModel } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { SpeakerStatus } from '@/enums/status';
 import { useUiStore } from '@/stores/ui';
-import type { SpeakerProfile } from '@/types/domain';
+import type { BaseModel, SpeakerProfile } from '@/types/domain';
 
 interface CreateSpeakerPayload {
   name: string;
@@ -37,7 +36,7 @@ const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
     name: item.name?.trim() || '',
     languages,
     samples: typeof item.samples === 'number' ? item.samples : 0,
-    baseModel: item.baseModel === BaseModel.Qwen3Tts ? item.baseModel : BaseModel.Qwen3Tts,
+    baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
     createTime: item.createTime ?? '',
     modifyTime: item.modifyTime ?? '',
     description: item.description?.trim() || '',

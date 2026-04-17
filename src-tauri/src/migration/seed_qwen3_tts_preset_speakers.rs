@@ -6,7 +6,9 @@ use crate::{
     migration::LOCAL_SCHEMA_VERSION,
     service::{
         models::{SpeakerSource, SpeakerStatus},
-        pipeline::qwen3_tts::{qwen3_tts_preset_speakers, QWEN3_TTS_CUSTOM_VOICE_MODEL_NAME},
+        pipeline::qwen3_tts::{
+            qwen3_tts_preset_speakers, QWEN3_TTS_DEFAULT_CUSTOM_VOICE_MODEL_NAME,
+        },
     },
 };
 
@@ -24,7 +26,7 @@ impl MigrationTrait for Migration {
         let backend = manager.get_database_backend();
         let connection = manager.get_connection();
         let model_path = src_model_relative_runtime_path(&format!(
-            "base-models/{QWEN3_TTS_CUSTOM_VOICE_MODEL_NAME}"
+            "base-models/{QWEN3_TTS_DEFAULT_CUSTOM_VOICE_MODEL_NAME}"
         ));
         let create_time = "2026-04-13 00:00:00";
 
