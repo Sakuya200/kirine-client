@@ -1,15 +1,13 @@
 use anyhow::Context;
 use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use sea_orm_migration::prelude::*;
 
 use crate::Result;
 
 mod create_local_schema;
-mod m20260415_000001_drop_task_hardware_type;
-mod m20260416_000001_add_model_training_runtime_fields;
-mod m20260416_000002_refactor_model_metadata;
-mod m20260417_000001_seed_vox_cpm2_model_info;
 mod seed_qwen3_tts_preset_speakers;
+mod seed_vox_cpm2_model_info;
 
 const LOCAL_SCHEMA_VERSION: &str = "16";
 
@@ -21,10 +19,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(create_local_schema::Migration),
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
-            Box::new(m20260415_000001_drop_task_hardware_type::Migration),
-            Box::new(m20260416_000001_add_model_training_runtime_fields::Migration),
-            Box::new(m20260416_000002_refactor_model_metadata::Migration),
-            Box::new(m20260417_000001_seed_vox_cpm2_model_info::Migration),
+            Box::new(seed_vox_cpm2_model_info::Migration),
         ]
     }
 }
@@ -33,5 +28,13 @@ pub(crate) async fn run_local_migrations(db: &DatabaseConnection) -> Result<()> 
     Migrator::up(db, None)
         .await
         .context("failed to run SeaORM local migrations")?;
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        format!(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('local_schema_version', '{LOCAL_SCHEMA_VERSION}')"
+        ),
+    ))
+    .await
+    .context("failed to persist local schema version after migrations")?;
     Ok(())
 }

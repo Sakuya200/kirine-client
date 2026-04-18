@@ -1,6 +1,4 @@
-use sea_orm_migration::{prelude::*, sea_orm::Statement};
-
-use crate::migration::LOCAL_SCHEMA_VERSION;
+use sea_orm_migration::prelude::*;
 
 pub struct Migration;
 
@@ -32,7 +30,6 @@ async fn run_up_flow(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     create_model_training_tasks_node(manager).await?;
     create_voice_clone_tasks_node(manager).await?;
     create_indexes_node(manager).await?;
-    persist_schema_version_node(manager).await?;
     Ok(())
 }
 
@@ -167,11 +164,7 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                 )
                 .col(ColumnDef::new(ModelInfo::BaseModel).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModelName).string().not_null())
-                .col(
-                    ColumnDef::new(ModelInfo::ModelScaleListJson)
-                        .text()
-                        .not_null(),
-                )
+                .col(ColumnDef::new(ModelInfo::ModelScale).string().not_null())
                 .col(
                     ColumnDef::new(ModelInfo::RequiredModelNameListJson)
                         .text()
@@ -481,6 +474,7 @@ async fn create_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .name("idx_model_info_base_model")
                 .table(ModelInfo::Table)
                 .col(ModelInfo::BaseModel)
+                .col(ModelInfo::ModelScale)
                 .unique()
                 .if_not_exists()
                 .to_owned(),
@@ -559,19 +553,6 @@ async fn create_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         )
         .await?;
 
-    Ok(())
-}
-
-async fn persist_schema_version_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    manager
-        .get_connection()
-        .execute(Statement::from_string(
-            manager.get_database_backend(),
-            format!(
-                "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('local_schema_version', '{LOCAL_SCHEMA_VERSION}')"
-            ),
-        ))
-        .await?;
     Ok(())
 }
 
@@ -688,7 +669,7 @@ enum ModelInfo {
     Id,
     BaseModel,
     ModelName,
-    ModelScaleListJson,
+    ModelScale,
     RequiredModelNameListJson,
     RequiredModelRepoIdListJson,
     SupportedFeatureListJson,

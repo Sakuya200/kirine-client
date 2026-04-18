@@ -38,9 +38,12 @@ function Get-RelativeArchivePath {
     return $normalizedFullPath.Substring($normalizedRoot.Length).TrimStart([char[]]@([char]92, [char]47))
 }
 
-$excludeDirectoryNames = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache')
+$excludeDirectoryNames = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'venv', '.venv')
 $excludeExtensions = @('.pyc', '.pyo')
-$sourceDirectories = @('scripts', 'qwen3_tts', 'vox_cpm2')
+$modelScriptExtensions = @('.py', '.ps1', '.sh')
+$modelRequirementFileNames = @('requirements.txt', 'requirements-dev.txt')
+$sourceDirectories = @('scripts')
+$modelDirectories = @('qwen3_tts', 'vox_cpm2')
 
 if (Test-Path -LiteralPath $OutputFile) {
     Remove-Item -LiteralPath $OutputFile -Force
@@ -70,6 +73,40 @@ try {
                     return
                 }
 
+                $entryPath = $relativePath -replace '\\', '/'
+                $entry = $archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+                $entryStream = $entry.Open()
+                try {
+                    $fileStream = [System.IO.File]::OpenRead($fullPath)
+                    try {
+                        $fileStream.CopyTo($entryStream)
+                    }
+                    finally {
+                        $fileStream.Dispose()
+                    }
+                }
+                finally {
+                    $entryStream.Dispose()
+                }
+            }
+        }
+
+        foreach ($directoryName in $modelDirectories) {
+            $directoryPath = Join-Path $srcModelRoot $directoryName
+            if (-not (Test-Path -LiteralPath $directoryPath)) {
+                throw "Source directory not found: $directoryPath"
+            }
+
+            Get-ChildItem -LiteralPath $directoryPath -File | ForEach-Object {
+                $fullPath = $_.FullName
+                $fileName = $_.Name
+                $extension = $_.Extension.ToLowerInvariant()
+
+                if (($modelScriptExtensions -notcontains $extension) -and ($modelRequirementFileNames -notcontains $fileName)) {
+                    return
+                }
+
+                $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $fullPath
                 $entryPath = $relativePath -replace '\\', '/'
                 $entry = $archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
                 $entryStream = $entry.Open()
