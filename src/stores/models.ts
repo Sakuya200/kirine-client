@@ -15,9 +15,10 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   requiredModelNameList: Array.isArray(item.requiredModelNameList) ? item.requiredModelNameList.filter(name => typeof name === 'string') : [],
   requiredModelRepoIdList: Array.isArray(item.requiredModelRepoIdList) ? item.requiredModelRepoIdList.filter(name => typeof name === 'string') : [],
   supportedFeatureList: Array.isArray(item.supportedFeatureList)
-    ? item.supportedFeatureList.filter(
-        feature => feature === HistoryTaskType.TextToSpeech || feature === HistoryTaskType.VoiceClone || feature === HistoryTaskType.ModelTraining
-      )
+    ? item.supportedFeatureList
+        .filter((feature): feature is string => typeof feature === 'string')
+        .map(feature => feature.trim())
+        .filter(Boolean)
     : [],
   createTime: item.createTime ?? '',
   modifyTime: item.modifyTime ?? ''
@@ -71,6 +72,9 @@ export const useModelStore = defineStore('models', () => {
       .map(variants => variants.find(item => item.supportedFeatureList.includes(feature)))
       .filter((item): item is ModelInfo => Boolean(item));
 
+  const supportsModelFeature = (baseModel: BaseModel, modelScale: string, feature: string) =>
+    (byBaseModel.value.get(baseModel) ?? []).some(item => item.modelScale === modelScale && item.supportedFeatureList.includes(feature));
+
   const getModelLabel = (baseModel: BaseModel) => byBaseModel.value.get(baseModel)?.[0]?.modelName ?? baseModel;
 
   const getModelScaleOptions = (baseModel: BaseModel) =>
@@ -88,6 +92,7 @@ export const useModelStore = defineStore('models', () => {
     ensureLoaded,
     getModelsByFeature,
     getModelLabel,
-    getModelScaleOptions
+    getModelScaleOptions,
+    supportsModelFeature
   };
 });

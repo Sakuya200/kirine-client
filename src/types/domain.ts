@@ -97,7 +97,7 @@ export interface ModelInfo {
   modelScale: string;
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
-  supportedFeatureList: HistoryTaskType[];
+  supportedFeatureList: string[];
   createTime: string;
   modifyTime: string;
 }

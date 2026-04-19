@@ -92,7 +92,7 @@ struct TtsPaths {
 struct TtsTaskExecution {
     base_model: BaseModel,
     model_scale: String,
-    model_path: String,
+    model_root_path: String,
     format: TextToSpeechFormat,
     text: String,
     cfg_value: f64,
@@ -138,7 +138,8 @@ impl VoxCpm2ModelTaskPipeline {
 
             self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
-            self.validate_tts_environment(&paths, &params)?;
+            let model_path = self.resolve_tts_inference_model_path(&params)?;
+            self.validate_tts_environment(&paths, &model_path, &params.output_file_path)?;
 
             let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
             self.run_tts_command(
@@ -146,6 +147,7 @@ impl VoxCpm2ModelTaskPipeline {
                 request.task_id,
                 &log_dir,
                 &params,
+                &model_path,
                 &temp_wav_path,
                 runtime,
             )
@@ -221,7 +223,7 @@ impl VoxCpm2ModelTaskPipeline {
         Ok(TtsTaskExecution {
             base_model: task_detail.base_model,
             model_scale: task_detail.model_scale.trim().to_string(),
-            model_path: resolve_runtime_model_path(
+            model_root_path: resolve_runtime_model_path(
                 Path::new(service.model_dir()),
                 &src_model_root,
                 &task_detail.model_path.unwrap_or_default(),
@@ -307,8 +309,7 @@ impl VoxCpm2ModelTaskPipeline {
             return Ok(());
         }
 
-        let mut download_script_args =
-            vec!["--base-model".to_string(), paths.base_model.clone()];
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         download_script_args.extend(vox_cpm2_download_script_args(
             &paths.src_model_root,
             &paths.model_scale,
@@ -328,6 +329,14 @@ impl VoxCpm2ModelTaskPipeline {
         self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
 
         Ok(())
+    }
+
+    fn resolve_tts_inference_model_path(&self, params: &TtsTaskExecution) -> Result<String> {
+        Ok(
+            resolve_inference_model_path(Path::new(&params.model_root_path))?
+                .to_string_lossy()
+                .to_string(),
+        )
     }
 
     fn tts_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
@@ -368,7 +377,9 @@ impl VoxCpm2ModelTaskPipeline {
     fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
         let mut missing_paths = Vec::new();
 
-        for path in vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+        for path in
+            vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
+        {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
             }
@@ -384,7 +395,12 @@ impl VoxCpm2ModelTaskPipeline {
         )
     }
 
-    fn validate_tts_environment(&self, paths: &TtsPaths, params: &TtsTaskExecution) -> Result<()> {
+    fn validate_tts_environment(
+        &self,
+        paths: &TtsPaths,
+        model_path: &str,
+        output_file_path: &str,
+    ) -> Result<()> {
         for (label, path) in [
             ("VoxCPM2 tts venv python", &paths.venv_python_path),
             (
@@ -406,11 +422,11 @@ impl VoxCpm2ModelTaskPipeline {
             }
         }
 
-        if !Path::new(&params.model_path).exists() {
-            bail!("VoxCPM2 model path not found: {}", params.model_path);
+        if !Path::new(model_path).exists() {
+            bail!("VoxCPM2 model path not found: {}", model_path);
         }
 
-        ensure_parent_dir(Path::new(&params.output_file_path), "voxcpm2 tts output")?;
+        ensure_parent_dir(Path::new(output_file_path), "voxcpm2 tts output")?;
         Ok(())
     }
 
@@ -420,12 +436,13 @@ impl VoxCpm2ModelTaskPipeline {
         task_id: i64,
         log_dir: &Path,
         params: &TtsTaskExecution,
+        model_path: &str,
         temp_wav_path: &Path,
         runtime: TtsRuntimeOptions,
     ) -> Result<()> {
         info!(
             tts_script = %paths.tts_python_script_path.display(),
-            model_path = %params.model_path,
+            model_path = %model_path,
             output_path = %temp_wav_path.display(),
             device = runtime.device(),
             mode = %runtime.mode_label(&params.base_model)?,
@@ -448,7 +465,7 @@ impl VoxCpm2ModelTaskPipeline {
             "python command completed successfully",
             vec![
                 "--init-model-path".to_string(),
-                params.model_path.clone(),
+                model_path.to_string(),
                 "--text".to_string(),
                 params.text.clone(),
                 "--cfg-value".to_string(),

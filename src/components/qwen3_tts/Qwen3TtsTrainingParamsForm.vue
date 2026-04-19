@@ -3,6 +3,7 @@ import { computed } from 'vue';
 
 interface Props {
   modelValue: Record<string, unknown>;
+  supportsLora?: boolean;
 }
 
 const props = defineProps<Props>();

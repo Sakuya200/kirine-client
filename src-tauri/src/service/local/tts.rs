@@ -78,7 +78,7 @@ impl LocalService {
             &model_root_path,
         )?;
         let inference_model_path = if base_model == VOX_CPM2_BASE_MODEL {
-            resolve_inference_model_path(&base_model, &resolved_model_root_path)?
+            resolved_model_root_path.clone()
         } else if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
             qwen3_tts_preset_custom_voice_model_path(&src_model_root, &model_scale)?
         } else {

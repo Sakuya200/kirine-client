@@ -54,6 +54,10 @@ struct TrainingParams {
     base_model: BaseModel,
     model_scale: String,
     training_mode: String,
+    use_lora: bool,
+    lora_rank: i64,
+    lora_alpha: i64,
+    lora_dropout: String,
     batch_size: i64,
     epoch_count: i64,
     gradient_accumulation_steps: i64,
@@ -211,11 +215,16 @@ impl VoxCpm2ModelTaskPipeline {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务参数"))?;
         let params = serde_json::from_str::<VoxCpm2TrainingModelParams>(&row.model_params_json)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let params = params.normalized();
 
         Ok(TrainingParams {
             base_model: row.base_model,
             model_scale: row.model_scale.trim().to_string(),
-            training_mode: params.training_mode.to_string(),
+            training_mode: params.training_mode_value().to_string(),
+            use_lora: params.use_lora(),
+            lora_rank: params.lora_rank(),
+            lora_alpha: params.lora_alpha(),
+            lora_dropout: params.lora_dropout(),
             batch_size: params.batch_size,
             epoch_count: params.epoch_count,
             gradient_accumulation_steps: params.gradient_accumulation_steps,
@@ -495,7 +504,12 @@ impl VoxCpm2ModelTaskPipeline {
             batch_size = params.batch_size,
             epoch_count = params.epoch_count,
             script = %paths.train_python_script_path.display(),
-            training_mode = %runtime.mode_label(&paths.base_model)?,
+            training_mode = %params.training_mode,
+            use_lora = params.use_lora,
+            lora_rank = params.lora_rank,
+            lora_alpha = params.lora_alpha,
+            lora_dropout = params.lora_dropout,
+            runtime_mode = %runtime.mode_label(&paths.base_model)?,
             device = runtime.training_device(),
             "starting voxcpm2 training.py through direct python invocation"
         );
@@ -541,6 +555,12 @@ impl VoxCpm2ModelTaskPipeline {
                 params.gradient_accumulation_steps.to_string(),
                 "--training-mode".to_string(),
                 params.training_mode.clone(),
+                "--lora-rank".to_string(),
+                params.lora_rank.to_string(),
+                "--lora-alpha".to_string(),
+                params.lora_alpha.to_string(),
+                "--lora-dropout".to_string(),
+                params.lora_dropout.clone(),
                 gradient_flag.to_string(),
             ],
         )

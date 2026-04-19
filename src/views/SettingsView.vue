@@ -10,7 +10,7 @@ import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation, HARDWARE_TYPE_TEXT, HardwareType, LoraMode } from '@/enums/settings';
+import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation, HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 
@@ -24,10 +24,6 @@ interface SettingsForm {
   logCacheDir: string;
   hardwareType: HardwareType;
   attnImplementation: AttentionImplementation;
-  loraMode: LoraMode;
-  loraRank: number;
-  loraAlpha: number;
-  loraDropout: string;
 }
 
 interface SettingsResponse extends SettingsForm {
@@ -43,15 +39,10 @@ const DEFAULT_SETTINGS_FORM: SettingsForm = {
   dataDir: '',
   logCacheDir: '',
   hardwareType: HardwareType.Cpu,
-  attnImplementation: AttentionImplementation.Sdpa,
-  loraMode: LoraMode.Disabled,
-  loraRank: 16,
-  loraAlpha: 32,
-  loraDropout: '0.05'
+  attnImplementation: AttentionImplementation.Sdpa
 };
 
 const form = reactive<SettingsForm>({ ...DEFAULT_SETTINGS_FORM });
-const loraDisabledOptions = [{ label: '已暂时禁用', value: LoraMode.Disabled }];
 const attnImplementationOptions = Object.values(AttentionImplementation).map(value => ({
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
@@ -81,8 +72,6 @@ const canSaveConnection = computed(() => !isLoading.value && !isSaving.value);
 
 const canSaveModel = computed(() => !isLoading.value && !isSaving.value);
 
-const canSaveTrainingRuntime = computed(() => !isLoading.value && !isSaving.value);
-
 const canSaveCache = computed(() => !isLoading.value && !isSaving.value);
 
 const applySettings = (payload: SettingsForm) => {
@@ -93,10 +82,6 @@ const applySettings = (payload: SettingsForm) => {
   form.logCacheDir = payload.logCacheDir;
   form.hardwareType = payload.hardwareType;
   form.attnImplementation = payload.attnImplementation;
-  form.loraMode = LoraMode.Disabled;
-  form.loraRank = payload.loraRank;
-  form.loraAlpha = payload.loraAlpha;
-  form.loraDropout = payload.loraDropout;
 };
 
 const loadSettings = async () => {
@@ -114,12 +99,7 @@ const loadSettings = async () => {
 };
 
 const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
-  const isSectionValid =
-    section === 'connection'
-      ? canSaveConnection.value
-      : section === 'model'
-        ? canSaveModel.value && canSaveTrainingRuntime.value
-        : canSaveCache.value;
+  const isSectionValid = section === 'connection' ? canSaveConnection.value : section === 'model' ? canSaveModel.value : canSaveCache.value;
 
   if (!isSectionValid) {
     return;
@@ -136,11 +116,7 @@ const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
         dataDir: form.dataDir,
         logCacheDir: form.logCacheDir,
         hardwareType: form.hardwareType,
-        attnImplementation: form.attnImplementation,
-        loraMode: form.loraMode,
-        loraRank: form.loraRank,
-        loraAlpha: form.loraAlpha,
-        loraDropout: form.loraDropout
+        attnImplementation: form.attnImplementation
       }
     });
     applySettings(payload);
@@ -202,7 +178,7 @@ onMounted(async () => {
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <p class="rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2 text-xs leading-5 text-stone-600">
-              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。任务页面不再单独覆盖硬件类型。
+              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。训练参数与 LoRA 配置已迁移到对应任务页面。
             </p>
             <label class="block">
               <span class="mb-1 block text-xs text-stone-500">模型目录</span>
@@ -220,50 +196,7 @@ onMounted(async () => {
               label="注意力实现"
               :options="attnImplementationOptions"
             />
-            <section class="space-y-3 rounded-2xl border border-brand-100 bg-stone-50/80 p-4">
-              <header class="space-y-1">
-                <h3 class="text-sm font-semibold text-stone-700">LoRA 训练参数</h3>
-                <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-                  当前 LoRA 微调 TTS 模型的效果较差，已暂时禁止使用。相关配置仅保留只读展示，应用保存时也会强制关闭 LoRA。
-                </p>
-              </header>
-              <BaseListbox v-model="form.loraMode" label="LoRA 模式" :options="loraDisabledOptions" disabled />
-              <div class="grid gap-3 md:grid-cols-3">
-                <label class="block">
-                  <span class="mb-1 block text-xs text-stone-500">Rank</span>
-                  <input
-                    v-model.number="form.loraRank"
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled
-                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
-                  />
-                </label>
-                <label class="block">
-                  <span class="mb-1 block text-xs text-stone-500">Alpha</span>
-                  <input
-                    v-model.number="form.loraAlpha"
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled
-                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
-                  />
-                </label>
-                <label class="block">
-                  <span class="mb-1 block text-xs text-stone-500">Dropout</span>
-                  <input
-                    v-model="form.loraDropout"
-                    type="text"
-                    inputmode="decimal"
-                    disabled
-                    class="w-full rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-slate-500"
-                  />
-                </label>
-              </div>
-            </section>
-            <BaseButton tone="ghost" :disabled="!canSaveModel || !canSaveTrainingRuntime" @click="saveSettings('model')">
+            <BaseButton tone="ghost" :disabled="!canSaveModel" @click="saveSettings('model')">
               <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />
               <FolderIcon v-else class="h-4 w-4" aria-hidden="true" />
               <span>{{ isSaving ? '保存中...' : '保存资源配置' }}</span>

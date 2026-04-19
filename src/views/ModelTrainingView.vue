@@ -71,6 +71,7 @@ interface ModelTrainingTaskResultPayload {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const LORA_FEATURE = 'lora';
 
 const createQwen3TrainingParams = () => ({
   epochCount: 30,
@@ -81,14 +82,34 @@ const createQwen3TrainingParams = () => ({
 
 const createVoxCpm2TrainingParams = () => ({
   trainingMode: 'lora',
+  useLora: true,
+  loraRank: 32,
+  loraAlpha: 32,
+  loraDropout: '0.0',
   epochCount: 2,
   batchSize: 4,
   gradientAccumulationSteps: 1,
   enableGradientCheckpointing: false
 });
 
+const normalizeVoxCpm2TrainingParams = (modelParams: Record<string, unknown>) => {
+  const defaults = createVoxCpm2TrainingParams();
+  const legacyTrainingMode = String(modelParams.trainingMode ?? '').trim();
+  const useLora = typeof modelParams.useLora === 'boolean' ? modelParams.useLora : legacyTrainingMode !== 'full';
+
+  return {
+    ...defaults,
+    ...modelParams,
+    useLora,
+    trainingMode: useLora ? 'lora' : 'full',
+    loraRank: Number(modelParams.loraRank ?? defaults.loraRank),
+    loraAlpha: Number(modelParams.loraAlpha ?? defaults.loraAlpha),
+    loraDropout: String(modelParams.loraDropout ?? defaults.loraDropout).trim() || defaults.loraDropout
+  };
+};
+
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2TrainingParams(), ...modelParams } : { ...createQwen3TrainingParams(), ...modelParams };
+  baseModel === VOX_CPM2_BASE_MODEL ? normalizeVoxCpm2TrainingParams(modelParams) : { ...createQwen3TrainingParams(), ...modelParams };
 
 const form = reactive({
   language: AppLanguage.Chinese,
@@ -131,6 +152,7 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
 const activeTrainingParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : Qwen3TtsTrainingParamsForm));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
@@ -719,13 +741,17 @@ onBeforeUnmount(() => {
             />
             <div>
               <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-              <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" />
+              <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
             </div>
             <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>训练摘要</p>
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
               <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
-              <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.trainingMode === 'full' ? '全量微调' : 'LoRA 微调' }}。</p>
+              <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.useLora ? 'LoRA 微调' : '全量微调' }}。</p>
+              <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
+                LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
+                {{ form.modelParams.loraDropout ?? 0 }}。
+              </p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
               <p class="mt-1">
                 当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点

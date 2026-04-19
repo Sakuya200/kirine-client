@@ -33,8 +33,8 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, Qwen3TtsTrainingModelParams, SpeakerSource,
-            SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
+            ModelTrainingTaskResult, Qwen3TtsTrainingModelParams, SpeakerSource, SpeakerStatus,
+            TaskStatus, VoxCpm2TrainingModelParams,
         },
         pipeline::model_paths::{llm_model_display_name, speaker_model_dir},
         LocalService,
@@ -102,9 +102,14 @@ impl LocalService {
         let base_model = payload.base_model.trim().to_string();
         let model_scale = payload.model_scale.trim().to_string();
         let model_params = if base_model == "vox_cpm2" {
-            serde_json::to_value(serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?)?
+            serde_json::to_value(
+                serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?
+                    .normalized(),
+            )?
         } else {
-            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(payload.model_params.clone())?)?
+            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(
+                payload.model_params.clone(),
+            )?)?
         };
         let selected_training_mode_text = format!(
             "{} / {}",
@@ -216,6 +221,31 @@ impl LocalService {
         if matches!(selected_training_hardware, HardwareType::Cpu) {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
         }
+        if base_model == "vox_cpm2" {
+            let use_lora = model_params
+                .get("useLora")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if use_lora {
+                notes.push(format!(
+                    "LoRA 微调参数: rank {}，alpha {}，dropout {}。",
+                    model_params
+                        .get("loraRank")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(32),
+                    model_params
+                        .get("loraAlpha")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(32),
+                    model_params
+                        .get("loraDropout")
+                        .and_then(Value::as_str)
+                        .unwrap_or("0.0")
+                ));
+            } else {
+                notes.push("当前使用全量微调，不启用 LoRA 适配器。".into());
+            }
+        }
         if payload
             .samples
             .iter()
@@ -232,7 +262,7 @@ impl LocalService {
             base_model: Set(base_model.clone()),
             model_scale: Set(model_scale.clone()),
             model_name: Set(speaker_name.clone()),
-            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
+            model_params_json: Set(serde_json::to_string(&model_params)?),
             sample_count: Set(sample_count),
             samples_json: Set(serde_json::to_string(&prepared.persisted_samples)?),
             notes_json: Set(serde_json::to_string(&notes)?),

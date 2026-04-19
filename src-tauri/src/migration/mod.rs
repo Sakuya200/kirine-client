@@ -6,10 +6,11 @@ use sea_orm_migration::prelude::*;
 use crate::Result;
 
 mod create_local_schema;
+mod add_vox_cpm2_lora_feature_flag;
 mod seed_qwen3_tts_preset_speakers;
 mod seed_vox_cpm2_model_info;
 
-const LOCAL_SCHEMA_VERSION: &str = "16";
+const LOCAL_SCHEMA_VERSION: &str = "17";
 
 pub(crate) struct Migrator;
 
@@ -20,6 +21,7 @@ impl MigratorTrait for Migrator {
             Box::new(create_local_schema::Migration),
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
             Box::new(seed_vox_cpm2_model_info::Migration),
+            Box::new(add_vox_cpm2_lora_feature_flag::Migration),
         ]
     }
 }
@@ -63,10 +65,18 @@ mod tests {
             .iter()
             .map(|item| format!("{}:{}", item.base_model, item.model_scale))
             .collect::<Vec<_>>();
+        let vox_info = model_infos
+            .iter()
+            .find(|item| item.base_model == "vox_cpm2" && item.model_scale == "2B")
+            .expect("vox model info should exist");
 
         assert!(scales.contains(&"qwen3_tts:1.7B".to_string()));
         assert!(scales.contains(&"qwen3_tts:0.6B".to_string()));
         assert!(scales.contains(&"vox_cpm2:2B".to_string()));
+        assert!(vox_info
+            .supported_feature_list
+            .iter()
+            .any(|feature| feature == "lora"));
 
         let speakers = harness.list_speakers().await.expect("list speakers");
         let speaker_names = speakers
