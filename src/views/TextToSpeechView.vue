@@ -141,21 +141,13 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
 const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
-const requiresSpeakerSelection = computed(() => !isVoxCpm2Model.value);
 const activeTextToSpeechParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TextToSpeechParamsForm : Qwen3TtsTextToSpeechParamsForm));
 const canGenerate = computed(
-  () =>
-    (!requiresSpeakerSelection.value || form.speakerId !== null) &&
-    Boolean(form.language) &&
-    charCount.value > 0 &&
-    !isGenerating.value &&
-    !!form.modelScale
+  () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
 );
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
-  requiresSpeakerSelection.value
-    ? `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`
-    : '当前模型不依赖预设说话人，将直接使用 VoxCPM2 基础模型。',
+  `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_tts'}。`,
   isVoxCpm2Model.value
@@ -216,12 +208,6 @@ watch(
 watch(
   speakerOptions,
   options => {
-    if (!requiresSpeakerSelection.value) {
-      form.speakerId = null;
-      selectedSpeakerOption.value = null;
-      return;
-    }
-
     if (options.length === 0) {
       form.speakerId = null;
       selectedSpeakerOption.value = null;
@@ -239,10 +225,6 @@ watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeTtsModelParams(nextBaseModel, form.modelParams);
-    if (nextBaseModel === VOX_CPM2_BASE_MODEL) {
-      form.speakerId = null;
-      selectedSpeakerOption.value = null;
-    }
   },
   { immediate: true }
 );
@@ -326,8 +308,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
 };
 
 const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
-  const matchedSpeakerOption =
-    item.baseModel === VOX_CPM2_BASE_MODEL ? null : (speakerOptions.value.find(option => option.value === item.speakerId) ?? null);
+  const matchedSpeakerOption = speakerOptions.value.find(option => option.value === item.speakerId) ?? null;
 
   stopActiveTaskStatusRefresh();
   activeResult.value = setAsActiveResult ? item : null;
@@ -557,17 +538,12 @@ onMounted(async () => {
       <PanelCard title="基础参数">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox
-            v-if="requiresSpeakerSelection"
             v-model="form.speakerId"
             v-model:selected-option="selectedSpeakerOption"
             label="说话人"
             :options="speakerOptions"
             :placeholder="speakerOptions.length > 0 ? '请选择说话人' : '暂无可用说话人'"
           />
-          <div v-else class="rounded-2xl border border-brand-200 bg-white/85 px-3 py-2 text-sm text-stone-600">
-            <span class="mb-1 block text-xs text-stone-500">说话人</span>
-            VoxCPM2 直接使用基础模型推理，不需要选择现有说话人。
-          </div>
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />

@@ -23,10 +23,8 @@ use crate::{
             SpeakerStatus, TaskStatus, TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
         },
         pipeline::{
-            qwen3_tts::qwen3_tts_preset_custom_voice_model_path,
-            resolve_inference_model_path,
-            script_paths::resolve_src_model_root,
-            vox_cpm2::{vox_cpm2_base_model_path, VOX_CPM2_BASE_MODEL},
+            qwen3_tts::qwen3_tts_preset_custom_voice_model_path, resolve_inference_model_path,
+            script_paths::resolve_src_model_root, vox_cpm2::VOX_CPM2_BASE_MODEL,
         },
         LocalService,
     },
@@ -49,61 +47,45 @@ impl LocalService {
         let speaker_id = payload.speaker_id;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
         let model_scale = payload.model_scale.trim().to_string();
-        let (task_speaker_id, history_speaker_id, speaker_label, inference_model_path) =
-            if base_model == VOX_CPM2_BASE_MODEL {
-                let base_model_path = vox_cpm2_base_model_path(&src_model_root, &model_scale)?;
-                let inference_model_path =
-                    resolve_inference_model_path(&base_model, &base_model_path)?;
-                (
-                    0_i64,
-                    None,
-                    "VoxCPM2 Base Voice".to_string(),
-                    inference_model_path,
+        let speaker = speaker_entity::Entity::find_by_id(speaker_id)
+            .filter(speaker_entity::Column::Deleted.eq(0))
+            .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
+            .filter(speaker_entity::Column::BaseModel.eq(base_model.as_str()))
+            .one(&txn)
+            .await?;
+        let speaker_label = speaker
+            .as_ref()
+            .map(|model| model.name.clone())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "未找到与当前基础模型匹配的可用说话人",
                 )
-            } else {
-                let speaker = speaker_entity::Entity::find_by_id(speaker_id)
-                    .filter(speaker_entity::Column::Deleted.eq(0))
-                    .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
-                    .filter(speaker_entity::Column::BaseModel.eq(base_model.as_str()))
-                    .one(&txn)
-                    .await?;
-                let speaker_label = speaker
-                    .as_ref()
-                    .map(|model| model.name.clone())
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::NotFound,
-                            "未找到与当前基础模型匹配的可用说话人",
-                        )
-                    })?;
-                let model_root_path = speaker
-                    .and_then(|model| model.model_path)
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "当前说话人尚未生成可用于文本转语音的本地模型",
-                        )
-                    })?;
-                let resolved_model_root_path = resolve_runtime_model_path(
-                    Path::new(self.model_dir()),
-                    &src_model_root,
-                    &model_root_path,
-                )?;
-                let inference_model_path =
-                    if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
-                        qwen3_tts_preset_custom_voice_model_path(&src_model_root, &model_scale)?
-                    } else {
-                        resolve_inference_model_path(&base_model, &resolved_model_root_path)?
-                    };
-                (
-                    speaker_id,
-                    Some(speaker_id),
-                    speaker_label,
-                    inference_model_path,
+            })?;
+        let model_root_path = speaker
+            .and_then(|model| model.model_path)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "当前说话人尚未生成可用于文本转语音的本地模型",
                 )
-            };
+            })?;
+        let resolved_model_root_path = resolve_runtime_model_path(
+            Path::new(self.model_dir()),
+            &src_model_root,
+            &model_root_path,
+        )?;
+        let inference_model_path = if base_model == VOX_CPM2_BASE_MODEL {
+            resolve_inference_model_path(&base_model, &resolved_model_root_path)?
+        } else if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
+            qwen3_tts_preset_custom_voice_model_path(&src_model_root, &model_scale)?
+        } else {
+            resolve_inference_model_path(&base_model, &resolved_model_root_path)?
+        };
+        let task_speaker_id = speaker_id;
+        let history_speaker_id = Some(speaker_id);
         let text = payload.text.trim().to_string();
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
         let model_params = if base_model == VOX_CPM2_BASE_MODEL {
