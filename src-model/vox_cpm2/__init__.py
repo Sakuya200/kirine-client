@@ -20,8 +20,9 @@ class RuntimeTarget:
 def load_dependencies() -> SimpleNamespace:
     import soundfile as sf
     from voxcpm import VoxCPM
+    from voxcpm.model.voxcpm2 import LoRAConfig
 
-    return SimpleNamespace(sf=sf, VoxCPM=VoxCPM)
+    return SimpleNamespace(sf=sf, VoxCPM=VoxCPM, LoRAConfig=LoRAConfig)
 
 
 def is_cpu_device(device: str) -> bool:
@@ -133,6 +134,22 @@ def resolve_checkpoint_path(
     )
 
 
+def load_lora_config_dict(checkpoint_path: Path) -> dict[str, object] | None:
+    lora_config_path = checkpoint_path / "lora_config.json"
+    if not lora_config_path.exists():
+        return None
+
+    with lora_config_path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    lora_config = payload.get("lora_config")
+    if lora_config is None:
+        return None
+    if not isinstance(lora_config, dict):
+        raise ValueError(f"Invalid VoxCPM LoRA config payload: {lora_config_path}")
+    return lora_config
+
+
 def resolve_runtime_target(init_model_path: str) -> RuntimeTarget:
     model_root = Path(init_model_path).expanduser().resolve()
     metadata_path = model_root / RUNTIME_METADATA_FILE_NAME
@@ -153,6 +170,17 @@ def resolve_runtime_target(init_model_path: str) -> RuntimeTarget:
             not base_model_path and not base_model_relative_path
         ):
             raise ValueError(f"Invalid VoxCPM runtime metadata: {metadata_path}")
+        checkpoint_path = resolve_checkpoint_path(
+            model_root,
+            metadata_path,
+            training_mode,
+            latest_checkpoint_path,
+            latest_checkpoint_relative_path,
+        )
+        load_kwargs: dict[str, object] = {"lora_weights_path": str(checkpoint_path)}
+        lora_config_dict = load_lora_config_dict(checkpoint_path)
+        if lora_config_dict is not None:
+            load_kwargs["lora_config_dict"] = lora_config_dict
         return RuntimeTarget(
             model_path=str(
                 resolve_base_model_path(
@@ -161,17 +189,7 @@ def resolve_runtime_target(init_model_path: str) -> RuntimeTarget:
                     base_model_relative_path,
                 )
             ),
-            load_kwargs={
-                "lora_weights_path": str(
-                    resolve_checkpoint_path(
-                        model_root,
-                        metadata_path,
-                        training_mode,
-                        latest_checkpoint_path,
-                        latest_checkpoint_relative_path,
-                    )
-                )
-            },
+            load_kwargs=load_kwargs,
         )
 
     if training_mode == "full":
@@ -197,10 +215,14 @@ def load_model_and_dependencies(init_model_path: str, device: str):
     prepare_runtime_environment(device)
     deps = load_dependencies()
     runtime_target = resolve_runtime_target(init_model_path)
+    load_kwargs = dict(runtime_target.load_kwargs)
+    lora_config_dict = load_kwargs.pop("lora_config_dict", None)
+    if lora_config_dict is not None:
+        load_kwargs["lora_config"] = deps.LoRAConfig(**lora_config_dict)
     model = deps.VoxCPM.from_pretrained(
         runtime_target.model_path,
         load_denoiser=False,
         optimize=resolve_optimize_flag(device),
-        **runtime_target.load_kwargs,
+        **load_kwargs,
     )
     return model, deps

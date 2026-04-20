@@ -216,6 +216,13 @@ def resolve_num_workers() -> int:
     return max(2, min(4, cpu_count))
 
 
+def resolve_warmup_steps(max_steps: int) -> int:
+    if max_steps <= 1:
+        return max_steps
+
+    return min(100, max(1, math.ceil(max_steps * 0.1)), max_steps - 1)
+
+
 def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_model_path: Path) -> dict[str, object]:
     checkpoint_dir = output_model_path / "checkpoints" / args.training_mode
     tensorboard_dir = output_model_path / "logs" / args.training_mode
@@ -245,7 +252,7 @@ def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_mo
         "save_interval": max(100, max_steps),
         "learning_rate": 1e-4 if args.training_mode == "lora" else 1e-5,
         "weight_decay": 0.01,
-        "warmup_steps": min(100, max_steps),
+        "warmup_steps": resolve_warmup_steps(max_steps),
         "max_steps": max_steps,
         "max_batch_tokens": 8192,
         "save_path": str(checkpoint_dir),

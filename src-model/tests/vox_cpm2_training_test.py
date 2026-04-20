@@ -135,11 +135,78 @@ class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
 
         self.assertEqual(config["num_iters"], 9)
         self.assertEqual(config["max_steps"], 9)
+        self.assertEqual(config["warmup_steps"], 1)
         self.assertEqual(config["log_interval"], 3)
         self.assertGreaterEqual(config["num_workers"], 2)
 
+    def test_resolve_warmup_steps_stays_below_max_steps_for_multi_step_training(self):
+        module = load_module()
+
+        self.assertEqual(module.resolve_warmup_steps(1), 1)
+        self.assertEqual(module.resolve_warmup_steps(2), 1)
+        self.assertEqual(module.resolve_warmup_steps(9), 1)
+        self.assertEqual(module.resolve_warmup_steps(84), 9)
+        self.assertEqual(module.resolve_warmup_steps(300), 30)
+
 
 class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
+    def test_resolve_runtime_target_includes_checkpoint_lora_config(self):
+        module = load_runtime_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            fake_init_path = temp_root / "src-model" / "vox_cpm2" / "__init__.py"
+            fake_init_path.parent.mkdir(parents=True, exist_ok=True)
+            fake_init_path.write_text("# stub", encoding="utf-8")
+
+            base_model_dir = temp_root / "src-model" / "base-models" / "VoxCPM2"
+            base_model_dir.mkdir(parents=True, exist_ok=True)
+            runtime_model_dir = temp_root / "models" / "13_hare"
+            checkpoint_dir = runtime_model_dir / "checkpoints" / "lora" / "latest"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            (checkpoint_dir / "lora_config.json").write_text(
+                json.dumps(
+                    {
+                        "base_model": str(base_model_dir),
+                        "lora_config": {
+                            "enable_lm": True,
+                            "enable_dit": True,
+                            "enable_proj": False,
+                            "r": 16,
+                            "alpha": 32,
+                            "dropout": 0.0,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            metadata_path = runtime_model_dir / module.RUNTIME_METADATA_FILE_NAME
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "trainingMode": "lora",
+                        "baseModelPath": str(base_model_dir),
+                        "latestCheckpointPath": str(checkpoint_dir),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(module, "__file__", str(fake_init_path)), patch.object(
+                module, "SRC_MODEL_ROOT", temp_root / "src-model"
+            ):
+                runtime_target = module.resolve_runtime_target(str(runtime_model_dir))
+
+        self.assertEqual(runtime_target.model_path, str(base_model_dir.resolve()))
+        self.assertEqual(
+            runtime_target.load_kwargs["lora_weights_path"],
+            str(checkpoint_dir.resolve()),
+        )
+        self.assertEqual(runtime_target.load_kwargs["lora_config_dict"]["r"], 16)
+        self.assertEqual(runtime_target.load_kwargs["lora_config_dict"]["alpha"], 32)
+
     def test_resolve_runtime_target_uses_relative_fallbacks_when_absolute_paths_move(self):
         module = load_runtime_module()
 
@@ -179,6 +246,47 @@ class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
             runtime_target.load_kwargs["lora_weights_path"],
             str(checkpoint_dir.resolve()),
         )
+
+    def test_load_model_and_dependencies_uses_resolved_lora_config(self):
+        module = load_runtime_module()
+
+        captured: dict[str, object] = {}
+
+        class FakeLoRAConfig:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        class FakeVoxCPM:
+            @classmethod
+            def from_pretrained(cls, model_path, **kwargs):
+                captured["model_path"] = model_path
+                captured["kwargs"] = kwargs
+                return "fake-model"
+
+        fake_deps = SimpleNamespace(sf="fake-sf", VoxCPM=FakeVoxCPM, LoRAConfig=FakeLoRAConfig)
+        runtime_target = module.RuntimeTarget(
+            model_path="D:/base-models/VoxCPM2",
+            load_kwargs={
+                "lora_weights_path": "D:/models/13_hare/checkpoints/lora/latest",
+                "lora_config_dict": {"r": 16, "alpha": 32},
+            },
+        )
+
+        with patch.object(module, "load_dependencies", return_value=fake_deps), patch.object(
+            module, "resolve_runtime_target", return_value=runtime_target
+        ):
+            model, deps = module.load_model_and_dependencies("D:/models/13_hare", "cuda:0")
+
+        self.assertEqual(model, "fake-model")
+        self.assertIs(deps, fake_deps)
+        self.assertEqual(captured["model_path"], "D:/base-models/VoxCPM2")
+        self.assertEqual(
+            captured["kwargs"]["lora_weights_path"],
+            "D:/models/13_hare/checkpoints/lora/latest",
+        )
+        self.assertEqual(captured["kwargs"]["lora_config"].kwargs["r"], 16)
+        self.assertEqual(captured["kwargs"]["lora_config"].kwargs["alpha"], 32)
+        self.assertNotIn("lora_config_dict", captured["kwargs"])
 
     def test_resolve_runtime_target_falls_back_to_default_base_model_for_legacy_metadata(self):
         module = load_runtime_module()
