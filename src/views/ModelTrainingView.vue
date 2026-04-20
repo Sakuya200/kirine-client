@@ -8,6 +8,7 @@ import {
   ArrowUpTrayIcon,
   CheckCircleIcon,
   CpuChipIcon,
+  StopCircleIcon,
   TrashIcon,
   ArchiveBoxArrowDownIcon
 } from '@heroicons/vue/24/outline';
@@ -124,6 +125,7 @@ const form = reactive({
 });
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
 const isStarting = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
 const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
@@ -193,6 +195,10 @@ const trainingBusyLabel = computed(() => {
     return '正在创建模型训练任务，请稍候';
   }
 
+  if (isCancelling.value) {
+    return '正在请求终止模型训练任务，请稍候';
+  }
+
   if (activeTrainingTask.value?.status === TaskStatus.Pending || activeTrainingTask.value?.status === TaskStatus.Running) {
     return '任务执行中，页面会持续刷新状态';
   }
@@ -260,6 +266,7 @@ const syncActiveTaskStatusRefresh = () => {
   if (
     !activeTrainingTask.value ||
     activeTrainingTask.value.status === TaskStatus.Completed ||
+    activeTrainingTask.value.status === TaskStatus.Cancelled ||
     activeTrainingTask.value.status === TaskStatus.Failed
   ) {
     return;
@@ -486,6 +493,7 @@ const refreshActiveTaskStatus = async () => {
   if (
     !activeTrainingTask.value ||
     activeTrainingTask.value.status === TaskStatus.Completed ||
+    activeTrainingTask.value.status === TaskStatus.Cancelled ||
     activeTrainingTask.value.status === TaskStatus.Failed
   ) {
     stopActiveTaskStatusRefresh();
@@ -512,13 +520,40 @@ const refreshActiveTaskStatus = async () => {
       item.id === currentTaskId ? ({ ...item, status: updatedTask.status } as ModelTrainingHistoryRecord) : item
     );
 
-    if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Failed) {
+    if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Cancelled || updatedTask.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
     console.log(formatErrorMessage('刷新模型训练任务状态失败，请检查 Rust 后端日志', error));
   } finally {
     isActiveTaskRefreshInFlight = false;
+  }
+};
+
+const cancelActiveTrainingTask = async () => {
+  if (!activeTrainingTask.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_model_training_task', {
+      historyId: activeTrainingTask.value.taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${activeTrainingTask.value.taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks({ silentOnError: true });
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止模型训练任务失败', error));
+  } finally {
+    isCancelling.value = false;
   }
 };
 
@@ -765,10 +800,28 @@ onBeforeUnmount(() => {
               <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
               <span>{{ isStarting ? '创建中...' : '开始训练' }}</span>
             </BaseButton>
+            <BaseButton
+              v-if="activeTrainingTask && [TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
+              tone="quiet"
+              :disabled="isCancelling"
+              @click="cancelActiveTrainingTask"
+            >
+              <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
+              <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
+              <span>{{ isCancelling ? '终止中...' : '终止当前任务' }}</span>
+            </BaseButton>
             <BaseButton tone="ghost" @click="resetForm">
               <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
               <span>重置表单</span>
             </BaseButton>
+          </div>
+          <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-3 text-xs text-stone-600">
+            <p>当前活动任务</p>
+            <p class="mt-1">
+              任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
+              {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
+            </p>
+            <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
           </div>
         </PanelCard>
 

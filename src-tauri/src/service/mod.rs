@@ -69,6 +69,7 @@ pub trait Service: Send + Sync {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult>;
+    async fn cancel_model_training_task(&self, history_id: i64) -> Result<bool>;
     async fn create_voice_clone_task(
         &self,
         payload: CreateVoiceCloneTaskPayload,

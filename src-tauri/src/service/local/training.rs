@@ -67,6 +67,44 @@ enum AnnotationFileFormat {
 }
 
 impl LocalService {
+    fn build_training_schedule_summary(
+        prepared_sample_count: usize,
+        model_params: &Value,
+    ) -> Option<(i64, i64, i64, i64, i64, i64)> {
+        let epoch_count = model_params
+            .get("epochCount")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let batch_size = model_params
+            .get("batchSize")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let gradient_accumulation_steps = model_params
+            .get("gradientAccumulationSteps")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let prepared_sample_count = prepared_sample_count as i64;
+        if prepared_sample_count <= 0 {
+            return None;
+        }
+
+        let effective_batch_size = batch_size
+            .saturating_mul(gradient_accumulation_steps)
+            .max(1);
+        let steps_per_epoch =
+            ((prepared_sample_count + effective_batch_size - 1) / effective_batch_size).max(1);
+        let total_steps = steps_per_epoch.saturating_mul(epoch_count).max(1);
+
+        Some((
+            epoch_count,
+            batch_size,
+            gradient_accumulation_steps,
+            effective_batch_size,
+            steps_per_epoch,
+            total_steps,
+        ))
+    }
+
     fn reference_text_score(text: &str) -> usize {
         text.chars().filter(|ch| !ch.is_whitespace()).count()
     }
@@ -193,6 +231,13 @@ impl LocalService {
             ),
             format!("训练模式: {}。", selected_training_mode_text),
             format!(
+                "配置轮数 {}。",
+                model_params
+                    .get("epochCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+            format!(
                 "梯度检查点: {}。",
                 if model_params
                     .get("enableGradientCheckpointing")
@@ -218,6 +263,30 @@ impl LocalService {
                 serialize_task_path(Path::new(self.data_dir()), &prepared.index_jsonl_path)
             ),
         ];
+        if let Some((
+            epoch_count,
+            batch_size,
+            gradient_accumulation_steps,
+            effective_batch_size,
+            steps_per_epoch,
+            total_steps,
+        )) = Self::build_training_schedule_summary(prepared.index_entries.len(), &model_params)
+        {
+            notes.push(format!(
+                "按当前配置，每个外层 step 约处理 {} 条样本（batch {} × 梯度累积 {}）。",
+                effective_batch_size, batch_size, gradient_accumulation_steps
+            ));
+            notes.push(format!(
+                "预计每轮约 {} 步，总计约 {} 步。",
+                steps_per_epoch, total_steps
+            ));
+            if base_model == "vox_cpm2" {
+                notes.push(format!(
+                    "VoxCPM2 的 epoch 进度按外层 step × {} / 样本数计算，配置 {} 轮时应在约 {} 步内结束。",
+                    effective_batch_size, epoch_count, total_steps
+                ));
+            }
+        }
         if matches!(selected_training_hardware, HardwareType::Cpu) {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
         }
@@ -287,6 +356,18 @@ impl LocalService {
             create_time,
             status: TaskStatus::Running,
         })
+    }
+
+    pub(crate) async fn cancel_model_training_task_impl(&self, history_id: i64) -> Result<bool> {
+        let record = self.get_history_record_impl(history_id).await?;
+        if record.task_type != HistoryTaskType::ModelTraining {
+            bail!("当前任务不是模型微调任务，无法终止");
+        }
+        if !matches!(record.status, TaskStatus::Pending | TaskStatus::Running) {
+            bail!("当前任务已经结束，无法再次终止");
+        }
+
+        self.request_active_training_cancel(history_id)
     }
 
     fn prepare_training_data(

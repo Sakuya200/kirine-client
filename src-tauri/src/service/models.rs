@@ -113,6 +113,7 @@ pub enum TaskStatus {
     Pending,
     Running,
     Completed,
+    Cancelled,
     Failed,
 }
 
@@ -122,12 +123,13 @@ impl TaskStatus {
             Self::Pending => "pending",
             Self::Running => "running",
             Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
             Self::Failed => "failed",
         }
     }
 
     pub const fn is_finished(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed)
+        matches!(self, Self::Completed | Self::Cancelled | Self::Failed)
     }
 }
 
@@ -182,6 +184,7 @@ impl FromStr for TaskStatus {
             "pending" => Ok(Self::Pending),
             "running" => Ok(Self::Running),
             "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
             "failed" => Ok(Self::Failed),
             other => Err(format!("不支持的任务状态: {}", other)),
         }

@@ -34,6 +34,7 @@ const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
   { value: TaskStatus.Pending, label: '待执行' },
   { value: TaskStatus.Running, label: '执行中' },
   { value: TaskStatus.Completed, label: '已完成' },
+  { value: TaskStatus.Cancelled, label: '已终止' },
   { value: TaskStatus.Failed, label: '失败' }
 ];
 
@@ -142,6 +143,25 @@ const closeDetail = () => {
   selectedRecordId.value = null;
 };
 
+const cancelTrainingTask = async (historyId: number) => {
+  isMutating.value = true;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_model_training_task', { historyId });
+    if (!accepted) {
+      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      return;
+    }
+
+    await loadHistory();
+    uiStore.notifySuccess(`已发送任务 ${historyId} 的终止请求。`, 2600);
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止模型训练任务失败', error));
+  } finally {
+    isMutating.value = false;
+  }
+};
+
 onMounted(async () => {
   await loadHistory();
 });
@@ -217,7 +237,7 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <HistoryTaskDetailDialog :open="selectedRecord !== null" :record="selectedRecord" @close="closeDetail" />
+    <HistoryTaskDetailDialog :open="selectedRecord !== null" :record="selectedRecord" @close="closeDetail" @cancel="cancelTrainingTask" />
 
     <BaseDialog :open="deleteTarget !== null" title="删除历史任务" @close="closeDeleteDialog">
       <p class="text-sm text-slate-600">

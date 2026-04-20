@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +26,8 @@ def ensure_src_root_on_path() -> None:
 ensure_src_root_on_path()
 
 from vox_cpm2 import RUNTIME_METADATA_FILE_NAME
+
+SRC_MODEL_ROOT = Path(__file__).resolve().parents[1]
 
 VOXCPM_REPO_GIT_URL = "https://github.com/OpenBMB/VoxCPM.git"
 VOXCPM_REPO_ARCHIVE_URL = "https://codeload.github.com/OpenBMB/VoxCPM/zip/refs/heads/main"
@@ -181,13 +185,35 @@ def resolve_train_script_path(explicit_path: str) -> Path:
     )
 
 
-def estimate_max_steps(train_jsonl: Path, batch_size: int, num_epochs: int) -> int:
+def count_training_samples(train_jsonl: Path) -> int:
     with train_jsonl.open("r", encoding="utf-8") as file:
         sample_count = sum(1 for line in file if line.strip())
     if sample_count <= 0:
         raise ValueError(f"Training manifest contains no samples: {train_jsonl}")
-    steps_per_epoch = max(1, sample_count // max(1, batch_size))
-    return max(steps_per_epoch * max(1, num_epochs), max(1, num_epochs))
+    return sample_count
+
+
+def estimate_training_schedule(
+    train_jsonl: Path,
+    batch_size: int,
+    gradient_accumulation_steps: int,
+    num_epochs: int,
+) -> dict[str, int]:
+    sample_count = count_training_samples(train_jsonl)
+    effective_batch_size = max(1, batch_size) * max(1, gradient_accumulation_steps)
+    steps_per_epoch = max(1, math.ceil(sample_count / effective_batch_size))
+    total_steps = max(1, steps_per_epoch * max(1, num_epochs))
+    return {
+        "sample_count": sample_count,
+        "effective_batch_size": effective_batch_size,
+        "steps_per_epoch": steps_per_epoch,
+        "total_steps": total_steps,
+    }
+
+
+def resolve_num_workers() -> int:
+    cpu_count = os.cpu_count() or 2
+    return max(2, min(4, cpu_count))
 
 
 def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_model_path: Path) -> dict[str, object]:
@@ -196,7 +222,14 @@ def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_mo
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     tensorboard_dir.mkdir(parents=True, exist_ok=True)
 
-    max_steps = estimate_max_steps(train_jsonl, args.batch_size, args.num_epochs)
+    schedule = estimate_training_schedule(
+        train_jsonl,
+        args.batch_size,
+        args.gradient_accumulation_steps,
+        args.num_epochs,
+    )
+    max_steps = schedule["total_steps"]
+    steps_per_epoch = schedule["steps_per_epoch"]
     config: dict[str, object] = {
         "pretrained_path": str(Path(args.init_model_path).expanduser().resolve()),
         "train_manifest": str(train_jsonl),
@@ -205,9 +238,9 @@ def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_mo
         "out_sample_rate": 48000,
         "batch_size": args.batch_size,
         "grad_accum_steps": max(1, args.gradient_accumulation_steps),
-        "num_workers": 2,
+        "num_workers": resolve_num_workers(),
         "num_iters": max_steps,
-        "log_interval": 10,
+        "log_interval": max(1, min(10, steps_per_epoch)),
         "valid_interval": max_steps,
         "save_interval": max(100, max_steps),
         "learning_rate": 1e-4 if args.training_mode == "lora" else 1e-5,
@@ -245,12 +278,21 @@ def resolve_latest_checkpoint(checkpoint_root: Path) -> Path:
     raise FileNotFoundError(f"No training checkpoint found under: {checkpoint_root}")
 
 
+def optional_relative_path(path: Path, root: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return ""
+
+
 def write_runtime_metadata(output_model_path: Path, init_model_path: Path, training_mode: str, latest_checkpoint: Path) -> None:
     metadata_path = output_model_path / RUNTIME_METADATA_FILE_NAME
     metadata = {
         "trainingMode": training_mode,
         "baseModelPath": str(init_model_path.resolve()),
+        "baseModelRelativePath": optional_relative_path(init_model_path, SRC_MODEL_ROOT),
         "latestCheckpointPath": str(latest_checkpoint.resolve()),
+        "latestCheckpointRelativePath": optional_relative_path(latest_checkpoint, output_model_path),
     }
     with metadata_path.open("w", encoding="utf-8") as file:
         json.dump(metadata, file, ensure_ascii=False, indent=2)

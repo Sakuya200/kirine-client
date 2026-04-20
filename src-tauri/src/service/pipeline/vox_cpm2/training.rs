@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
@@ -23,9 +24,7 @@ use crate::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
             LocalService,
         },
-        models::{
-            SpeakerStatus, TaskStatus, UpdateTaskStatusPayload, VoxCpm2TrainingModelParams,
-        },
+        models::{SpeakerStatus, TaskStatus, UpdateTaskStatusPayload, VoxCpm2TrainingModelParams},
         pipeline::{
             model_paths::{llm_model_display_name, speaker_model_dir},
             script_paths::{
@@ -37,7 +36,10 @@ use crate::{
     },
     utils::{
         audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
-        process::{run_logged_command, run_logged_python_script},
+        process::{
+            run_logged_command, run_logged_python_script, run_logged_python_script_cancellable,
+            LoggedCommandResult,
+        },
         time::now_string,
     },
     Result,
@@ -131,12 +133,25 @@ impl TrainingCommandLabel {
 }
 
 impl VoxCpm2ModelTaskPipeline {
+    fn training_output_model_dir(model_dir: &Path, speaker_id: i64, speaker_name: &str) -> PathBuf {
+        speaker_model_dir(
+            model_dir,
+            speaker_id,
+            &crate::service::local::sanitize_path_segment(speaker_name),
+        )
+    }
+
+    fn cancellation_requested(cancel_rx: &watch::Receiver<bool>) -> bool {
+        *cancel_rx.borrow()
+    }
+
     pub(super) async fn run_training_pipeline_impl(
         &self,
         service: &LocalService,
         request: TrainingPipelineRequest,
     ) -> Result<()> {
         let started_at = Instant::now();
+        let cancel_rx = service.active_training_cancel_receiver(request.task_id)?;
 
         let result = async {
             self.mark_training_running(service, request.task_id, request.speaker_id)
@@ -144,7 +159,8 @@ impl VoxCpm2ModelTaskPipeline {
             let params = self
                 .load_training_params(service, request.task_id, request.speaker_id)
                 .await?;
-            let runtime = TrainingRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
+            let runtime =
+                TrainingRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
             let paths = self.resolve_training_paths(
                 service,
                 request.task_id,
@@ -157,46 +173,65 @@ impl VoxCpm2ModelTaskPipeline {
 
             self.prepare_model_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.normalize_training_audio_inputs(&paths, request.task_id, &log_dir)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.run_training_command(
                 &paths,
                 request.task_id,
                 &log_dir,
                 &params,
                 runtime,
-            )
-            .await?;
-
-            self.mark_training_completed(
-                service,
-                request.task_id,
-                request.speaker_id,
-                started_at.elapsed().as_secs() as i64,
+                cancel_rx.clone(),
             )
             .await
         }
         .await;
 
-        if let Err(err) = result {
-            let duration_seconds = started_at.elapsed().as_secs() as i64;
-            let error_message = err.to_string();
-            if let Err(update_err) = self
-                .mark_training_failed(
+        match result {
+            Ok(LoggedCommandResult::Completed) => {
+                self.mark_training_completed(
                     service,
                     request.task_id,
                     request.speaker_id,
-                    duration_seconds,
-                    &error_message,
+                    started_at.elapsed().as_secs() as i64,
                 )
-                .await
-            {
-                error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist voxcpm2 training failure state");
+                .await?;
+                Ok(())
             }
-            return Err(err);
+            Ok(LoggedCommandResult::Cancelled) => {
+                self.mark_training_cancelled(
+                    service,
+                    request.task_id,
+                    request.speaker_id,
+                    started_at.elapsed().as_secs() as i64,
+                )
+                .await?;
+                Ok(())
+            }
+            Err(err) => {
+                let duration_seconds = started_at.elapsed().as_secs() as i64;
+                let error_message = err.to_string();
+                if let Err(update_err) = self
+                    .mark_training_failed(
+                        service,
+                        request.task_id,
+                        request.speaker_id,
+                        duration_seconds,
+                        &error_message,
+                    )
+                    .await
+                {
+                    error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist voxcpm2 training failure state");
+                }
+                Err(err)
+            }
         }
-
-        Ok(())
     }
 
     async fn load_training_params(
@@ -211,7 +246,12 @@ impl VoxCpm2ModelTaskPipeline {
             .filter(training_task_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| format!("failed to load voxcpm2 training params for task {}", task_id))?
+            .with_context(|| {
+                format!(
+                    "failed to load voxcpm2 training params for task {}",
+                    task_id
+                )
+            })?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务参数"))?;
         let params = serde_json::from_str::<VoxCpm2TrainingModelParams>(&row.model_params_json)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
@@ -244,16 +284,26 @@ impl VoxCpm2ModelTaskPipeline {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
-        let init_task_runtime_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
+        let init_task_runtime_script_path =
+            src_model_root.join(platform.init_task_runtime_relative_path());
         let download_models_script_path =
             src_model_root.join(platform.download_models_relative_path());
-        let ffmpeg_python_script_path = src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
-        let train_python_script_path = src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
+        let ffmpeg_python_script_path =
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let train_python_script_path =
+            src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
         let init_model_path = vox_cpm2_base_model_path(&src_model_root, model_scale)?;
-        let resource_name = format!("{}_{}", speaker_id, crate::service::local::sanitize_path_segment(speaker_name));
-        let sample_root = task_sample_dir(Path::new(service.data_dir()), crate::service::models::HistoryTaskType::ModelTraining, task_id);
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            crate::service::models::HistoryTaskType::ModelTraining,
+            task_id,
+        );
         let input_jsonl = training_index_jsonl_path(&sample_root);
-        let output_model_dir = speaker_model_dir(Path::new(service.model_dir()), speaker_id, &resource_name);
+        let output_model_dir = Self::training_output_model_dir(
+            Path::new(service.model_dir()),
+            speaker_id,
+            speaker_name,
+        );
 
         for (label, path) in [
             ("init-task-runtime script", &init_task_runtime_script_path),
@@ -269,7 +319,10 @@ impl VoxCpm2ModelTaskPipeline {
             bail!("Training source jsonl not found: {}", input_jsonl.display());
         }
         std::fs::create_dir_all(&output_model_dir).with_context(|| {
-            format!("failed to create voxcpm2 training output directory: {}", output_model_dir.display())
+            format!(
+                "failed to create voxcpm2 training output directory: {}",
+                output_model_dir.display()
+            )
         })?;
 
         Ok(TrainingPaths {
@@ -321,8 +374,7 @@ impl VoxCpm2ModelTaskPipeline {
             return Ok(());
         }
 
-        let mut download_script_args =
-            vec!["--base-model".to_string(), paths.base_model.clone()];
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         download_script_args.extend(vox_cpm2_download_script_args(
             &paths.src_model_root,
             &paths.model_scale,
@@ -382,7 +434,9 @@ impl VoxCpm2ModelTaskPipeline {
     fn validate_prepared_model_downloads(&self, paths: &TrainingPaths) -> Result<()> {
         let mut missing_paths = Vec::new();
 
-        for path in vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+        for path in
+            vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
+        {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
             }
@@ -405,7 +459,10 @@ impl VoxCpm2ModelTaskPipeline {
         log_dir: &Path,
     ) -> Result<()> {
         let raw = std::fs::read_to_string(&paths.input_jsonl).with_context(|| {
-            format!("failed to read training source jsonl: {}", paths.input_jsonl.display())
+            format!(
+                "failed to read training source jsonl: {}",
+                paths.input_jsonl.display()
+            )
         })?;
         let mut normalized_lines = Vec::new();
         let mut normalized_paths = HashMap::<String, String>::new();
@@ -415,9 +472,10 @@ impl VoxCpm2ModelTaskPipeline {
             if trimmed.is_empty() {
                 continue;
             }
-            let mut value = serde_json::from_str::<serde_json::Value>(trimmed).with_context(|| {
-                format!("training index line {} is not valid json", line_number + 1)
-            })?;
+            let mut value =
+                serde_json::from_str::<serde_json::Value>(trimmed).with_context(|| {
+                    format!("training index line {} is not valid json", line_number + 1)
+                })?;
 
             for field in ["audio", "ref_audio"] {
                 if let Some(path_value) = value.get(field).and_then(serde_json::Value::as_str) {
@@ -437,8 +495,15 @@ impl VoxCpm2ModelTaskPipeline {
             normalized_lines.push(serde_json::to_string(&value)?);
         }
 
-        std::fs::write(&paths.input_jsonl, format!("{}\n", normalized_lines.join("\n"))).with_context(|| {
-            format!("failed to rewrite normalized training index: {}", paths.input_jsonl.display())
+        std::fs::write(
+            &paths.input_jsonl,
+            format!("{}\n", normalized_lines.join("\n")),
+        )
+        .with_context(|| {
+            format!(
+                "failed to rewrite normalized training index: {}",
+                paths.input_jsonl.display()
+            )
         })?;
 
         info!(
@@ -467,7 +532,11 @@ impl VoxCpm2ModelTaskPipeline {
         }
 
         let output_path = resolve_normalized_wav_sidecar_path(input_path);
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::ModelTraining, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::ModelTraining,
+            task_id,
+        );
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -497,7 +566,8 @@ impl VoxCpm2ModelTaskPipeline {
         log_dir: &Path,
         params: &TrainingParams,
         runtime: TrainingRuntimeOptions,
-    ) -> Result<()> {
+        mut cancel_rx: watch::Receiver<bool>,
+    ) -> Result<LoggedCommandResult> {
         info!(
             train_jsonl = %paths.input_jsonl.display(),
             output_model_dir = %paths.output_model_dir.display(),
@@ -515,13 +585,23 @@ impl VoxCpm2ModelTaskPipeline {
         );
 
         if !paths.venv_python_path.exists() {
-            bail!("Training venv python not found: {}", paths.venv_python_path.display());
+            bail!(
+                "Training venv python not found: {}",
+                paths.venv_python_path.display()
+            );
         }
         if !paths.init_model_path.exists() {
-            bail!("Training base model path not found: {}", paths.init_model_path.display());
+            bail!(
+                "Training base model path not found: {}",
+                paths.init_model_path.display()
+            );
         }
 
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::ModelTraining, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::ModelTraining,
+            task_id,
+        );
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
         let gradient_flag = if params.enable_gradient_checkpointing {
             "--enable-gradient-checkpointing"
@@ -529,7 +609,7 @@ impl VoxCpm2ModelTaskPipeline {
             "--no-enable-gradient-checkpointing"
         };
 
-        run_logged_python_script(
+        run_logged_python_script_cancellable(
             &paths.venv_python_path,
             &paths.train_python_script_path,
             &paths.src_model_root,
@@ -563,6 +643,7 @@ impl VoxCpm2ModelTaskPipeline {
                 params.lora_dropout.clone(),
                 gradient_flag.to_string(),
             ],
+            &mut cancel_rx,
         )
         .await
     }
@@ -577,7 +658,11 @@ impl VoxCpm2ModelTaskPipeline {
         label: TrainingCommandLabel,
     ) -> Result<()> {
         let platform = ScriptPlatform::current();
-        let task_log_path = task_log_file_path(log_dir, crate::service::models::HistoryTaskType::ModelTraining, task_id);
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::ModelTraining,
+            task_id,
+        );
         let mut args = platform.shell_args(script_path);
         args.push("--log-path".to_string());
         args.push(log_dir.to_string_lossy().to_string());
@@ -632,6 +717,25 @@ impl VoxCpm2ModelTaskPipeline {
             .await?;
         self.update_speaker_status(service, speaker_id, SpeakerStatus::Ready)
             .await?;
+        Ok(())
+    }
+
+    async fn mark_training_cancelled(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        speaker_id: i64,
+        duration_seconds: i64,
+    ) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Cancelled,
+                duration_seconds: Some(duration_seconds),
+                error_message: Some("模型训练任务已由用户终止。".to_string()),
+            })
+            .await?;
+        let _ = self.delete_failed_speaker(service, speaker_id).await?;
         Ok(())
     }
 

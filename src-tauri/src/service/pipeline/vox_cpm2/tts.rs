@@ -633,6 +633,10 @@ pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<Pat
         return Ok(model_root_path.to_path_buf());
     }
 
+    if let Some(path) = resolve_nested_training_checkpoint_path(model_root_path)? {
+        return Ok(path);
+    }
+
     let mut checkpoint_dirs = fs::read_dir(model_root_path)
         .with_context(|| {
             format!(
@@ -661,6 +665,71 @@ pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<Pat
             model_root_path.display()
         )
     })
+}
+
+fn resolve_nested_training_checkpoint_path(model_root_path: &Path) -> Result<Option<PathBuf>> {
+    let checkpoints_root = model_root_path.join("checkpoints");
+    if !checkpoints_root.is_dir() {
+        return Ok(None);
+    }
+
+    let mut latest_dirs = Vec::new();
+    let mut step_dirs = Vec::new();
+
+    for mode_entry in fs::read_dir(&checkpoints_root).with_context(|| {
+        format!(
+            "failed to inspect voxcpm2 checkpoints root: {}",
+            checkpoints_root.display()
+        )
+    })? {
+        let Ok(mode_entry) = mode_entry else {
+            continue;
+        };
+        let Ok(file_type) = mode_entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let mode_path = mode_entry.path();
+        let latest_path = mode_path.join("latest");
+        if is_model_checkpoint_dir(&latest_path) {
+            latest_dirs.push(latest_path.clone());
+        }
+
+        for checkpoint_entry in fs::read_dir(&mode_path).with_context(|| {
+            format!(
+                "failed to inspect voxcpm2 checkpoint mode directory: {}",
+                mode_path.display()
+            )
+        })? {
+            let Ok(checkpoint_entry) = checkpoint_entry else {
+                continue;
+            };
+            let Ok(file_type) = checkpoint_entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let checkpoint_path = checkpoint_entry.path();
+            if checkpoint_path == latest_path {
+                continue;
+            }
+            if is_model_checkpoint_dir(&checkpoint_path) {
+                step_dirs.push(checkpoint_path);
+            }
+        }
+    }
+
+    latest_dirs.sort();
+    if let Some(path) = latest_dirs.pop() {
+        return Ok(Some(path));
+    }
+
+    step_dirs.sort();
+    Ok(step_dirs.pop())
 }
 
 fn is_model_checkpoint_dir(path: &Path) -> bool {

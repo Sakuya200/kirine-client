@@ -1,8 +1,10 @@
 import importlib
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -14,6 +16,13 @@ if str(SRC_MODEL_ROOT) not in sys.path:
 
 def load_module():
     module_name = "vox_cpm2.training"
+    sys.modules.pop(module_name, None)
+    sys.modules.setdefault("yaml", SimpleNamespace(safe_dump=lambda *args, **kwargs: None))
+    return importlib.import_module(module_name)
+
+
+def load_runtime_module():
+    module_name = "vox_cpm2"
     sys.modules.pop(module_name, None)
     return importlib.import_module(module_name)
 
@@ -61,6 +70,154 @@ class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
                 resolved = module.resolve_train_script_path("")
 
             self.assertEqual(resolved, vendor_script.resolve())
+
+    def test_estimate_training_schedule_accounts_for_gradient_accumulation(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = temp_root / "train.jsonl"
+            rows = [
+                {"audio": f"sample-{index}.wav", "ref_audio": "ref.wav", "text": f"line-{index}"}
+                for index in range(166)
+            ]
+            manifest_path.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            schedule = module.estimate_training_schedule(
+                manifest_path,
+                batch_size=2,
+                gradient_accumulation_steps=4,
+                num_epochs=4,
+            )
+
+        self.assertEqual(schedule["sample_count"], 166)
+        self.assertEqual(schedule["effective_batch_size"], 8)
+        self.assertEqual(schedule["steps_per_epoch"], 21)
+        self.assertEqual(schedule["total_steps"], 84)
+
+    def test_build_training_config_uses_schedule_derived_steps(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = temp_root / "train.jsonl"
+            output_dir = temp_root / "output"
+            rows = [
+                {"audio": f"sample-{index}.wav", "ref_audio": "ref.wav", "text": f"line-{index}"}
+                for index in range(9)
+            ]
+            manifest_path.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            args = module.parse_args(
+                [
+                    "--train-jsonl",
+                    str(manifest_path),
+                    "--output-model-path",
+                    str(output_dir),
+                    "--init-model-path",
+                    str(temp_root),
+                    "--batch-size",
+                    "2",
+                    "--num-epochs",
+                    "3",
+                    "--gradient-accumulation-steps",
+                    "2",
+                ]
+            )
+
+            config = module.build_training_config(args, manifest_path, output_dir)
+
+        self.assertEqual(config["num_iters"], 9)
+        self.assertEqual(config["max_steps"], 9)
+        self.assertEqual(config["log_interval"], 3)
+        self.assertGreaterEqual(config["num_workers"], 2)
+
+
+class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
+    def test_resolve_runtime_target_uses_relative_fallbacks_when_absolute_paths_move(self):
+        module = load_runtime_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            fake_init_path = temp_root / "src-model" / "vox_cpm2" / "__init__.py"
+            fake_init_path.parent.mkdir(parents=True, exist_ok=True)
+            fake_init_path.write_text("# stub", encoding="utf-8")
+
+            base_model_dir = temp_root / "src-model" / "base-models" / "VoxCPM2"
+            base_model_dir.mkdir(parents=True, exist_ok=True)
+            runtime_model_dir = temp_root / "models" / "13_hare"
+            checkpoint_dir = runtime_model_dir / "checkpoints" / "lora" / "latest"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            metadata_path = runtime_model_dir / module.RUNTIME_METADATA_FILE_NAME
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "trainingMode": "lora",
+                        "baseModelPath": str(temp_root / "missing" / "VoxCPM2"),
+                        "baseModelRelativePath": "base-models/VoxCPM2",
+                        "latestCheckpointPath": str(temp_root / "missing" / "latest"),
+                        "latestCheckpointRelativePath": "checkpoints/lora/latest",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(module, "__file__", str(fake_init_path)), patch.object(
+                module, "SRC_MODEL_ROOT", temp_root / "src-model"
+            ):
+                runtime_target = module.resolve_runtime_target(str(runtime_model_dir))
+
+        self.assertEqual(runtime_target.model_path, str(base_model_dir.resolve()))
+        self.assertEqual(
+            runtime_target.load_kwargs["lora_weights_path"],
+            str(checkpoint_dir.resolve()),
+        )
+
+    def test_resolve_runtime_target_falls_back_to_default_base_model_for_legacy_metadata(self):
+        module = load_runtime_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            fake_init_path = temp_root / "src-model" / "vox_cpm2" / "__init__.py"
+            fake_init_path.parent.mkdir(parents=True, exist_ok=True)
+            fake_init_path.write_text("# stub", encoding="utf-8")
+
+            base_model_dir = temp_root / "src-model" / "base-models" / "VoxCPM2"
+            base_model_dir.mkdir(parents=True, exist_ok=True)
+            runtime_model_dir = temp_root / "models" / "legacy_hare"
+            checkpoint_dir = runtime_model_dir / "checkpoints" / "lora" / "step_84"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            metadata_path = runtime_model_dir / module.RUNTIME_METADATA_FILE_NAME
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "trainingMode": "lora",
+                        "baseModelPath": str(temp_root / "missing" / "VoxCPM2"),
+                        "latestCheckpointPath": str(temp_root / "missing" / "step_84"),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(module, "__file__", str(fake_init_path)), patch.object(
+                module, "SRC_MODEL_ROOT", temp_root / "src-model"
+            ):
+                runtime_target = module.resolve_runtime_target(str(runtime_model_dir))
+
+        self.assertEqual(runtime_target.model_path, str(base_model_dir.resolve()))
+        self.assertEqual(
+            runtime_target.load_kwargs["lora_weights_path"],
+            str(checkpoint_dir.resolve()),
+        )
 
 
 if __name__ == "__main__":

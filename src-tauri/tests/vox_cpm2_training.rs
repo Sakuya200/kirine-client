@@ -63,3 +63,29 @@ async fn voxcpm2_training_task_accepts_legacy_training_mode_payload() -> Result<
 
     harness.shutdown().await
 }
+
+#[tokio::test]
+async fn voxcpm2_training_task_notes_include_schedule_summary() -> Result<()> {
+    let harness = LocalServiceHarness::new("vox-training-notes").await?;
+
+    let task = harness.create_vox_training_task().await?;
+    let record = harness.get_history_record(task.task_id).await?;
+    let detail = match record.detail {
+        serde_json::Value::Object(map) => map,
+        other => panic!("expected model training detail object, got {other:?}"),
+    };
+    let notes = detail
+        .get("notes")
+        .and_then(serde_json::Value::as_array)
+        .expect("expected notes array");
+    let note_text = notes
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(note_text.contains("配置轮数 2。"));
+    assert!(note_text.contains("预计每轮约 1 步，总计约 2 步。"));
+
+    harness.shutdown().await
+}

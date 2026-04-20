@@ -53,3 +53,8 @@ rand = "0.8"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 calamine = "0.26"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+] }

@@ -176,6 +176,20 @@ pub async fn create_model_training_task(
 }
 
 #[tauri::command]
+pub async fn cancel_model_training_task(
+    history_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<bool, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .cancel_model_training_task(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub async fn create_voice_clone_task(
     payload: CreateVoiceCloneTaskPayload,
     state: State<'_, ServiceState>,

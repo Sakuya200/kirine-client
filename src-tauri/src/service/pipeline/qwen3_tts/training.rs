@@ -8,6 +8,7 @@ use std::{
 use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
@@ -44,7 +45,10 @@ use crate::{
     },
     utils::{
         audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
-        process::{run_logged_command, run_logged_python_script},
+        process::{
+            run_logged_command, run_logged_python_script, run_logged_python_script_cancellable,
+            LoggedCommandResult,
+        },
         time::now_string,
     },
     Result,
@@ -149,12 +153,17 @@ impl TrainingCommandLabel {
 }
 
 impl Qwen3TTSModelTaskPipeline {
+    fn cancellation_requested(cancel_rx: &watch::Receiver<bool>) -> bool {
+        *cancel_rx.borrow()
+    }
+
     pub(super) async fn run_training_pipeline_impl(
         &self,
         service: &LocalService,
         request: TrainingPipelineRequest,
     ) -> Result<()> {
         let started_at = Instant::now();
+        let cancel_rx = service.active_training_cancel_receiver(request.task_id)?;
 
         let result = async {
             self.mark_training_running(service, request.task_id, request.speaker_id)
@@ -176,10 +185,19 @@ impl Qwen3TTSModelTaskPipeline {
 
             self.prepare_model_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.normalize_training_audio_inputs(&paths, request.task_id, &log_dir)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.run_encode_audio(&paths, request.task_id, &log_dir, runtime)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.run_training_command(
                 &paths,
                 request.task_id,
@@ -187,38 +205,51 @@ impl Qwen3TTSModelTaskPipeline {
                 &request.speaker_name,
                 &params,
                 runtime,
-            )
-            .await?;
-
-            self.mark_training_completed(
-                service,
-                request.task_id,
-                request.speaker_id,
-                started_at.elapsed().as_secs() as i64,
+                cancel_rx.clone(),
             )
             .await
         }
         .await;
 
-        if let Err(err) = result {
-            let duration_seconds = started_at.elapsed().as_secs() as i64;
-            let error_message = err.to_string();
-            if let Err(update_err) = self
-                .mark_training_failed(
+        match result {
+            Ok(LoggedCommandResult::Completed) => {
+                self.mark_training_completed(
                     service,
                     request.task_id,
                     request.speaker_id,
-                    duration_seconds,
-                    &error_message,
+                    started_at.elapsed().as_secs() as i64,
                 )
-                .await
-            {
-                error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist training failure state");
+                .await?;
+                Ok(())
             }
-            return Err(err);
+            Ok(LoggedCommandResult::Cancelled) => {
+                self.mark_training_cancelled(
+                    service,
+                    request.task_id,
+                    request.speaker_id,
+                    started_at.elapsed().as_secs() as i64,
+                )
+                .await?;
+                Ok(())
+            }
+            Err(err) => {
+                let duration_seconds = started_at.elapsed().as_secs() as i64;
+                let error_message = err.to_string();
+                if let Err(update_err) = self
+                    .mark_training_failed(
+                        service,
+                        request.task_id,
+                        request.speaker_id,
+                        duration_seconds,
+                        &error_message,
+                    )
+                    .await
+                {
+                    error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist training failure state");
+                }
+                Err(err)
+            }
         }
-
-        Ok(())
     }
 
     async fn load_training_params(
@@ -653,7 +684,8 @@ impl Qwen3TTSModelTaskPipeline {
         speaker_name: &str,
         params: &TrainingParams,
         runtime: TrainingRuntimeOptions,
-    ) -> Result<()> {
+        mut cancel_rx: watch::Receiver<bool>,
+    ) -> Result<LoggedCommandResult> {
         let training_config = load_configs().context(
             "failed to load config.toml before resolving training attention implementation",
         )?;
@@ -716,7 +748,7 @@ impl Qwen3TTSModelTaskPipeline {
             "--no-enable-gradient-checkpointing".to_string()
         });
 
-        run_logged_python_script(
+        run_logged_python_script_cancellable(
             &paths.venv_python_path,
             &paths.train_python_script_path,
             &paths.src_model_root,
@@ -724,6 +756,7 @@ impl Qwen3TTSModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             script_args,
+            &mut cancel_rx,
         )
         .await
     }
@@ -792,6 +825,25 @@ impl Qwen3TTSModelTaskPipeline {
             .await?;
         self.update_speaker_status(service, speaker_id, SpeakerStatus::Ready)
             .await?;
+        Ok(())
+    }
+
+    async fn mark_training_cancelled(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        speaker_id: i64,
+        duration_seconds: i64,
+    ) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Cancelled,
+                duration_seconds: Some(duration_seconds),
+                error_message: Some("模型训练任务已由用户终止。".to_string()),
+            })
+            .await?;
+        let _ = self.delete_failed_speaker(service, speaker_id).await?;
         Ok(())
     }
 

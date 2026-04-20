@@ -24,6 +24,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::delete_history_record,
         task_history::create_text_to_speech_task,
         task_history::create_model_training_task,
+        task_history::cancel_model_training_task,
         task_history::create_voice_clone_task,
         settings::get_settings_config,
         settings::save_settings_config

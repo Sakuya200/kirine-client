@@ -1,7 +1,8 @@
 use kirine_client_lib::{test_support::LocalServiceHarness, Result};
 
 #[tokio::test]
-async fn voxcpm2_tts_task_creation_defers_inference_model_resolution_until_pipeline() -> Result<()> {
+async fn voxcpm2_tts_task_creation_defers_inference_model_resolution_until_pipeline() -> Result<()>
+{
     let harness = LocalServiceHarness::new("vox-tts-missing-base-model").await?;
 
     let src_model_root = harness.ensure_src_model_root()?;
@@ -14,8 +15,11 @@ async fn voxcpm2_tts_task_creation_defers_inference_model_resolution_until_pipel
         .await?
         .expect("expected stored voxcpm2 model path");
 
-    assert_eq!(stored_model_path, "%SRC_MODEL_ROOT_PATH%/base-models/VoxCPM2");
-    assert!(base_model_dir.exists());
+    assert_eq!(
+        stored_model_path,
+        "%SRC_MODEL_ROOT_PATH%/base-models/VoxCPM2"
+    );
+    assert!(!base_model_dir.exists());
 
     harness.shutdown().await
 }
