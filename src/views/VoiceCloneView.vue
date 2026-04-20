@@ -25,6 +25,7 @@ import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } f
 import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
+import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 
 interface VoiceCloneResult {
   taskId: number;
@@ -77,6 +78,7 @@ interface SelectedAudioFile {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
 const createQwen3VoiceCloneParams = () => ({});
 
@@ -99,7 +101,7 @@ const form = reactive({
   modelScale: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: 'kirine_voice_clone',
+  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
@@ -155,7 +157,7 @@ const cloneSummary = computed(() => [
   requiresReferenceText.value
     ? `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
     : `当前模式不要求参考台词，目标台词 ${charCount.value} 字。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_voice_clone'}。`
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({

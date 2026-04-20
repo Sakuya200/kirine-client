@@ -204,16 +204,16 @@ onMounted(async () => {
       <div v-if="filteredSpeakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <article v-for="speaker in filteredSpeakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
           <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
-              <div class="mt-2 flex flex-wrap gap-2">
-                <span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">
-                  {{ getSpeakerModelLabel(speaker) }}
-                </span>
-                <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="statusClassMap[speaker.status]">
-                  {{ statusLabelMap[speaker.status] }}
-                </span>
-              </div>
+            </div>
+            <div class="flex shrink-0 flex-wrap justify-end gap-2">
+              <span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">
+                {{ getSpeakerModelLabel(speaker) }}
+              </span>
+              <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="statusClassMap[speaker.status]">
+                {{ statusLabelMap[speaker.status] }}
+              </span>
             </div>
           </div>
           <p class="mt-1 text-xs text-stone-500">{{ speakerStore.getLanguageLabel(speaker) }} · 样本 {{ speaker.samples }} 条</p>

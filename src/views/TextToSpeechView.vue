@@ -31,6 +31,7 @@ import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
+import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 
 interface TtsResult {
   taskId: number;
@@ -78,6 +79,7 @@ interface TextToSpeechAudioAssetPayload {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const createQwen3TtsModelParams = () => ({
   voicePrompt: ''
@@ -97,7 +99,7 @@ const form = reactive({
   modelScale: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: 'kirine_tts',
+  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
   text: '',
   modelParams: createQwen3TtsModelParams() as Record<string, unknown>
 });
@@ -149,7 +151,7 @@ const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || 'kirine_tts'}。`,
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`,
   isVoxCpm2Model.value
     ? `当前 CFG=${Number(form.modelParams.cfgValue ?? 2.0)}，推理步数=${Number(form.modelParams.inferenceTimesteps ?? 10)}。`
     : trimmedVoicePrompt.value
