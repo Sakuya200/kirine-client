@@ -30,7 +30,7 @@ const QWEN3_TTS_TOKENIZER_NAME: &str = "Qwen3-TTS-Tokenizer-12Hz";
 const QWEN3_TTS_TOKENIZER_REPO_ID: &str = "Qwen/Qwen3-TTS-Tokenizer-12Hz";
 pub(crate) const QWEN3_TTS_DISPLAY_NAME: &str = "Qwen3-TTS";
 pub(crate) const QWEN3_TTS_BASE_MODEL: &str = "qwen3_tts";
-pub(crate) const QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE: u32 = 12_000;
+pub(crate) const QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE: u32 = 24_000;
 const QWEN3_TTS_MODEL_PYTHON_SCRIPT_DIR: &str = "qwen3_tts";
 pub(crate) const QWEN3_TTS_MODEL_ARTIFACTS_DIR: &str = "base-models";
 
