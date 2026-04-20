@@ -8,6 +8,7 @@ use std::{
 use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
@@ -24,10 +25,17 @@ use crate::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
             sanitize_path_segment, LocalService,
         },
-        models::{HistoryTaskType, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
+        models::{
+            HistoryTaskType, Qwen3TtsTrainingModelParams, SpeakerStatus, TaskStatus,
+            UpdateTaskStatusPayload,
+        },
         pipeline::{
-            model_paths::{llm_model_display_name, llm_model_paths},
-            qwen3_tts::Qwen3TTSModelTaskPipeline,
+            model_paths::llm_model_display_name,
+            qwen3_tts::{
+                qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
+                qwen3_tts_prepared_variant_key, qwen3_tts_training_init_model_path,
+                qwen3_tts_training_tokenizer_model_path, Qwen3TTSModelTaskPipeline,
+            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -36,12 +44,17 @@ use crate::{
         },
     },
     utils::{
-        audio::{is_ogg_audio_path, resolve_normalized_wav_sidecar_path},
-        process::{run_logged_command, run_logged_python_script},
+        audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
+        process::{
+            run_logged_command, run_logged_python_script, run_logged_python_script_cancellable,
+            LoggedCommandResult,
+        },
         time::now_string,
     },
     Result,
 };
+
+use super::QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TrainingIndexEntry {
@@ -53,6 +66,7 @@ struct TrainingIndexEntry {
 #[derive(Debug)]
 struct TrainingParams {
     base_model: BaseModel,
+    model_scale: String,
     batch_size: i64,
     epoch_count: i64,
     gradient_accumulation_steps: i64,
@@ -89,18 +103,19 @@ impl TrainingRuntimeOptions {
         }
     }
 
-    fn mode_label(self, base_model: BaseModel) -> String {
-        format!(
+    fn mode_label(self, base_model: &str) -> Result<String> {
+        Ok(format!(
             "{} / {}",
-            llm_model_display_name(base_model),
+            llm_model_display_name(base_model)?,
             if self.is_cpu() { "CPU" } else { "CUDA" }
-        )
+        ))
     }
 }
 
 #[derive(Debug)]
 struct TrainingPaths {
     base_model: BaseModel,
+    model_scale: String,
     src_model_root: PathBuf,
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
@@ -138,12 +153,17 @@ impl TrainingCommandLabel {
 }
 
 impl Qwen3TTSModelTaskPipeline {
+    fn cancellation_requested(cancel_rx: &watch::Receiver<bool>) -> bool {
+        *cancel_rx.borrow()
+    }
+
     pub(super) async fn run_training_pipeline_impl(
         &self,
         service: &LocalService,
         request: TrainingPipelineRequest,
     ) -> Result<()> {
         let started_at = Instant::now();
+        let cancel_rx = service.active_training_cancel_receiver(request.task_id)?;
 
         let result = async {
             self.mark_training_running(service, request.task_id, request.speaker_id)
@@ -158,16 +178,26 @@ impl Qwen3TTSModelTaskPipeline {
                 request.task_id,
                 request.speaker_id,
                 &request.speaker_name,
-                params.base_model,
+                &params.base_model,
+                &params.model_scale,
             )?;
             let log_dir = resolve_local_log_dir()?;
 
             self.prepare_model_env(service, &paths, request.task_id, &log_dir, runtime)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.normalize_training_audio_inputs(&paths, request.task_id, &log_dir)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.run_encode_audio(&paths, request.task_id, &log_dir, runtime)
                 .await?;
+            if Self::cancellation_requested(&cancel_rx) {
+                return Ok(LoggedCommandResult::Cancelled);
+            }
             self.run_training_command(
                 &paths,
                 request.task_id,
@@ -175,38 +205,51 @@ impl Qwen3TTSModelTaskPipeline {
                 &request.speaker_name,
                 &params,
                 runtime,
-            )
-            .await?;
-
-            self.mark_training_completed(
-                service,
-                request.task_id,
-                request.speaker_id,
-                started_at.elapsed().as_secs() as i64,
+                cancel_rx.clone(),
             )
             .await
         }
         .await;
 
-        if let Err(err) = result {
-            let duration_seconds = started_at.elapsed().as_secs() as i64;
-            let error_message = err.to_string();
-            if let Err(update_err) = self
-                .mark_training_failed(
+        match result {
+            Ok(LoggedCommandResult::Completed) => {
+                self.mark_training_completed(
                     service,
                     request.task_id,
                     request.speaker_id,
-                    duration_seconds,
-                    &error_message,
+                    started_at.elapsed().as_secs() as i64,
                 )
-                .await
-            {
-                error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist training failure state");
+                .await?;
+                Ok(())
             }
-            return Err(err);
+            Ok(LoggedCommandResult::Cancelled) => {
+                self.mark_training_cancelled(
+                    service,
+                    request.task_id,
+                    request.speaker_id,
+                    started_at.elapsed().as_secs() as i64,
+                )
+                .await?;
+                Ok(())
+            }
+            Err(err) => {
+                let duration_seconds = started_at.elapsed().as_secs() as i64;
+                let error_message = err.to_string();
+                if let Err(update_err) = self
+                    .mark_training_failed(
+                        service,
+                        request.task_id,
+                        request.speaker_id,
+                        duration_seconds,
+                        &error_message,
+                    )
+                    .await
+                {
+                    error!(error = %update_err, task_id = request.task_id, speaker_id = request.speaker_id, "failed to persist training failure state");
+                }
+                Err(err)
+            }
         }
-
-        Ok(())
     }
 
     async fn load_training_params(
@@ -223,16 +266,16 @@ impl Qwen3TTSModelTaskPipeline {
             .await
             .with_context(|| format!("failed to load training params for task {}", task_id))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务参数"))?;
+        let params = serde_json::from_str::<Qwen3TtsTrainingModelParams>(&row.model_params_json)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
         Ok(TrainingParams {
-            base_model: row
-                .base_model
-                .parse()
-                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            batch_size: row.batch_size,
-            epoch_count: row.epoch_count,
-            gradient_accumulation_steps: row.gradient_accumulation_steps,
-            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
+            base_model: row.base_model,
+            model_scale: row.model_scale.trim().to_string(),
+            batch_size: params.batch_size,
+            epoch_count: params.epoch_count,
+            gradient_accumulation_steps: params.gradient_accumulation_steps,
+            enable_gradient_checkpointing: params.enable_gradient_checkpointing,
         })
     }
 
@@ -242,24 +285,25 @@ impl Qwen3TTSModelTaskPipeline {
         task_id: i64,
         speaker_id: i64,
         speaker_name: &str,
-        base_model: BaseModel,
+        base_model: &str,
+        model_scale: &str,
     ) -> Result<TrainingPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
-        let venv_python_path = src_model_venv_python_path(&src_model_root);
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
         let init_task_runtime_script_path =
             src_model_root.join(platform.init_task_runtime_relative_path());
         let download_models_script_path =
             src_model_root.join(platform.download_models_relative_path());
         let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, "ffmpeg.py");
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let encode_python_script_path =
-            src_model_model_python_script_path(&src_model_root, base_model, "encode_audio.py");
+            src_model_model_python_script_path(&src_model_root, base_model, "encode_audio.py")?;
         let train_python_script_path =
-            src_model_model_python_script_path(&src_model_root, base_model, "training.py");
-        let model_paths = llm_model_paths(base_model);
-        let tokenizer_model_path = model_paths.training_tokenizer_model_path(&src_model_root);
-        let init_model_path = model_paths.training_init_model_path(&src_model_root);
+            src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
+        let tokenizer_model_path =
+            qwen3_tts_training_tokenizer_model_path(&src_model_root, model_scale)?;
+        let init_model_path = qwen3_tts_training_init_model_path(&src_model_root, model_scale)?;
         let resource_name = format!("{}_{}", speaker_id, sanitize_path_segment(speaker_name));
         let sample_root = task_sample_dir(
             Path::new(service.data_dir()),
@@ -294,7 +338,8 @@ impl Qwen3TTSModelTaskPipeline {
         })?;
 
         Ok(TrainingPaths {
-            base_model,
+            base_model: base_model.to_string(),
+            model_scale: model_scale.to_string(),
             src_model_root,
             venv_python_path,
             init_task_runtime_script_path,
@@ -411,9 +456,6 @@ impl Qwen3TTSModelTaskPipeline {
         normalized_paths: &mut HashMap<String, String>,
     ) -> Result<String> {
         let input_string = input_path.to_string_lossy().to_string();
-        if !is_ogg_audio_path(input_path) {
-            return Ok(input_string);
-        }
         if let Some(normalized) = normalized_paths.get(&input_string) {
             return Ok(normalized.clone());
         }
@@ -431,14 +473,12 @@ impl Qwen3TTSModelTaskPipeline {
             TrainingCommandLabel::NormalizeAudio.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--input-path".to_string(),
-                input_path.to_string_lossy().to_string(),
-                "--output-path".to_string(),
-                output_path.to_string_lossy().to_string(),
-                "--format".to_string(),
-                "wav".to_string(),
-            ],
+            build_ffmpeg_transcode_args(
+                input_path,
+                &output_path,
+                "wav",
+                Some(QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
         )
         .await?;
 
@@ -463,11 +503,11 @@ impl Qwen3TTSModelTaskPipeline {
             src_model_root = %paths.src_model_root.display(),
             init_script = %paths.init_task_runtime_script_path.display(),
             download_script = %paths.download_models_script_path.display(),
-            training_mode = runtime.mode_label(paths.base_model),
+            training_mode = %runtime.mode_label(&paths.base_model)?,
             "preparing local model environment via required init-task-runtime and optional download-models stages"
         );
 
-        let mut init_script_args = Vec::new();
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         if runtime.is_cpu() {
             init_script_args.push("--cpu-mode".to_string());
         }
@@ -482,18 +522,21 @@ impl Qwen3TTSModelTaskPipeline {
         )
         .await?;
 
-        if self.training_base_model_downloaded(paths.base_model)? {
+        if self.training_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
             info!(
                 base_model = %paths.base_model,
-                training_mode = runtime.mode_label(paths.base_model),
+                training_mode = %runtime.mode_label(&paths.base_model)?,
                 "base model is already marked as downloaded; skipping download-models stage"
             );
             self.validate_prepared_model_downloads(paths)?;
             return Ok(());
         }
 
-        let download_script_args =
-            llm_model_paths(paths.base_model).download_script_args(&paths.src_model_root);
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(qwen3_tts_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
 
         self.run_training_script(
             &paths.download_models_script_path,
@@ -506,43 +549,41 @@ impl Qwen3TTSModelTaskPipeline {
         .await?;
 
         self.validate_prepared_model_downloads(paths)?;
-        self.mark_training_base_model_downloaded(service, paths.base_model)?;
+        self.mark_training_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
 
         Ok(())
     }
 
-    fn training_base_model_downloaded(&self, base_model: BaseModel) -> Result<bool> {
+    fn training_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
         let config = load_configs()
             .context("failed to load config.toml before checking base model marker")?;
+        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
 
         Ok(config
             .prepared_base_models()
             .iter()
-            .any(|prepared| *prepared == base_model))
+            .any(|prepared| prepared == &variant_key || prepared == base_model))
     }
 
     fn mark_training_base_model_downloaded(
         &self,
         _service: &LocalService,
-        base_model: BaseModel,
+        _base_model: &str,
+        model_scale: &str,
     ) -> Result<()> {
         let mut config = load_configs()
             .context("failed to load config.toml before updating prepared base model marker")?;
+        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
         if config
             .training
             .prepared_base_models
             .iter()
-            .any(|prepared| *prepared == base_model)
+            .any(|prepared| prepared == &variant_key)
         {
             return Ok(());
         }
 
-        config.training.prepared_base_models.push(base_model);
-        config
-            .training
-            .prepared_base_models
-            .sort_by_key(|value| value.as_str());
-        config.training.prepared_base_models.dedup();
+        config.training.prepared_base_models.push(variant_key);
 
         save_configs(&config)
             .context("failed to persist training.prepared_base_models to config.toml")
@@ -552,7 +593,7 @@ impl Qwen3TTSModelTaskPipeline {
         let mut missing_paths = Vec::new();
 
         for path in
-            llm_model_paths(paths.base_model).prepared_model_download_paths(&paths.src_model_root)
+            qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
         {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
@@ -564,7 +605,7 @@ impl Qwen3TTSModelTaskPipeline {
         }
 
         bail!(
-            "基础模型已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
             missing_paths.join(", ")
         )
     }
@@ -583,7 +624,7 @@ impl Qwen3TTSModelTaskPipeline {
             input = %paths.input_jsonl.display(),
             output = %paths.train_jsonl.display(),
             script = %paths.encode_python_script_path.display(),
-            training_mode = runtime.mode_label(paths.base_model),
+            training_mode = %runtime.mode_label(&paths.base_model)?,
             device = runtime.encode_device(),
             "starting encode_audio.py through direct python invocation"
         );
@@ -643,7 +684,8 @@ impl Qwen3TTSModelTaskPipeline {
         speaker_name: &str,
         params: &TrainingParams,
         runtime: TrainingRuntimeOptions,
-    ) -> Result<()> {
+        mut cancel_rx: watch::Receiver<bool>,
+    ) -> Result<LoggedCommandResult> {
         let training_config = load_configs().context(
             "failed to load config.toml before resolving training attention implementation",
         )?;
@@ -655,7 +697,7 @@ impl Qwen3TTSModelTaskPipeline {
             batch_size = params.batch_size,
             epoch_count = params.epoch_count,
             script = %paths.train_python_script_path.display(),
-            training_mode = runtime.mode_label(paths.base_model),
+            training_mode = %runtime.mode_label(&paths.base_model)?,
             device = runtime.training_device(),
             "starting training.py through direct python invocation"
         );
@@ -706,7 +748,7 @@ impl Qwen3TTSModelTaskPipeline {
             "--no-enable-gradient-checkpointing".to_string()
         });
 
-        run_logged_python_script(
+        run_logged_python_script_cancellable(
             &paths.venv_python_path,
             &paths.train_python_script_path,
             &paths.src_model_root,
@@ -714,6 +756,7 @@ impl Qwen3TTSModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             script_args,
+            &mut cancel_rx,
         )
         .await
     }
@@ -782,6 +825,25 @@ impl Qwen3TTSModelTaskPipeline {
             .await?;
         self.update_speaker_status(service, speaker_id, SpeakerStatus::Ready)
             .await?;
+        Ok(())
+    }
+
+    async fn mark_training_cancelled(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        speaker_id: i64,
+        duration_seconds: i64,
+    ) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Cancelled,
+                duration_seconds: Some(duration_seconds),
+                error_message: Some("模型训练任务已由用户终止。".to_string()),
+            })
+            .await?;
+        let _ = self.delete_failed_speaker(service, speaker_id).await?;
         Ok(())
     }
 

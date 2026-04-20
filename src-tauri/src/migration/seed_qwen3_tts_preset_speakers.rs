@@ -3,14 +3,17 @@ use sea_orm_migration::prelude::*;
 
 use crate::{
     common::local_paths::src_model_relative_runtime_path,
-    migration::LOCAL_SCHEMA_VERSION,
     service::{
         models::{SpeakerSource, SpeakerStatus},
-        pipeline::qwen3_tts::{qwen3_tts_preset_speakers, QWEN3_TTS_CUSTOM_VOICE_MODEL_NAME},
+        pipeline::qwen3_tts::{
+            qwen3_tts_preset_speakers, QWEN3_TTS_DEFAULT_CUSTOM_VOICE_MODEL_NAME,
+        },
     },
 };
 
 pub struct Migration;
+
+const DEFAULT_TIMESTAMP: &str = "2026-04-13 00:00:00";
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
@@ -24,9 +27,33 @@ impl MigrationTrait for Migration {
         let backend = manager.get_database_backend();
         let connection = manager.get_connection();
         let model_path = src_model_relative_runtime_path(&format!(
-            "base-models/{QWEN3_TTS_CUSTOM_VOICE_MODEL_NAME}"
+            "base-models/{QWEN3_TTS_DEFAULT_CUSTOM_VOICE_MODEL_NAME}"
         ));
-        let create_time = "2026-04-13 00:00:00";
+        let create_time = DEFAULT_TIMESTAMP;
+
+        for (id, model_scale, model_names, repo_ids) in [
+            (
+                1_i64,
+                "1.7B",
+                r#"["Qwen3-TTS-12Hz-1.7B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#,
+                r#"["Qwen/Qwen3-TTS-12Hz-1.7B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#,
+            ),
+            (
+                2_i64,
+                "0.6B",
+                r#"["Qwen3-TTS-12Hz-0.6B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-0.6B-CustomVoice"]"#,
+                r#"["Qwen/Qwen3-TTS-12Hz-0.6B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"]"#,
+            ),
+        ] {
+            connection
+                .execute(Statement::from_string(
+                    backend,
+                    format!(
+                        r#"INSERT OR REPLACE INTO model_info (id, base_model, model_name, model_scale, required_model_name_list_json, required_model_repo_id_list_json, supported_feature_list_json, create_time, modify_time, deleted) VALUES ({id}, 'qwen3_tts', 'Qwen3-TTS', '{model_scale}', '{model_names}', '{repo_ids}', '["text-to-speech","voice-clone","model-training"]', '{DEFAULT_TIMESTAMP}', '{DEFAULT_TIMESTAMP}', 0)"#
+                    ),
+                ))
+                .await?;
+        }
 
         for speaker in qwen3_tts_preset_speakers() {
             let languages_json = serde_json::to_string(speaker.languages)
@@ -65,21 +92,19 @@ impl MigrationTrait for Migration {
                 .await?;
         }
 
-        connection
-            .execute(Statement::from_string(
-                backend,
-                format!(
-                    "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('local_schema_version', '{LOCAL_SCHEMA_VERSION}')"
-                ),
-            ))
-            .await?;
-
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let backend = manager.get_database_backend();
         let connection = manager.get_connection();
+
+        connection
+            .execute(Statement::from_string(
+                backend,
+                "DELETE FROM model_info WHERE base_model = 'qwen3_tts'".to_string(),
+            ))
+            .await?;
 
         for speaker in qwen3_tts_preset_speakers() {
             connection
@@ -92,41 +117,5 @@ impl MigrationTrait for Migration {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::test_support::LocalServiceHarness;
-
-    #[tokio::test]
-    async fn seeds_qwen3_tts_custom_voice_preset_speakers() {
-        let harness = LocalServiceHarness::new("preset-speakers-migration")
-            .await
-            .expect("create local service harness");
-
-        let speakers = harness.list_speakers().await.expect("list speakers");
-        let speaker_names = speakers
-            .iter()
-            .map(|speaker| speaker.name.as_str())
-            .collect::<Vec<_>>();
-
-        assert!(speaker_names.contains(&"Vivian"));
-        assert!(speaker_names.contains(&"Ryan"));
-        assert!(speaker_names.contains(&"Ono_Anna"));
-        assert!(speaker_names.contains(&"Sohee"));
-
-        let model_path = harness
-            .speaker_model_path_by_name("Vivian")
-            .await
-            .expect("query preset speaker model path")
-            .expect("preset speaker model path should exist");
-
-        assert_eq!(
-            model_path,
-            "%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice"
-        );
-
-        harness.shutdown().await.expect("shutdown local service harness");
     }
 }

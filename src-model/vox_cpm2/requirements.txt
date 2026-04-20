@@ -1,0 +1,4 @@
+soundfile==0.13.1
+ffmpy==0.6.1
+PyYAML==6.0.2
+voxcpm>=2.0.0

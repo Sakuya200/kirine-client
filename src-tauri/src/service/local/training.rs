@@ -33,7 +33,8 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
+            ModelTrainingTaskResult, Qwen3TtsTrainingModelParams, SpeakerSource, SpeakerStatus,
+            TaskStatus, VoxCpm2TrainingModelParams,
         },
         pipeline::model_paths::{llm_model_display_name, speaker_model_dir},
         LocalService,
@@ -66,6 +67,44 @@ enum AnnotationFileFormat {
 }
 
 impl LocalService {
+    fn build_training_schedule_summary(
+        prepared_sample_count: usize,
+        model_params: &Value,
+    ) -> Option<(i64, i64, i64, i64, i64, i64)> {
+        let epoch_count = model_params
+            .get("epochCount")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let batch_size = model_params
+            .get("batchSize")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let gradient_accumulation_steps = model_params
+            .get("gradientAccumulationSteps")
+            .and_then(Value::as_i64)?
+            .max(1);
+        let prepared_sample_count = prepared_sample_count as i64;
+        if prepared_sample_count <= 0 {
+            return None;
+        }
+
+        let effective_batch_size = batch_size
+            .saturating_mul(gradient_accumulation_steps)
+            .max(1);
+        let steps_per_epoch =
+            ((prepared_sample_count + effective_batch_size - 1) / effective_batch_size).max(1);
+        let total_steps = steps_per_epoch.saturating_mul(epoch_count).max(1);
+
+        Some((
+            epoch_count,
+            batch_size,
+            gradient_accumulation_steps,
+            effective_batch_size,
+            steps_per_epoch,
+            total_steps,
+        ))
+    }
+
     fn reference_text_score(text: &str) -> usize {
         text.chars().filter(|ch| !ch.is_whitespace()).count()
     }
@@ -98,9 +137,21 @@ impl LocalService {
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
+        let base_model = payload.base_model.trim().to_string();
+        let model_scale = payload.model_scale.trim().to_string();
+        let model_params = if base_model == "vox_cpm2" {
+            serde_json::to_value(
+                serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?
+                    .normalized(),
+            )?
+        } else {
+            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(
+                payload.model_params.clone(),
+            )?)?
+        };
         let selected_training_mode_text = format!(
             "{} / {}",
-            llm_model_display_name(payload.base_model),
+            llm_model_display_name(&base_model)?,
             match selected_training_hardware {
                 HardwareType::Cuda => "CUDA",
                 HardwareType::Cpu => "CPU",
@@ -114,7 +165,7 @@ impl LocalService {
             name: Set(speaker_name.clone()),
             languages_json: Set(languages_json),
             samples: Set(0),
-            base_model: Set(payload.base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
             description: Set("通过模型训练任务自动创建".to_string()),
             model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
@@ -168,12 +219,31 @@ impl LocalService {
             format!("共导入 {} 项样本。", sample_count),
             format!(
                 "训练语言 {}，批次大小 {}，梯度累积 {}。",
-                payload.language, payload.batch_size, payload.gradient_accumulation_steps
+                payload.language,
+                model_params
+                    .get("batchSize")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+                model_params
+                    .get("gradientAccumulationSteps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
             ),
             format!("训练模式: {}。", selected_training_mode_text),
             format!(
+                "配置轮数 {}。",
+                model_params
+                    .get("epochCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default()
+            ),
+            format!(
                 "梯度检查点: {}。",
-                if payload.enable_gradient_checkpointing {
+                if model_params
+                    .get("enableGradientCheckpointing")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     "启用"
                 } else {
                     "禁用"
@@ -193,8 +263,57 @@ impl LocalService {
                 serialize_task_path(Path::new(self.data_dir()), &prepared.index_jsonl_path)
             ),
         ];
+        if let Some((
+            epoch_count,
+            batch_size,
+            gradient_accumulation_steps,
+            effective_batch_size,
+            steps_per_epoch,
+            total_steps,
+        )) = Self::build_training_schedule_summary(prepared.index_entries.len(), &model_params)
+        {
+            notes.push(format!(
+                "按当前配置，每个外层 step 约处理 {} 条样本（batch {} × 梯度累积 {}）。",
+                effective_batch_size, batch_size, gradient_accumulation_steps
+            ));
+            notes.push(format!(
+                "预计每轮约 {} 步，总计约 {} 步。",
+                steps_per_epoch, total_steps
+            ));
+            if base_model == "vox_cpm2" {
+                notes.push(format!(
+                    "VoxCPM2 的 epoch 进度按外层 step × {} / 样本数计算，配置 {} 轮时应在约 {} 步内结束。",
+                    effective_batch_size, epoch_count, total_steps
+                ));
+            }
+        }
         if matches!(selected_training_hardware, HardwareType::Cpu) {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
+        }
+        if base_model == "vox_cpm2" {
+            let use_lora = model_params
+                .get("useLora")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if use_lora {
+                notes.push(format!(
+                    "LoRA 微调参数: rank {}，alpha {}，dropout {}。",
+                    model_params
+                        .get("loraRank")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(32),
+                    model_params
+                        .get("loraAlpha")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(32),
+                    model_params
+                        .get("loraDropout")
+                        .and_then(Value::as_str)
+                        .unwrap_or("0.0")
+                ));
+            } else {
+                notes.push("当前使用全量微调，不启用 LoRA 适配器。".into());
+            }
         }
         if payload
             .samples
@@ -209,12 +328,10 @@ impl LocalService {
             id: NotSet,
             history_id: Set(task_id),
             language: Set(payload.language.as_str().to_string()),
-            base_model: Set(payload.base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
+            model_scale: Set(model_scale.clone()),
             model_name: Set(speaker_name.clone()),
-            epoch_count: Set(payload.epoch_count),
-            batch_size: Set(payload.batch_size),
-            gradient_accumulation_steps: Set(payload.gradient_accumulation_steps),
-            enable_gradient_checkpointing: Set(payload.enable_gradient_checkpointing),
+            model_params_json: Set(serde_json::to_string(&model_params)?),
             sample_count: Set(sample_count),
             samples_json: Set(serde_json::to_string(&prepared.persisted_samples)?),
             notes_json: Set(serde_json::to_string(&notes)?),
@@ -227,16 +344,30 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
-        self.start_training(payload.base_model, task_id, speaker_id, &speaker_name)?;
+        self.start_training(base_model.clone(), task_id, speaker_id, &speaker_name)?;
 
         Ok(ModelTrainingTaskResult {
             task_id,
-            base_model: payload.base_model,
+            base_model,
+            model_scale,
             model_name: speaker_name,
+            model_params,
             sample_count,
             create_time,
             status: TaskStatus::Running,
         })
+    }
+
+    pub(crate) async fn cancel_model_training_task_impl(&self, history_id: i64) -> Result<bool> {
+        let record = self.get_history_record_impl(history_id).await?;
+        if record.task_type != HistoryTaskType::ModelTraining {
+            bail!("当前任务不是模型微调任务，无法终止");
+        }
+        if !matches!(record.status, TaskStatus::Pending | TaskStatus::Running) {
+            bail!("当前任务已经结束，无法再次终止");
+        }
+
+        self.request_active_training_cancel(history_id)
     }
 
     fn prepare_training_data(

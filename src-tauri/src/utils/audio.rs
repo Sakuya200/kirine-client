@@ -24,14 +24,47 @@ pub fn resolve_temp_wav_path(final_output_path: &str, format: TextToSpeechFormat
     PathBuf::from(format!("{}.tmp.wav", final_output_path))
 }
 
-pub fn is_ogg_audio_path(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase())
-            .as_deref(),
-        Some("ogg")
-    )
+pub fn resolve_audio_input_format_hint(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("wav") => Some("wav"),
+        Some("mp3") => Some("mp3"),
+        Some("flac") => Some("flac"),
+        Some("ogg") => Some("ogg"),
+        _ => None,
+    }
+}
+
+pub fn build_ffmpeg_transcode_args(
+    input_path: &Path,
+    output_path: &Path,
+    output_format: &str,
+    sample_rate: Option<u32>,
+) -> Vec<String> {
+    let mut args = vec![
+        "--input-path".to_string(),
+        input_path.to_string_lossy().to_string(),
+        "--output-path".to_string(),
+        output_path.to_string_lossy().to_string(),
+        "--format".to_string(),
+        output_format.to_string(),
+    ];
+
+    if let Some(input_format) = resolve_audio_input_format_hint(input_path) {
+        args.push("--input-format".to_string());
+        args.push(input_format.to_string());
+    }
+
+    if let Some(sample_rate) = sample_rate {
+        args.push("--sample-rate".to_string());
+        args.push(sample_rate.to_string());
+    }
+
+    args
 }
 
 pub fn resolve_normalized_wav_sidecar_path(path: &Path) -> PathBuf {

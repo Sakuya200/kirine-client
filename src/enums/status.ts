@@ -2,6 +2,7 @@ export enum TaskStatus {
   Pending = 'pending',
   Running = 'running',
   Completed = 'completed',
+  Cancelled = 'cancelled',
   Failed = 'failed'
 }
 
@@ -15,6 +16,7 @@ export const STATUS_TEXT: Record<TaskStatus, string> = {
   [TaskStatus.Pending]: '待执行',
   [TaskStatus.Running]: '执行中',
   [TaskStatus.Completed]: '已完成',
+  [TaskStatus.Cancelled]: '已终止',
   [TaskStatus.Failed]: '失败'
 };
 
@@ -22,6 +24,7 @@ export const STATUS_STYLES: Record<TaskStatus, string> = {
   [TaskStatus.Pending]: 'border-brand-200 bg-brand-50 text-brand-700',
   [TaskStatus.Running]: 'border-amber-300 bg-amber-50 text-amber-700',
   [TaskStatus.Completed]: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+  [TaskStatus.Cancelled]: 'border-slate-300 bg-slate-100 text-slate-700',
   [TaskStatus.Failed]: 'border-rose-300 bg-rose-50 text-rose-700'
 };
 

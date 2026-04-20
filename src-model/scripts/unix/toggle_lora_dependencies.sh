@@ -3,12 +3,18 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 SRC_MODEL_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)
-VENV_PYTHON="$SRC_MODEL_ROOT/venv/bin/python"
+BASE_MODEL=""
+MODEL_ROOT=""
+VENV_PYTHON=""
 MODE=""
 TASK_LOG_FILE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --base-model)
+            BASE_MODEL=$2
+            shift 2
+            ;;
         --mode)
             MODE=$2
             shift 2
@@ -23,6 +29,14 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$BASE_MODEL" ]; then
+    echo "toggle-lora-dependencies requires --base-model." >&2
+    exit 64
+fi
+
+MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
+VENV_PYTHON="$MODEL_ROOT/venv/bin/python"
 
 if [ -z "$TASK_LOG_FILE" ]; then
     echo "toggle-lora-dependencies requires --task-log-file." >&2

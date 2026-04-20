@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
   CheckCircleIcon,
   CpuChipIcon,
+  StopCircleIcon,
   TrashIcon,
   ArchiveBoxArrowDownIcon
 } from '@heroicons/vue/24/outline';
@@ -21,6 +22,8 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
+import Qwen3TtsTrainingParamsForm from '@/components/qwen3_tts/Qwen3TtsTrainingParamsForm.vue';
+import VoxCpm2TrainingParamsForm from '@/components/vox_cpm2/VoxCpm2TrainingParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -32,11 +35,10 @@ import {
   ModelTrainingSampleType,
   type ModelTrainingOption
 } from '@/enums/modelTraining';
-import { BASE_MODEL_TEXT, BaseModel } from '@/enums/settings';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
-import { useTaskPreferencesStore } from '@/stores/taskPreferences';
+import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
 
@@ -60,34 +62,75 @@ interface ImportedSampleItem {
 
 interface ModelTrainingTaskResultPayload {
   taskId: number;
-  baseModel: BaseModel;
+  baseModel: string;
+  modelScale: string;
   modelName: string;
+  modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
   status: TaskStatus;
 }
 
+const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const LORA_FEATURE = 'lora';
+
+const createQwen3TrainingParams = () => ({
+  epochCount: 30,
+  batchSize: 8,
+  gradientAccumulationSteps: 4,
+  enableGradientCheckpointing: false
+});
+
+const createVoxCpm2TrainingParams = () => ({
+  trainingMode: 'lora',
+  useLora: true,
+  loraRank: 32,
+  loraAlpha: 32,
+  loraDropout: '0.0',
+  epochCount: 2,
+  batchSize: 4,
+  gradientAccumulationSteps: 1,
+  enableGradientCheckpointing: false
+});
+
+const normalizeVoxCpm2TrainingParams = (modelParams: Record<string, unknown>) => {
+  const defaults = createVoxCpm2TrainingParams();
+  const legacyTrainingMode = String(modelParams.trainingMode ?? '').trim();
+  const useLora = typeof modelParams.useLora === 'boolean' ? modelParams.useLora : legacyTrainingMode !== 'full';
+
+  return {
+    ...defaults,
+    ...modelParams,
+    useLora,
+    trainingMode: useLora ? 'lora' : 'full',
+    loraRank: Number(modelParams.loraRank ?? defaults.loraRank),
+    loraAlpha: Number(modelParams.loraAlpha ?? defaults.loraAlpha),
+    loraDropout: String(modelParams.loraDropout ?? defaults.loraDropout).trim() || defaults.loraDropout
+  };
+};
+
+const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
+  baseModel === VOX_CPM2_BASE_MODEL ? normalizeVoxCpm2TrainingParams(modelParams) : { ...createQwen3TrainingParams(), ...modelParams };
+
 const form = reactive({
   language: AppLanguage.Chinese,
-  baseModel: BaseModel.Qwen3Tts,
+  baseModel: '',
+  modelScale: '',
   modelName: 'speaker_a_custom',
-  epochCount: 4,
-  batchSize: 2,
-  gradientAccumulationSteps: 4,
-  enableGradientCheckpointing: false,
+  modelParams: createQwen3TrainingParams() as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
-const baseModelOptions = [{ label: BASE_MODEL_TEXT[BaseModel.Qwen3Tts], value: BaseModel.Qwen3Tts }];
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
 const isStarting = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
 const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
 const isTemplateDialogOpen = ref(false);
-const taskPreferencesStore = useTaskPreferencesStore();
+const modelStore = useModelStore();
 const uiStore = useUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -103,18 +146,34 @@ const trainingChecklist = [
 ];
 
 const importedSamples = ref<ImportedSampleItem[]>([]);
+const modelOptions = computed(() =>
+  modelStore.getModelsByFeature(HistoryTaskType.ModelTraining).map(item => ({
+    label: item.modelName,
+    value: item.baseModel
+  }))
+);
+const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
+const activeTrainingParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : Qwen3TtsTrainingParamsForm));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
-const canStartTraining = computed(
-  () =>
+const canStartTraining = computed(() => {
+  const epochCount = Number(form.modelParams.epochCount ?? 0);
+  const batchSize = Number(form.modelParams.batchSize ?? 0);
+  const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
+
+  return (
     form.modelName.trim().length > 0 &&
     importedSamples.value.length > 0 &&
-    form.epochCount > 0 &&
-    form.batchSize > 0 &&
-    form.gradientAccumulationSteps > 0 &&
-    !isStarting.value
-);
+    epochCount > 0 &&
+    batchSize > 0 &&
+    gradientAccumulationSteps > 0 &&
+    !isStarting.value &&
+    !!form.modelScale
+  );
+});
 
 const sampleSummary = computed(() => ({
   total: importedSamples.value.length
@@ -123,7 +182,7 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.modelName,
-    subtitle: `任务 ${item.id} · ${BASE_MODEL_TEXT[item.detail.baseModel]}`,
+    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelScale}`,
     status: item.status
   }))
 );
@@ -136,12 +195,53 @@ const trainingBusyLabel = computed(() => {
     return '正在创建模型训练任务，请稍候';
   }
 
+  if (isCancelling.value) {
+    return '正在请求终止模型训练任务，请稍候';
+  }
+
   if (activeTrainingTask.value?.status === TaskStatus.Pending || activeTrainingTask.value?.status === TaskStatus.Running) {
     return '任务执行中，页面会持续刷新状态';
   }
 
   return '';
 });
+
+watch(
+  modelOptions,
+  options => {
+    if (options.length === 0) {
+      return;
+    }
+
+    if (!options.some(option => option.value === form.baseModel)) {
+      form.baseModel = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  modelScaleOptions,
+  options => {
+    if (options.length === 0) {
+      form.modelScale = '';
+      return;
+    }
+
+    if (!options.some(option => option.value === form.modelScale)) {
+      form.modelScale = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => form.baseModel,
+  nextBaseModel => {
+    form.modelParams = normalizeTrainingModelParams(nextBaseModel, form.modelParams);
+  },
+  { immediate: true }
+);
 
 const extractFileName = (filePath: string) => {
   const parts = filePath.split(/[/\\]/);
@@ -166,6 +266,7 @@ const syncActiveTaskStatusRefresh = () => {
   if (
     !activeTrainingTask.value ||
     activeTrainingTask.value.status === TaskStatus.Completed ||
+    activeTrainingTask.value.status === TaskStatus.Cancelled ||
     activeTrainingTask.value.status === TaskStatus.Failed
   ) {
     return;
@@ -185,7 +286,9 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
   return {
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
+    modelScale: trainingRecord.detail.modelScale,
     modelName: trainingRecord.detail.modelName,
+    modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
     status: trainingRecord.status
@@ -283,16 +386,12 @@ const removeImportedSample = (sampleId: number) => {
   importedSamples.value = importedSamples.value.filter(sample => sample.id !== sampleId);
 };
 
-form.baseModel = taskPreferencesStore.fixedBaseModel;
-
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
-  form.baseModel = taskPreferencesStore.fixedBaseModel;
+  form.baseModel = String(modelOptions.value[0]?.value ?? '');
+  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '');
   form.modelName = 'speaker_a_custom';
-  form.epochCount = 30;
-  form.batchSize = 8;
-  form.gradientAccumulationSteps = 4;
-  form.enableGradientCheckpointing = false;
+  form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -325,11 +424,9 @@ const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): Im
 const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
+  form.modelScale = record.detail.modelScale;
   form.modelName = record.detail.modelName;
-  form.epochCount = record.detail.epochCount;
-  form.batchSize = record.detail.batchSize;
-  form.gradientAccumulationSteps = record.detail.gradientAccumulationSteps;
-  form.enableGradientCheckpointing = record.detail.enableGradientCheckpointing;
+  form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
   form.singleAudioFile = null;
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
@@ -396,6 +493,7 @@ const refreshActiveTaskStatus = async () => {
   if (
     !activeTrainingTask.value ||
     activeTrainingTask.value.status === TaskStatus.Completed ||
+    activeTrainingTask.value.status === TaskStatus.Cancelled ||
     activeTrainingTask.value.status === TaskStatus.Failed
   ) {
     stopActiveTaskStatusRefresh();
@@ -422,13 +520,40 @@ const refreshActiveTaskStatus = async () => {
       item.id === currentTaskId ? ({ ...item, status: updatedTask.status } as ModelTrainingHistoryRecord) : item
     );
 
-    if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Failed) {
+    if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Cancelled || updatedTask.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
     console.log(formatErrorMessage('刷新模型训练任务状态失败，请检查 Rust 后端日志', error));
   } finally {
     isActiveTaskRefreshInFlight = false;
+  }
+};
+
+const cancelActiveTrainingTask = async () => {
+  if (!activeTrainingTask.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_model_training_task', {
+      historyId: activeTrainingTask.value.taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${activeTrainingTask.value.taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks({ silentOnError: true });
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止模型训练任务失败', error));
+  } finally {
+    isCancelling.value = false;
   }
 };
 
@@ -445,11 +570,9 @@ const startTraining = async () => {
       payload: {
         language: form.language,
         baseModel: form.baseModel,
+        modelScale: form.modelScale,
         modelName: form.modelName.trim(),
-        epochCount: form.epochCount,
-        batchSize: form.batchSize,
-        gradientAccumulationSteps: form.gradientAccumulationSteps,
-        enableGradientCheckpointing: form.enableGradientCheckpointing,
+        modelParams: form.modelParams,
         samples: importedSamples.value.map(sample => ({
           id: sample.id,
           sampleType: sample.type,
@@ -467,7 +590,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${BASE_MODEL_TEXT[payload.baseModel]}，共 ${payload.sampleCount} 项样本。`,
+      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -490,6 +613,7 @@ const loadHistoryItem = (taskId: number) => {
 };
 
 onMounted(async () => {
+  await modelStore.ensureLoaded();
   await loadRecentTasks({ silentOnError: true });
   await hydrateReplayTaskFromRoute();
 });
@@ -636,65 +760,37 @@ onBeforeUnmount(() => {
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard class="z-20" title="训练参数">
+        <PanelCard class="z-20" title="基础参数">
           <div class="space-y-3 text-sm text-slate-700">
             <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">模型名称</span>
+              <span class="mb-1 block text-xs text-stone-500">训练输出名称</span>
               <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
             </label>
-            <BaseListbox v-model="form.baseModel" label="基础模型" :options="baseModelOptions" disabled />
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">训练轮次</span>
-                <input
-                  v-model.number="form.epochCount"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">批次大小</span>
-                <input
-                  v-model.number="form.batchSize"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-            </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">梯度累积步数</span>
-                <input
-                  v-model.number="form.gradientAccumulationSteps"
-                  type="number"
-                  min="1"
-                  class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                />
-              </label>
-              <label class="flex items-center gap-3 rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
-                <input
-                  v-model="form.enableGradientCheckpointing"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-brand-300 text-brand-500 focus:ring-brand-200"
-                />
-                <span>启用梯度检查点</span>
-              </label>
-            </div>
+            <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
+            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
             <BaseListbox
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
               label="语种"
               :options="MODEL_TRAINING_LANGUAGE_OPTIONS"
             />
+            <div>
+              <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+              <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
+            </div>
             <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
               <p>训练摘要</p>
               <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-              <p class="mt-1">基础模型 {{ BASE_MODEL_TEXT[form.baseModel] }}。{{ baseModelSummary }}</p>
+              <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+              <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.useLora ? 'LoRA 微调' : '全量微调' }}。</p>
+              <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
+                LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
+                {{ form.modelParams.loraDropout ?? 0 }}。
+              </p>
               <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
               <p class="mt-1">
-                当前梯度累积 {{ form.gradientAccumulationSteps }}，梯度检查点 {{ form.enableGradientCheckpointing ? '已启用' : '未启用' }}。
+                当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
+                {{ form.modelParams.enableGradientCheckpointing ? '已启用' : '未启用' }}。
               </p>
             </div>
           </div>
@@ -704,10 +800,28 @@ onBeforeUnmount(() => {
               <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
               <span>{{ isStarting ? '创建中...' : '开始训练' }}</span>
             </BaseButton>
+            <BaseButton
+              v-if="activeTrainingTask && [TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
+              tone="quiet"
+              :disabled="isCancelling"
+              @click="cancelActiveTrainingTask"
+            >
+              <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
+              <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
+              <span>{{ isCancelling ? '终止中...' : '终止当前任务' }}</span>
+            </BaseButton>
             <BaseButton tone="ghost" @click="resetForm">
               <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
               <span>重置表单</span>
             </BaseButton>
+          </div>
+          <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-3 text-xs text-stone-600">
+            <p>当前活动任务</p>
+            <p class="mt-1">
+              任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
+              {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
+            </p>
+            <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
           </div>
         </PanelCard>
 

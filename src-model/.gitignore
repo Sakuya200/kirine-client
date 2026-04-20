@@ -1,6 +1,8 @@
 venv
-src/__pycache__
+qwen3_tts/venv
+vox_cpm2/venv
+qwen3_tts/__pycache__
+vox_cpm2/__pycache__
 tests/training-data
 tests/__pycache__
 base-models
-src/qwen3_tts/__pycache__

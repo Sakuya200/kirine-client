@@ -18,8 +18,9 @@ async fn speaker_crud_round_trip_uses_local_database() -> Result<()> {
     assert!(created.id > 0);
 
     let listed = harness.list_speakers().await?;
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].name, "SeaOrm Speaker");
+    assert!(listed
+        .iter()
+        .any(|speaker| speaker.name == "SeaOrm Speaker"));
 
     let updated = harness.update_test_speaker(created.id).await?;
     assert_eq!(updated.name, "Updated Speaker");
@@ -27,7 +28,11 @@ async fn speaker_crud_round_trip_uses_local_database() -> Result<()> {
 
     let deleted = harness.delete_speaker(created.id).await?;
     assert!(deleted);
-    assert!(harness.list_speakers().await?.is_empty());
+    assert!(harness
+        .list_speakers()
+        .await?
+        .iter()
+        .all(|speaker| speaker.id != created.id));
 
     harness.shutdown().await
 }
@@ -37,10 +42,12 @@ async fn local_service_migrates_legacy_schema_without_compat_layer() -> Result<(
     let harness = LocalServiceHarness::new_with_legacy_schema("legacy-schema").await?;
 
     let speakers = harness.list_speakers().await?;
-    assert_eq!(speakers.len(), 1);
-    assert_eq!(speakers[0].name, "Legacy Speaker");
-    assert_eq!(speakers[0].description, "");
-    assert_eq!(speakers[0].samples, 2);
+    let legacy = speakers
+        .iter()
+        .find(|speaker| speaker.name == "Legacy Speaker")
+        .expect("legacy speaker should exist after migration");
+    assert_eq!(legacy.description, "");
+    assert_eq!(legacy.samples, 2);
 
     harness.shutdown().await
 }
@@ -51,10 +58,17 @@ async fn local_service_migrates_legacy_task_tables_to_surrogate_ids() -> Result<
         LocalServiceHarness::new_with_legacy_task_detail_schema("legacy-task-detail-ids").await?;
 
     assert!(harness.table_has_column("tts_tasks", "id").await?);
-    assert!(harness.table_has_column("model_training_tasks", "id").await?);
+    assert!(
+        harness
+            .table_has_column("model_training_tasks", "id")
+            .await?
+    );
     assert!(harness.table_has_column("voice_clone_tasks", "id").await?);
 
-    assert_eq!(harness.task_detail_id_for_history("tts_tasks", 101).await?, Some(1));
+    assert_eq!(
+        harness.task_detail_id_for_history("tts_tasks", 101).await?,
+        Some(1)
+    );
     assert_eq!(
         harness
             .task_detail_id_for_history("model_training_tasks", 102)

@@ -2,8 +2,8 @@
 import { computed } from 'vue';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
-import { BASE_MODEL_TEXT } from '@/enums/settings';
 import { TEXT_TO_SPEECH_FORMATS } from '@/enums/textToSpeech';
+import { useModelStore } from '@/stores/models';
 import type { TextToSpeechHistoryRecord } from '@/types/domain';
 
 interface Props {
@@ -11,11 +11,13 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const modelStore = useModelStore();
 
 const formatLabel = computed(
   () => TEXT_TO_SPEECH_FORMATS.find(option => option.value === props.record.detail.format)?.label ?? props.record.detail.format
 );
-const baseModelLabel = computed(() => BASE_MODEL_TEXT[props.record.detail.baseModel]);
+const baseModelLabel = computed(() => modelStore.getModelLabel(props.record.detail.baseModel));
+const voicePrompt = computed(() => String(props.record.detail.modelParams.voicePrompt ?? ''));
 </script>
 
 <template>
@@ -31,11 +33,15 @@ const baseModelLabel = computed(() => BASE_MODEL_TEXT[props.record.detail.baseMo
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">基础模型</p>
-        <p class="mt-1 text-sm font-semibold text-slate-800">{{ baseModelLabel }}</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ baseModelLabel }} {{ record.detail.modelScale }}</p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">输出格式</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ formatLabel }}</p>
+      </article>
+      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4 md:col-span-2">
+        <p class="text-xs text-stone-500">导出音频名称</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.exportAudioName }}</p>
       </article>
     </div>
 
@@ -63,9 +69,9 @@ const baseModelLabel = computed(() => BASE_MODEL_TEXT[props.record.detail.baseMo
     </section>
 
     <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-      <p class="text-sm font-semibold text-slate-800">声音 Prompt</p>
+      <p class="text-sm font-semibold text-slate-800">模型特定参数</p>
       <p class="mt-3 whitespace-pre-wrap rounded-xl bg-brand-50/45 px-3 py-3 text-sm leading-6 text-slate-700">
-        {{ record.detail.voicePrompt || '未填写声音 Prompt，使用默认风格。' }}
+        {{ voicePrompt || '未填写声音 Prompt，使用默认风格。' }}
       </p>
     </section>
   </div>

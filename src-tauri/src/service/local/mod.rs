@@ -1,19 +1,23 @@
 mod db;
 pub(crate) mod entity;
 mod history;
+mod model_info;
 mod speaker;
 mod training;
 mod tts;
 mod voice_clone;
 
 use std::{
+    collections::HashMap,
     env::current_dir,
     path::{Path, PathBuf},
+    sync::{Arc, RwLock},
 };
 
 use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
+use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
@@ -22,9 +26,10 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelTrainingTaskResult,
-            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
+            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
@@ -41,6 +46,7 @@ pub struct LocalService {
     data_dir: String,
     model_dir: String,
     orm: DatabaseConnection,
+    active_training_controls: Arc<RwLock<HashMap<i64, watch::Sender<bool>>>>,
 }
 
 #[async_trait]
@@ -74,6 +80,10 @@ impl Service for LocalService {
 
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
         self.delete_speaker_info_impl(speaker_id).await
+    }
+
+    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
+        self.list_model_infos_impl().await
     }
 
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
@@ -118,6 +128,10 @@ impl Service for LocalService {
         self.create_model_training_task_impl(payload).await
     }
 
+    async fn cancel_model_training_task(&self, history_id: i64) -> Result<bool> {
+        self.cancel_model_training_task_impl(history_id).await
+    }
+
     async fn create_voice_clone_task(
         &self,
         payload: CreateVoiceCloneTaskPayload,
@@ -158,6 +172,7 @@ impl LocalService {
             data_dir: data_dir.to_string_lossy().to_string(),
             model_dir: model_dir.to_string_lossy().to_string(),
             orm,
+            active_training_controls: Arc::new(RwLock::new(HashMap::new())),
         };
         Ok(service)
     }
@@ -169,7 +184,7 @@ impl LocalService {
         speaker_id: i64,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
 
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
@@ -195,7 +210,7 @@ impl LocalService {
         task_id: i64,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
 
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
@@ -217,11 +232,13 @@ impl LocalService {
         speaker_name: &str,
     ) -> Result<()> {
         let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(base_model);
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
         let speaker_name = speaker_name.to_string();
+        let (cancel_tx, _cancel_rx) = watch::channel(false);
+        self.register_active_training_control(task_id, cancel_tx);
 
         tauri::async_runtime::spawn(async move {
-            if let Err(err) = pipeline
+            let result = pipeline
                 .run_training_pipeline(
                     &service,
                     TrainingPipelineRequest {
@@ -230,8 +247,10 @@ impl LocalService {
                         speaker_name,
                     },
                 )
-                .await
-            {
+                .await;
+            service.unregister_active_training_control(task_id);
+
+            if let Err(err) = result {
                 tracing::error!(error = %err, "local training pipeline failed");
             }
         });
@@ -253,6 +272,55 @@ impl LocalService {
 
     pub(crate) fn orm(&self) -> &DatabaseConnection {
         &self.orm
+    }
+
+    pub(crate) fn register_active_training_control(
+        &self,
+        task_id: i64,
+        cancel_tx: watch::Sender<bool>,
+    ) {
+        if let Ok(mut controls) = self.active_training_controls.write() {
+            controls.insert(task_id, cancel_tx);
+        }
+    }
+
+    pub(crate) fn unregister_active_training_control(&self, task_id: i64) {
+        if let Ok(mut controls) = self.active_training_controls.write() {
+            controls.remove(&task_id);
+        }
+    }
+
+    pub(crate) fn active_training_cancel_receiver(
+        &self,
+        task_id: i64,
+    ) -> Result<watch::Receiver<bool>> {
+        let controls = self
+            .active_training_controls
+            .read()
+            .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
+        let cancel_tx = controls
+            .get(&task_id)
+            .ok_or_else(|| anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启"))?;
+        Ok(cancel_tx.subscribe())
+    }
+
+    pub(crate) fn request_active_training_cancel(&self, task_id: i64) -> Result<bool> {
+        let controls = self
+            .active_training_controls
+            .read()
+            .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
+        let cancel_tx = controls
+            .get(&task_id)
+            .ok_or_else(|| anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启"))?;
+
+        if *cancel_tx.borrow() {
+            return Ok(false);
+        }
+
+        cancel_tx
+            .send(true)
+            .map_err(|_| anyhow::anyhow!("训练任务终止信号发送失败"))?;
+        Ok(true)
     }
 
     async fn init_db(orm: &DatabaseConnection, data_dir: &Path) -> Result<()> {
@@ -320,5 +388,16 @@ pub(crate) fn sanitize_path_segment(value: &str) -> String {
         "speaker".to_string()
     } else {
         sanitized
+    }
+}
+
+pub(crate) fn sanitize_file_stem(value: &str, default_stem: &str) -> String {
+    let sanitized = sanitize_path_segment(value);
+    let trimmed = sanitized.trim_matches('.').trim();
+
+    if trimmed.is_empty() || trimmed == "speaker" {
+        default_stem.to_string()
+    } else {
+        trimmed.to_string()
     }
 }

@@ -1,9 +1,10 @@
 import type { AppLanguage } from '@/enums/language';
 import type { ModelTrainingSampleType } from '@/enums/modelTraining';
-import type { BaseModel } from '@/enums/settings';
 import type { SpeakerStatus, TaskStatus } from '@/enums/status';
 import type { TextToSpeechFormat } from '@/enums/textToSpeech';
 import type { HistoryTaskType } from '@/enums/task';
+
+export type BaseModel = string;
 
 export type SpeakerSource = 'local' | 'remote';
 
@@ -35,11 +36,9 @@ export interface HistoryRecordBase {
 export interface ModelTrainingTaskDetail {
   language: AppLanguage;
   baseModel: BaseModel;
+  modelScale: string;
   modelName: string;
-  epochCount: number;
-  batchSize: number;
-  gradientAccumulationSteps: number;
-  enableGradientCheckpointing: boolean;
+  modelParams: Record<string, unknown>;
   sampleCount: number;
   samples: ModelTrainingSampleDetail[];
   notes: string[];
@@ -64,10 +63,12 @@ export interface ModelTrainingSampleDetail {
 export interface TextToSpeechTaskDetail {
   speakerId: number;
   baseModel: BaseModel;
+  modelScale: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
+  exportAudioName: string;
   text: string;
-  voicePrompt: string;
+  modelParams: Record<string, unknown>;
   charCount: number;
   fileName: string;
   outputFilePath: string;
@@ -75,15 +76,30 @@ export interface TextToSpeechTaskDetail {
 
 export interface VoiceCloneTaskDetail {
   baseModel: BaseModel;
+  modelScale: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
+  exportAudioName: string;
   refAudioName: string;
   refAudioPath: string;
   refText: string;
   text: string;
+  modelParams: Record<string, unknown>;
   charCount: number;
   fileName: string;
   outputFilePath: string;
+}
+
+export interface ModelInfo {
+  id: number;
+  baseModel: BaseModel;
+  modelName: string;
+  modelScale: string;
+  requiredModelNameList: string[];
+  requiredModelRepoIdList: string[];
+  supportedFeatureList: string[];
+  createTime: string;
+  modifyTime: string;
 }
 
 export interface ModelTrainingHistoryRecord extends HistoryRecordBase {

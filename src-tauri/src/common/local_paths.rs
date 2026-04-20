@@ -74,15 +74,6 @@ pub(crate) fn resolve_runtime_model_path(
         PathBuf::from(trimmed)
     };
 
-    if !resolved.exists() {
-        fs::create_dir_all(&resolved).with_context(|| {
-            format!(
-                "failed to create runtime model directory: {}",
-                resolved.display()
-            )
-        })?;
-    }
-
     Ok(resolved)
 }
 
@@ -197,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_runtime_model_path_creates_missing_directory() {
+    fn resolve_runtime_model_path_keeps_missing_directory_uncreated() {
         let unique = format!(
             "kirine-runtime-model-path-{}",
             std::time::SystemTime::now()
@@ -219,7 +210,13 @@ mod tests {
         )
         .expect("resolve runtime model path");
 
-        assert!(resolved.exists());
+        assert!(!resolved.exists());
+        assert_eq!(
+            resolved,
+            src_model_root
+                .join("base-models")
+                .join("Qwen3-TTS-12Hz-1.7B-CustomVoice")
+        );
 
         std::fs::remove_dir_all(&root).expect("remove temp root dir");
     }

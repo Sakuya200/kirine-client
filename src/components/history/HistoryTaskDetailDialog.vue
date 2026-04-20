@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
+import { StopCircleIcon } from '@heroicons/vue/24/outline';
 
 import { HISTORY_TASK_REPLAY_QUERY_KEY, HISTORY_TASK_ROUTE_PATH, HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
+import { TaskStatus } from '@/enums/status';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
@@ -17,14 +19,20 @@ interface Props {
   record: HistoryRecord | null;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
 
 const emit = defineEmits<{
   close: [];
+  cancel: [historyId: number];
 }>();
 
 const router = useRouter();
 const canReplay = computed(() => Boolean(router));
+const canCancel = computed(() =>
+  Boolean(
+    props.record && props.record.taskType === HistoryTaskType.ModelTraining && [TaskStatus.Pending, TaskStatus.Running].includes(props.record.status)
+  )
+);
 
 const replayTask = async (record: HistoryRecord | null) => {
   if (!record) {
@@ -38,6 +46,14 @@ const replayTask = async (record: HistoryRecord | null) => {
       [HISTORY_TASK_REPLAY_QUERY_KEY]: String(record.id)
     }
   });
+};
+
+const requestCancel = (record: HistoryRecord | null) => {
+  if (!record || !canCancel.value) {
+    return;
+  }
+
+  emit('cancel', record.id);
 };
 </script>
 
@@ -99,6 +115,10 @@ const replayTask = async (record: HistoryRecord | null) => {
       </section>
     </div>
     <template #footer>
+      <BaseButton v-if="canCancel" tone="quiet" @click="requestCancel(record)">
+        <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
+        <span>终止任务</span>
+      </BaseButton>
       <BaseButton :disabled="!record || !canReplay" @click="replayTask(record)">再次执行</BaseButton>
       <BaseButton tone="ghost" @click="emit('close')">关闭</BaseButton>
     </template>

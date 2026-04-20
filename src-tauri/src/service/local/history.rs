@@ -7,7 +7,6 @@ use sea_orm::{
 
 use crate::{
     common::local_paths::resolve_task_path,
-    config::BaseModel,
     service::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
@@ -334,10 +333,8 @@ impl LocalService {
 
         Ok(serde_json::to_value(TextToSpeechTaskDetail {
             speaker_id: row.speaker_id,
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
+            model_scale: row.model_scale,
             language: row
                 .language
                 .parse()
@@ -346,8 +343,9 @@ impl LocalService {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            export_audio_name: row.export_audio_name,
             text: row.text,
-            voice_prompt: row.voice_prompt,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             char_count: row.char_count as usize,
             file_name: row.file_name,
             output_file_path: row.output_file_path.unwrap_or_default(),
@@ -373,15 +371,10 @@ impl LocalService {
                 .language
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
+            model_scale: row.model_scale,
             model_name: row.model_name,
-            epoch_count: row.epoch_count,
-            batch_size: row.batch_size,
-            gradient_accumulation_steps: row.gradient_accumulation_steps,
-            enable_gradient_checkpointing: row.enable_gradient_checkpointing,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             sample_count: row.sample_count,
             samples,
             notes,
@@ -400,10 +393,8 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到声音克隆任务详情"))?;
 
         Ok(serde_json::to_value(VoiceCloneTaskDetail {
-            base_model: row
-                .base_model
-                .parse::<BaseModel>()
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            base_model: row.base_model,
+            model_scale: row.model_scale,
             language: row
                 .language
                 .parse()
@@ -412,10 +403,12 @@ impl LocalService {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            export_audio_name: row.export_audio_name,
             ref_audio_name: row.ref_audio_name,
             ref_audio_path: row.ref_audio_path,
             ref_text: row.ref_text,
             text: row.text,
+            model_params: serde_json::from_str(&row.model_params_json)?,
             char_count: row.char_count as usize,
             file_name: row.file_name,
             output_file_path: row.output_file_path.unwrap_or_default(),

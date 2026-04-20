@@ -19,10 +19,13 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
-            TextToSpeechTaskResult,
+            CreateTextToSpeechTaskPayload, HistoryTaskType, Qwen3TtsTextToSpeechModelParams,
+            SpeakerStatus, TaskStatus, TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
         },
-        pipeline::{resolve_inference_model_path, script_paths::resolve_src_model_root},
+        pipeline::{
+            qwen3_tts::qwen3_tts_preset_custom_voice_model_path, resolve_inference_model_path,
+            script_paths::resolve_src_model_root, vox_cpm2::VOX_CPM2_BASE_MODEL,
+        },
         LocalService,
     },
     utils::time::now_string,
@@ -40,8 +43,10 @@ impl LocalService {
     ) -> Result<TextToSpeechTaskResult> {
         let txn = self.orm().begin().await?;
         let create_time = now_string()?;
+        let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
-        let base_model = payload.base_model;
+        let src_model_root = resolve_src_model_root(self.app_dir())?;
+        let model_scale = payload.model_scale.trim().to_string();
         let speaker = speaker_entity::Entity::find_by_id(speaker_id)
             .filter(speaker_entity::Column::Deleted.eq(0))
             .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
@@ -67,20 +72,31 @@ impl LocalService {
                     "当前说话人尚未生成可用于文本转语音的本地模型",
                 )
             })?;
-        let src_model_root = resolve_src_model_root(self.app_dir())?;
         let resolved_model_root_path = resolve_runtime_model_path(
             Path::new(self.model_dir()),
             &src_model_root,
             &model_root_path,
         )?;
-        let inference_model_path =
-            if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
-                resolved_model_root_path.clone()
-            } else {
-                resolve_inference_model_path(base_model, &resolved_model_root_path)?
-            };
+        let inference_model_path = if base_model == VOX_CPM2_BASE_MODEL {
+            resolved_model_root_path.clone()
+        } else if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
+            qwen3_tts_preset_custom_voice_model_path(&src_model_root, &model_scale)?
+        } else {
+            resolve_inference_model_path(&base_model, &resolved_model_root_path)?
+        };
+        let task_speaker_id = speaker_id;
+        let history_speaker_id = Some(speaker_id);
         let text = payload.text.trim().to_string();
-        let voice_prompt = payload.voice_prompt.trim().to_string();
+        let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
+        let model_params = if base_model == VOX_CPM2_BASE_MODEL {
+            serde_json::to_value(serde_json::from_value::<VoxCpm2TextToSpeechModelParams>(
+                payload.model_params.clone(),
+            )?)?
+        } else {
+            serde_json::to_value(serde_json::from_value::<Qwen3TtsTextToSpeechModelParams>(
+                payload.model_params.clone(),
+            )?)?
+        };
         let char_count = text.chars().count();
         let title = super::build_task_title("文本转语音", Some(&speaker_label), &create_time);
         let output_dir = ensure_child_dir(Path::new(self.data_dir()), "generated")?;
@@ -89,7 +105,7 @@ impl LocalService {
             id: NotSet,
             task_type: Set(HistoryTaskType::TextToSpeech.as_str().to_string()),
             title: Set(title),
-            speaker_id: Set(Some(speaker_id)),
+            speaker_id: Set(history_speaker_id),
             speaker_name_snapshot: Set(speaker_label.clone()),
             status: Set(TaskStatus::Pending.as_str().to_string()),
             duration_seconds: Set(0),
@@ -107,7 +123,7 @@ impl LocalService {
             HistoryTaskType::TextToSpeech,
             task_id,
         )?;
-        let file_name = format!("kirine_tts_{}.{}", task_id, payload.format.as_str());
+        let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
         let serialized_model_path = serialize_runtime_model_path(
@@ -119,13 +135,15 @@ impl LocalService {
         tts_task_entity::Entity::insert(tts_task_entity::ActiveModel {
             id: NotSet,
             history_id: Set(task_id),
-            speaker_id: Set(speaker_id),
+            speaker_id: Set(task_speaker_id),
             model_path: Set(Some(serialized_model_path)),
-            base_model: Set(base_model.as_str().to_string()),
+            base_model: Set(base_model.clone()),
+            model_scale: Set(model_scale.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
+            export_audio_name: Set(export_audio_name.clone()),
             text: Set(text.clone()),
-            voice_prompt: Set(voice_prompt.clone()),
+            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
             char_count: Set(char_count as i64),
             file_name: Set(file_name.clone()),
             output_file_path: Set(Some(serialized_output_path.clone())),
@@ -137,19 +155,21 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
-        self.start_tts_inference(base_model, task_id, speaker_id)?;
+        self.start_tts_inference(base_model.clone(), task_id, speaker_id)?;
 
         Ok(TextToSpeechTaskResult {
             task_id,
             file_name,
-            speaker_id,
+            speaker_id: task_speaker_id,
             speaker_label,
             base_model,
+            model_scale,
             language: payload.language,
             format: payload.format,
+            export_audio_name,
             duration_seconds: 0,
             text,
-            voice_prompt,
+            model_params,
             created_at: create_time,
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,

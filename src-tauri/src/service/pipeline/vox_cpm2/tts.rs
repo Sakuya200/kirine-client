@@ -1,0 +1,743 @@
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    time::Instant,
+};
+
+use anyhow::{bail, Context};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use tracing::{error, info};
+
+use crate::{
+    common::{
+        local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
+        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+    },
+    config::{load_configs, save_configs, BaseModel, HardwareType},
+    service::{
+        local::{
+            entity::{task_history as task_history_entity, tts_task as tts_task_entity},
+            LocalService,
+        },
+        models::{
+            TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload, VoxCpm2TextToSpeechModelParams,
+        },
+        pipeline::{
+            model_paths::llm_model_display_name,
+            script_paths::{
+                resolve_src_model_root, src_model_model_python_script_path,
+                src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
+            },
+            TtsPipelineRequest,
+        },
+    },
+    utils::{
+        audio::{build_ffmpeg_transcode_args, resolve_temp_wav_path},
+        file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
+        process::{run_logged_command, run_logged_python_script},
+    },
+    Result,
+};
+
+use super::{
+    vox_cpm2_download_script_args, vox_cpm2_prepared_model_download_paths,
+    vox_cpm2_prepared_variant_key, VoxCpm2ModelTaskPipeline,
+    VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE, VOX_CPM2_RUNTIME_METADATA_FILE_NAME,
+};
+
+#[derive(Debug, Clone, Copy)]
+struct TtsRuntimeOptions {
+    hardware_type: HardwareType,
+}
+
+impl TtsRuntimeOptions {
+    const fn from_hardware_type(hardware_type: HardwareType) -> Self {
+        Self { hardware_type }
+    }
+
+    const fn is_cpu(self) -> bool {
+        matches!(self.hardware_type, HardwareType::Cpu)
+    }
+
+    const fn device(self) -> &'static str {
+        if self.is_cpu() {
+            "cpu"
+        } else {
+            "cuda:0"
+        }
+    }
+
+    fn mode_label(self, base_model: &str) -> Result<String> {
+        Ok(format!(
+            "{} / {}",
+            llm_model_display_name(base_model)?,
+            if self.is_cpu() { "CPU" } else { "CUDA" }
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct TtsPaths {
+    base_model: BaseModel,
+    model_scale: String,
+    src_model_root: PathBuf,
+    venv_python_path: PathBuf,
+    init_task_runtime_script_path: PathBuf,
+    download_models_script_path: PathBuf,
+    tts_python_script_path: PathBuf,
+    ffmpeg_python_script_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct TtsTaskExecution {
+    base_model: BaseModel,
+    model_scale: String,
+    model_root_path: String,
+    format: TextToSpeechFormat,
+    text: String,
+    cfg_value: f64,
+    inference_timesteps: i64,
+    output_file_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TtsCommandLabel {
+    InitTaskRuntime,
+    DownloadModels,
+    RunInference,
+    ConvertAudio,
+}
+
+impl TtsCommandLabel {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::InitTaskRuntime => "initialize voxcpm2 tts runtime",
+            Self::DownloadModels => "download voxcpm2 base models",
+            Self::RunInference => "run voxcpm2 tts inference",
+            Self::ConvertAudio => "convert voxcpm2 audio",
+        }
+    }
+}
+
+impl VoxCpm2ModelTaskPipeline {
+    pub(super) async fn run_tts_pipeline_impl(
+        &self,
+        service: &LocalService,
+        request: TtsPipelineRequest,
+    ) -> Result<()> {
+        let started_at = Instant::now();
+
+        let result = async {
+            self.mark_tts_running(service, request.task_id).await?;
+            let params = self
+                .load_tts_task_execution(service, request.task_id)
+                .await?;
+            let paths = self.resolve_tts_paths(service, &params.base_model, &params.model_scale)?;
+            let log_dir = resolve_local_log_dir()?;
+            let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
+
+            self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
+                .await?;
+            let model_path = self.resolve_tts_inference_model_path(&params)?;
+            self.validate_tts_environment(&paths, &model_path, &params.output_file_path)?;
+
+            let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
+            self.run_tts_command(
+                &paths,
+                request.task_id,
+                &log_dir,
+                &params,
+                &model_path,
+                &temp_wav_path,
+                runtime,
+            )
+            .await?;
+            self.finalize_tts_output(
+                &paths,
+                request.task_id,
+                &log_dir,
+                &temp_wav_path,
+                &params.output_file_path,
+                params.format,
+            )
+            .await?;
+
+            self.mark_tts_completed(
+                service,
+                request.task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await
+        }
+        .await;
+
+        if let Err(err) = result {
+            let duration_seconds = started_at.elapsed().as_secs() as i64;
+            let error_message = err.to_string();
+            if let Err(update_err) = self
+                .mark_tts_failed(service, request.task_id, duration_seconds, &error_message)
+                .await
+            {
+                error!(error = %update_err, task_id = request.task_id, "failed to persist voxcpm2 tts failure state");
+            }
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    async fn load_tts_task_execution(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+    ) -> Result<TtsTaskExecution> {
+        let task_detail = tts_task_entity::Entity::find()
+            .filter(tts_task_entity::Column::HistoryId.eq(task_id))
+            .filter(tts_task_entity::Column::Deleted.eq(0))
+            .one(service.orm())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to load voxcpm2 tts execution params for task {}",
+                    task_id
+                )
+            })?
+            .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 TTS 任务执行参数: {}", task_id))?;
+
+        task_history_entity::Entity::find_by_id(task_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(service.orm())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to load voxcpm2 tts task history for task {}",
+                    task_id
+                )
+            })?
+            .ok_or_else(|| anyhow::anyhow!("未找到 VoxCPM2 TTS 历史任务记录: {}", task_id))?;
+
+        let params =
+            serde_json::from_str::<VoxCpm2TextToSpeechModelParams>(&task_detail.model_params_json)?;
+        let src_model_root = resolve_src_model_root(service.app_dir())?;
+
+        Ok(TtsTaskExecution {
+            base_model: task_detail.base_model,
+            model_scale: task_detail.model_scale.trim().to_string(),
+            model_root_path: resolve_runtime_model_path(
+                Path::new(service.model_dir()),
+                &src_model_root,
+                &task_detail.model_path.unwrap_or_default(),
+            )?
+            .to_string_lossy()
+            .to_string(),
+            format: task_detail
+                .format
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            text: task_detail.text,
+            cfg_value: params.cfg_value,
+            inference_timesteps: params.inference_timesteps,
+            output_file_path: resolve_task_path(
+                Path::new(service.data_dir()),
+                &task_detail.output_file_path.clone().unwrap_or_default(),
+            )
+            .to_string_lossy()
+            .to_string(),
+        })
+    }
+
+    fn resolve_tts_paths(
+        &self,
+        service: &LocalService,
+        base_model: &str,
+        model_scale: &str,
+    ) -> Result<TtsPaths> {
+        let platform = ScriptPlatform::current();
+        let src_model_root = resolve_src_model_root(service.app_dir())?;
+        let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
+        let init_task_runtime_script_path =
+            src_model_root.join(platform.init_task_runtime_relative_path());
+        let download_models_script_path =
+            src_model_root.join(platform.download_models_relative_path());
+        let tts_python_script_path =
+            src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
+        let ffmpeg_python_script_path =
+            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+
+        Ok(TtsPaths {
+            base_model: base_model.to_string(),
+            model_scale: model_scale.to_string(),
+            src_model_root,
+            venv_python_path,
+            init_task_runtime_script_path,
+            download_models_script_path,
+            tts_python_script_path,
+            ffmpeg_python_script_path,
+        })
+    }
+
+    async fn prepare_tts_env(
+        &self,
+        service: &LocalService,
+        paths: &TtsPaths,
+        task_id: i64,
+        log_dir: &Path,
+        runtime: TtsRuntimeOptions,
+    ) -> Result<()> {
+        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
+        if runtime.is_cpu() {
+            init_script_args.push("--cpu-mode".to_string());
+        }
+
+        self.run_tts_stage_script(
+            &paths.init_task_runtime_script_path,
+            &paths.src_model_root,
+            task_id,
+            log_dir,
+            init_script_args,
+            TtsCommandLabel::InitTaskRuntime,
+        )
+        .await?;
+
+        if self.tts_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
+            info!(
+                base_model = %paths.base_model,
+                training_mode = %runtime.mode_label(&paths.base_model)?,
+                "base model is already marked as downloaded; skipping download-models stage"
+            );
+            self.validate_prepared_tts_downloads(paths)?;
+            return Ok(());
+        }
+
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
+        download_script_args.extend(vox_cpm2_download_script_args(
+            &paths.src_model_root,
+            &paths.model_scale,
+        )?);
+
+        self.run_tts_stage_script(
+            &paths.download_models_script_path,
+            &paths.src_model_root,
+            task_id,
+            log_dir,
+            download_script_args,
+            TtsCommandLabel::DownloadModels,
+        )
+        .await?;
+
+        self.validate_prepared_tts_downloads(paths)?;
+        self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
+
+        Ok(())
+    }
+
+    fn resolve_tts_inference_model_path(&self, params: &TtsTaskExecution) -> Result<String> {
+        Ok(
+            resolve_inference_model_path(Path::new(&params.model_root_path))?
+                .to_string_lossy()
+                .to_string(),
+        )
+    }
+
+    fn tts_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
+        let config = load_configs()
+            .context("failed to load config.toml before checking tts base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+
+        Ok(config
+            .prepared_base_models()
+            .iter()
+            .any(|prepared| prepared == &variant_key || prepared == base_model))
+    }
+
+    fn mark_tts_base_model_downloaded(
+        &self,
+        _service: &LocalService,
+        _base_model: &str,
+        model_scale: &str,
+    ) -> Result<()> {
+        let mut config = load_configs()
+            .context("failed to load config.toml before updating prepared base model marker")?;
+        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
+        if config
+            .training
+            .prepared_base_models
+            .iter()
+            .any(|prepared| prepared == &variant_key)
+        {
+            return Ok(());
+        }
+
+        config.training.prepared_base_models.push(variant_key);
+
+        save_configs(&config)
+            .context("failed to persist training.prepared_base_models to config.toml")
+    }
+
+    fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
+        let mut missing_paths = Vec::new();
+
+        for path in
+            vox_cpm2_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
+        {
+            if !path.exists() {
+                missing_paths.push(path.display().to_string());
+            }
+        }
+
+        if missing_paths.is_empty() {
+            return Ok(());
+        }
+
+        bail!(
+            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            missing_paths.join(", ")
+        )
+    }
+
+    fn validate_tts_environment(
+        &self,
+        paths: &TtsPaths,
+        model_path: &str,
+        output_file_path: &str,
+    ) -> Result<()> {
+        for (label, path) in [
+            ("VoxCPM2 tts venv python", &paths.venv_python_path),
+            (
+                "VoxCPM2 init-task-runtime script",
+                &paths.init_task_runtime_script_path,
+            ),
+            (
+                "VoxCPM2 download-models script",
+                &paths.download_models_script_path,
+            ),
+            ("VoxCPM2 tts python script", &paths.tts_python_script_path),
+            (
+                "VoxCPM2 ffmpeg python script",
+                &paths.ffmpeg_python_script_path,
+            ),
+        ] {
+            if !path.exists() {
+                bail!("{} not found: {}", label, path.display());
+            }
+        }
+
+        if !Path::new(model_path).exists() {
+            bail!("VoxCPM2 model path not found: {}", model_path);
+        }
+
+        ensure_parent_dir(Path::new(output_file_path), "voxcpm2 tts output")?;
+        Ok(())
+    }
+
+    async fn run_tts_command(
+        &self,
+        paths: &TtsPaths,
+        task_id: i64,
+        log_dir: &Path,
+        params: &TtsTaskExecution,
+        model_path: &str,
+        temp_wav_path: &Path,
+        runtime: TtsRuntimeOptions,
+    ) -> Result<()> {
+        info!(
+            tts_script = %paths.tts_python_script_path.display(),
+            model_path = %model_path,
+            output_path = %temp_wav_path.display(),
+            device = runtime.device(),
+            mode = %runtime.mode_label(&params.base_model)?,
+            "starting local voxcpm2 tts inference through direct python invocation"
+        );
+
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
+        let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
+
+        run_logged_python_script(
+            &paths.venv_python_path,
+            &paths.tts_python_script_path,
+            &paths.src_model_root,
+            TtsCommandLabel::RunInference.as_str(),
+            &task_log_path,
+            "python command completed successfully",
+            vec![
+                "--init-model-path".to_string(),
+                model_path.to_string(),
+                "--text".to_string(),
+                params.text.clone(),
+                "--cfg-value".to_string(),
+                params.cfg_value.to_string(),
+                "--inference-timesteps".to_string(),
+                params.inference_timesteps.to_string(),
+                "--output-path".to_string(),
+                temp_wav_path.to_string_lossy().to_string(),
+                "--logging-dir".to_string(),
+                metrics_log_dir.to_string_lossy().to_string(),
+                "--device".to_string(),
+                runtime.device().to_string(),
+            ],
+        )
+        .await?;
+
+        if !temp_wav_path.exists() {
+            bail!(
+                "VoxCPM2 output file not found after inference: {}",
+                temp_wav_path.display()
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn finalize_tts_output(
+        &self,
+        paths: &TtsPaths,
+        task_id: i64,
+        log_dir: &Path,
+        temp_wav_path: &Path,
+        final_output_path: &str,
+        format: TextToSpeechFormat,
+    ) -> Result<()> {
+        let final_output_path = Path::new(final_output_path);
+        if format == TextToSpeechFormat::Wav {
+            replace_output_file(temp_wav_path, final_output_path, "voxcpm2 tts output")?;
+            return Ok(());
+        }
+
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
+
+        run_logged_python_script(
+            &paths.venv_python_path,
+            &paths.ffmpeg_python_script_path,
+            &paths.src_model_root,
+            TtsCommandLabel::ConvertAudio.as_str(),
+            &task_log_path,
+            "python command completed successfully",
+            build_ffmpeg_transcode_args(
+                temp_wav_path,
+                final_output_path,
+                format.as_str(),
+                Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            ),
+        )
+        .await?;
+
+        remove_file_if_exists(temp_wav_path, "temporary voxcpm2 tts wav file")?;
+        Ok(())
+    }
+
+    async fn run_tts_stage_script(
+        &self,
+        script_path: &Path,
+        current_dir: &Path,
+        task_id: i64,
+        log_dir: &Path,
+        script_args: Vec<String>,
+        label: TtsCommandLabel,
+    ) -> Result<()> {
+        let platform = ScriptPlatform::current();
+        let task_log_path = task_log_file_path(
+            log_dir,
+            crate::service::models::HistoryTaskType::TextToSpeech,
+            task_id,
+        );
+        let mut args = platform.shell_args(script_path);
+        args.push("--log-path".to_string());
+        args.push(log_dir.to_string_lossy().to_string());
+        args.push("--task-log-file".to_string());
+        args.push(task_log_path.to_string_lossy().to_string());
+        args.extend(script_args);
+
+        run_logged_command(
+            Path::new(platform.shell_program()),
+            &args,
+            current_dir,
+            label.as_str(),
+            &task_log_path,
+            "voxcpm2 tts command completed successfully",
+        )
+        .await
+    }
+
+    async fn mark_tts_running(&self, service: &LocalService, task_id: i64) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Running,
+                duration_seconds: None,
+                error_message: None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn mark_tts_completed(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        duration_seconds: i64,
+    ) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Completed,
+                duration_seconds: Some(duration_seconds),
+                error_message: None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn mark_tts_failed(
+        &self,
+        service: &LocalService,
+        task_id: i64,
+        duration_seconds: i64,
+        error_message: &str,
+    ) -> Result<()> {
+        service
+            .update_task_status_impl(UpdateTaskStatusPayload {
+                task_id,
+                status: TaskStatus::Failed,
+                duration_seconds: Some(duration_seconds),
+                error_message: Some(error_message.trim().to_string()),
+            })
+            .await?;
+        Ok(())
+    }
+}
+
+pub(crate) fn resolve_inference_model_path(model_root_path: &Path) -> Result<PathBuf> {
+    if !model_root_path.exists() {
+        bail!(
+            "VoxCPM2 model root path not found: {}",
+            model_root_path.display()
+        );
+    }
+
+    if model_root_path
+        .join(VOX_CPM2_RUNTIME_METADATA_FILE_NAME)
+        .exists()
+    {
+        return Ok(model_root_path.to_path_buf());
+    }
+
+    if is_model_checkpoint_dir(model_root_path) {
+        return Ok(model_root_path.to_path_buf());
+    }
+
+    if let Some(path) = resolve_nested_training_checkpoint_path(model_root_path)? {
+        return Ok(path);
+    }
+
+    let mut checkpoint_dirs = fs::read_dir(model_root_path)
+        .with_context(|| {
+            format!(
+                "failed to inspect voxcpm2 model root: {}",
+                model_root_path.display()
+            )
+        })?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_dir() {
+                return None;
+            }
+            let path = entry.path();
+            if is_model_checkpoint_dir(&path) {
+                return Some(path);
+            }
+            None
+        })
+        .collect::<Vec<_>>();
+    checkpoint_dirs.sort();
+
+    checkpoint_dirs.pop().ok_or_else(|| {
+        anyhow::anyhow!(
+            "当前 VoxCPM2 模型目录中没有可用 checkpoint: {}",
+            model_root_path.display()
+        )
+    })
+}
+
+fn resolve_nested_training_checkpoint_path(model_root_path: &Path) -> Result<Option<PathBuf>> {
+    let checkpoints_root = model_root_path.join("checkpoints");
+    if !checkpoints_root.is_dir() {
+        return Ok(None);
+    }
+
+    let mut latest_dirs = Vec::new();
+    let mut step_dirs = Vec::new();
+
+    for mode_entry in fs::read_dir(&checkpoints_root).with_context(|| {
+        format!(
+            "failed to inspect voxcpm2 checkpoints root: {}",
+            checkpoints_root.display()
+        )
+    })? {
+        let Ok(mode_entry) = mode_entry else {
+            continue;
+        };
+        let Ok(file_type) = mode_entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let mode_path = mode_entry.path();
+        let latest_path = mode_path.join("latest");
+        if is_model_checkpoint_dir(&latest_path) {
+            latest_dirs.push(latest_path.clone());
+        }
+
+        for checkpoint_entry in fs::read_dir(&mode_path).with_context(|| {
+            format!(
+                "failed to inspect voxcpm2 checkpoint mode directory: {}",
+                mode_path.display()
+            )
+        })? {
+            let Ok(checkpoint_entry) = checkpoint_entry else {
+                continue;
+            };
+            let Ok(file_type) = checkpoint_entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let checkpoint_path = checkpoint_entry.path();
+            if checkpoint_path == latest_path {
+                continue;
+            }
+            if is_model_checkpoint_dir(&checkpoint_path) {
+                step_dirs.push(checkpoint_path);
+            }
+        }
+    }
+
+    latest_dirs.sort();
+    if let Some(path) = latest_dirs.pop() {
+        return Ok(Some(path));
+    }
+
+    step_dirs.sort();
+    Ok(step_dirs.pop())
+}
+
+fn is_model_checkpoint_dir(path: &Path) -> bool {
+    let has_config = path.join("config.json").exists();
+    let has_weights = path.join("model.safetensors").exists()
+        || path.join("model.safetensors.index.json").exists()
+        || path.join("pytorch_model.bin").exists()
+        || path.join("pytorch_model.bin.index.json").exists();
+
+    has_config && has_weights
+}

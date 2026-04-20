@@ -3,19 +3,28 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
-$venvPython = Join-Path $srcModelRoot 'venv\Scripts\python.exe'
+$modelRoot = $null
+$venvPython = $null
 
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--mode', '--task-log-file') -ActionName 'toggle-lora-dependencies'
+    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--mode', '--task-log-file') -ActionName 'toggle-lora-dependencies'
 }
 catch {
     Write-Error $_.Exception.Message
     exit 64
 }
 
+$baseModel = $parsed['--base-model']
+$modelRoot = Join-Path $srcModelRoot $baseModel
+$venvPython = Join-Path $modelRoot 'venv\Scripts\python.exe'
 $mode = $parsed['--mode']
 $taskLogFile = $parsed['--task-log-file']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.' -Initialize
+
+if ([string]::IsNullOrWhiteSpace($baseModel)) {
+    Write-Error 'Missing --base-model argument.'
+    exit 64
+}
 
 if ($mode -notin @('enable', 'disable')) {
     Write-Error "Unsupported --mode value: $mode"

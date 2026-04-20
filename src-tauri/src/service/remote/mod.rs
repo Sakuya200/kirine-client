@@ -10,9 +10,10 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelTrainingTaskResult,
-            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
+            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult,
         },
         Service,
     },
@@ -62,6 +63,10 @@ impl Service for RemoteService {
         biz::unsupported("delete_speaker_info")
     }
 
+    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
+        biz::unsupported("list_model_infos")
+    }
+
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
         biz::unsupported("list_history_records")
     }
@@ -102,6 +107,10 @@ impl Service for RemoteService {
         _payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
         biz::unsupported("create_model_training_task")
+    }
+
+    async fn cancel_model_training_task(&self, _history_id: i64) -> Result<bool> {
+        biz::unsupported("cancel_model_training_task")
     }
 
     async fn create_voice_clone_task(

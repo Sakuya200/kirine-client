@@ -1,3 +1,4 @@
+pub mod model_info;
 pub mod speaker;
 pub mod task_history;
 pub mod training_task;

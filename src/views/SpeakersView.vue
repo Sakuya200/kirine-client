@@ -9,6 +9,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { AppLanguage } from '@/enums/language';
 import { SPEAKER_STATUS_STYLES, SPEAKER_STATUS_TEXT, SpeakerStatus } from '@/enums/status';
+import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import type { SpeakerProfile } from '@/types/domain';
 
@@ -16,6 +17,7 @@ type LanguageFilterValue = 'all' | AppLanguage;
 type StatusFilterValue = 'all' | SpeakerStatus;
 
 const speakerStore = useSpeakerStore();
+const modelStore = useModelStore();
 const selectedSpeakerId = ref<number | null>(null);
 const deleteTargetId = ref<number | null>(null);
 const searchKeyword = ref('');
@@ -78,6 +80,8 @@ const statusClassMap: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Training]: SPEAKER_STATUS_STYLES[SpeakerStatus.Training],
   [SpeakerStatus.Disabled]: SPEAKER_STATUS_STYLES[SpeakerStatus.Disabled]
 };
+
+const getSpeakerModelLabel = (speaker: SpeakerProfile) => modelStore.getModelLabel(speaker.baseModel);
 
 const openDetail = (speaker: SpeakerProfile) => {
   selectedSpeakerId.value = speaker.id;
@@ -146,6 +150,10 @@ const confirmDelete = async () => {
 };
 
 onMounted(async () => {
+  if (!modelStore.initialized) {
+    await modelStore.loadModels();
+  }
+
   if (!speakerStore.initialized) {
     await speakerStore.loadSpeakers();
   }
@@ -196,10 +204,17 @@ onMounted(async () => {
       <div v-if="filteredSpeakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <article v-for="speaker in filteredSpeakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
           <div class="flex items-start justify-between gap-3">
-            <h3 class="text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
-            <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="statusClassMap[speaker.status]">
-              {{ statusLabelMap[speaker.status] }}
-            </span>
+            <div class="min-w-0 flex-1">
+              <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
+            </div>
+            <div class="flex shrink-0 flex-wrap justify-end gap-2">
+              <span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">
+                {{ getSpeakerModelLabel(speaker) }}
+              </span>
+              <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="statusClassMap[speaker.status]">
+                {{ statusLabelMap[speaker.status] }}
+              </span>
+            </div>
           </div>
           <p class="mt-1 text-xs text-stone-500">{{ speakerStore.getLanguageLabel(speaker) }} · 样本 {{ speaker.samples }} 条</p>
           <p class="mt-2 text-sm text-slate-600">{{ speaker.description }}</p>
@@ -229,6 +244,7 @@ onMounted(async () => {
     <BaseDialog :open="selectedSpeaker !== null" title="说话人详情" @close="closeDetail">
       <div v-if="selectedSpeaker" class="space-y-2 text-sm text-slate-600">
         <p><span class="font-semibold text-slate-800">名称：</span>{{ selectedSpeaker.name }}</p>
+        <p><span class="font-semibold text-slate-800">模型：</span>{{ getSpeakerModelLabel(selectedSpeaker) }}</p>
         <p><span class="font-semibold text-slate-800">语言：</span>{{ speakerStore.getLanguageLabel(selectedSpeaker) }}</p>
         <p><span class="font-semibold text-slate-800">样本数：</span>{{ selectedSpeaker.samples }}</p>
         <p><span class="font-semibold text-slate-800">状态：</span>{{ statusLabelMap[selectedSpeaker.status] }}</p>
