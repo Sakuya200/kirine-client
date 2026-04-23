@@ -649,6 +649,7 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             supported_feature_list_json TEXT NOT NULL,
             create_time TEXT NOT NULL,
             modify_time TEXT NOT NULL,
+            downloaded INTEGER NOT NULL DEFAULT 0,
             deleted INTEGER NOT NULL DEFAULT 0
         )
         "#,
@@ -768,8 +769,8 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
         INSERT INTO model_info (
             id, base_model, model_name, model_scale_list_json,
             required_model_name_list_json, required_model_repo_id_list_json,
-            supported_feature_list_json, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            supported_feature_list_json, create_time, modify_time, downloaded, deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
@@ -781,6 +782,7 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     .bind(r#"["text_to_speech","voice_clone","model_training"]"#)
     .bind("2026-04-01 10:00:00")
     .bind("2026-04-01 10:00:00")
+    .bind(1_i64)
     .bind(0_i64)
     .execute(&pool)
     .await?;

@@ -299,7 +299,10 @@ impl VoxCpm2ModelTaskPipeline {
         )
         .await?;
 
-        if self.tts_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
+        if self
+            .tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
+            .await?
+        {
             info!(
                 base_model = %paths.base_model,
                 training_mode = %runtime.mode_label(&paths.base_model)?,
@@ -326,7 +329,9 @@ impl VoxCpm2ModelTaskPipeline {
         .await?;
 
         self.validate_prepared_tts_downloads(paths)?;
-        self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
+        self
+            .mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
+            .await?;
 
         Ok(())
     }
@@ -339,39 +344,24 @@ impl VoxCpm2ModelTaskPipeline {
         )
     }
 
-    fn tts_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
-        let config = load_configs()
-            .context("failed to load config.toml before checking tts base model marker")?;
-        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
-
-        Ok(config
-            .prepared_base_models()
-            .iter()
-            .any(|prepared| prepared == &variant_key || prepared == base_model))
+    async fn tts_base_model_downloaded(
+        &self,
+        service: &LocalService,
+        base_model: &str,
+        model_scale: &str,
+    ) -> Result<bool> {
+        let _ = vox_cpm2_prepared_variant_key(model_scale)?;
+        service.model_downloaded_impl(base_model, model_scale).await
     }
 
-    fn mark_tts_base_model_downloaded(
+    async fn mark_tts_base_model_downloaded(
         &self,
-        _service: &LocalService,
-        _base_model: &str,
+        service: &LocalService,
+        base_model: &str,
         model_scale: &str,
     ) -> Result<()> {
-        let mut config = load_configs()
-            .context("failed to load config.toml before updating prepared base model marker")?;
-        let variant_key = vox_cpm2_prepared_variant_key(model_scale)?;
-        if config
-            .training
-            .prepared_base_models
-            .iter()
-            .any(|prepared| prepared == &variant_key)
-        {
-            return Ok(());
-        }
-
-        config.training.prepared_base_models.push(variant_key);
-
-        save_configs(&config)
-            .context("failed to persist training.prepared_base_models to config.toml")
+        let _ = vox_cpm2_prepared_variant_key(model_scale)?;
+        service.set_model_downloaded_impl(base_model, model_scale, true).await
     }
 
     fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
@@ -390,7 +380,7 @@ impl VoxCpm2ModelTaskPipeline {
         }
 
         bail!(
-            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
+            "基础模型变体已在 model_info.downloaded 中标记为完成，但以下路径缺失: {}。如需重新下载，请在模型管理页卸载后重试。",
             missing_paths.join(", ")
         )
     }

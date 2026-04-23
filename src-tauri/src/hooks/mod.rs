@@ -14,6 +14,8 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         speaker_info::update_speaker_info,
         speaker_info::delete_speaker_info,
         model_info::list_model_infos,
+        model_info::install_model,
+        model_info::uninstall_model,
         task_history::list_history_records,
         task_history::get_history_record,
         task_history::get_text_to_speech_audio,

@@ -5,12 +5,13 @@ use sea_orm_migration::prelude::*;
 
 use crate::Result;
 
-mod create_local_schema;
+mod add_model_info_downloaded_flag;
 mod add_vox_cpm2_lora_feature_flag;
+mod create_local_schema;
 mod seed_qwen3_tts_preset_speakers;
 mod seed_vox_cpm2_model_info;
 
-const LOCAL_SCHEMA_VERSION: &str = "17";
+const LOCAL_SCHEMA_VERSION: &str = "18";
 
 pub(crate) struct Migrator;
 
@@ -22,6 +23,7 @@ impl MigratorTrait for Migrator {
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
             Box::new(seed_vox_cpm2_model_info::Migration),
             Box::new(add_vox_cpm2_lora_feature_flag::Migration),
+            Box::new(add_model_info_downloaded_flag::Migration),
         ]
     }
 }
@@ -59,6 +61,10 @@ mod tests {
             .table_has_column("tts_tasks", "model_params_json")
             .await
             .expect("check tts model_params_json column"));
+        assert!(harness
+            .table_has_column("model_info", "downloaded")
+            .await
+            .expect("check model_info downloaded column"));
 
         let model_infos = harness.list_model_infos().await.expect("list model infos");
         let scales = model_infos
@@ -73,6 +79,7 @@ mod tests {
         assert!(scales.contains(&"qwen3_tts:1.7B".to_string()));
         assert!(scales.contains(&"qwen3_tts:0.6B".to_string()));
         assert!(scales.contains(&"vox_cpm2:2B".to_string()));
+        assert!(model_infos.iter().all(|item| item.downloaded));
         assert!(vox_info
             .supported_feature_list
             .iter()

@@ -183,6 +183,12 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                 .col(ColumnDef::new(ModelInfo::CreateTime).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModifyTime).string().not_null())
                 .col(
+                    ColumnDef::new(ModelInfo::Downloaded)
+                        .boolean()
+                        .not_null()
+                        .default(false),
+                )
+                .col(
                     ColumnDef::new(ModelInfo::Deleted)
                         .integer()
                         .not_null()
@@ -675,6 +681,7 @@ enum ModelInfo {
     SupportedFeatureListJson,
     CreateTime,
     ModifyTime,
+    Downloaded,
     Deleted,
 }
 
