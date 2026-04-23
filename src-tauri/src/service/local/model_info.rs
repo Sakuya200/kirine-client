@@ -116,10 +116,14 @@ impl LocalService {
             &log_dir,
             use_cpu_mode,
             INIT_MODEL_RUNTIME_LABEL,
-            |script_path, working_dir, _task_id, _log_dir, script_args, label| {
+            |script_path, working_dir, _task_id, log_dir, script_args, label| {
                 let log_path = init_log_path.clone();
                 async move {
                     let mut args = platform.shell_args(&script_path);
+                    args.push("--log-path".to_string());
+                    args.push(log_dir.to_string_lossy().to_string());
+                    args.push("--task-log-file".to_string());
+                    args.push(log_path.to_string_lossy().to_string());
                     args.extend(script_args);
                     run_logged_command(
                         Path::new(platform.shell_program()),
@@ -146,10 +150,14 @@ impl LocalService {
                 &model_info.model_scale,
             )?,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL,
-            |script_path, working_dir, _task_id, _log_dir, script_args, label| {
+            |script_path, working_dir, _task_id, log_dir, script_args, label| {
                 let log_path = download_log_path.clone();
                 async move {
                     let mut args = platform.shell_args(&script_path);
+                    args.push("--log-path".to_string());
+                    args.push(log_dir.to_string_lossy().to_string());
+                    args.push("--task-log-file".to_string());
+                    args.push(log_path.to_string_lossy().to_string());
                     args.extend(script_args);
                     run_logged_command(
                         Path::new(platform.shell_program()),
