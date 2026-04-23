@@ -5,12 +5,8 @@ import importlib.util
 import json
 import math
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
 import yaml
@@ -28,9 +24,7 @@ ensure_src_root_on_path()
 from vox_cpm2 import RUNTIME_METADATA_FILE_NAME
 
 SRC_MODEL_ROOT = Path(__file__).resolve().parents[1]
-
-VOXCPM_REPO_GIT_URL = "https://github.com/OpenBMB/VoxCPM.git"
-VOXCPM_REPO_ARCHIVE_URL = "https://codeload.github.com/OpenBMB/VoxCPM/zip/refs/heads/main"
+LOCAL_TRAIN_SCRIPT_NAME = "train_voxcpm_finetune.py"
 
 LORA_DEFAULTS = {
     "enable_lm": True,
@@ -77,81 +71,16 @@ def parse_lora_dropout(value: str) -> float:
     return parsed
 
 
-def get_vendor_repo_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "vendor" / "VoxCPM"
-
-
-def vendor_train_script_path() -> Path:
-    return get_vendor_repo_root() / "scripts" / "train_voxcpm_finetune.py"
-
-
-def install_voxcpm_training_sources_from_git(vendor_root: Path) -> bool:
-    git_command = shutil.which("git")
-    if not git_command:
-        return False
-
-    vendor_root.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [git_command, "clone", "--depth", "1", VOXCPM_REPO_GIT_URL, str(vendor_root)],
-        check=True,
-    )
-    return True
-
-
-def install_voxcpm_training_sources_from_archive(vendor_root: Path) -> bool:
-    vendor_root.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.TemporaryDirectory(prefix="voxcpm-src-") as temp_dir:
-        archive_path = Path(temp_dir) / "voxcpm.zip"
-        with urllib.request.urlopen(VOXCPM_REPO_ARCHIVE_URL) as response, archive_path.open("wb") as output:
-            shutil.copyfileobj(response, output)
-
-        with zipfile.ZipFile(archive_path) as archive:
-            archive.extractall(vendor_root.parent)
-
-        extracted_root = vendor_root.parent / "VoxCPM-main"
-        if not extracted_root.exists():
-            return False
-
-        if vendor_root.exists():
-            shutil.rmtree(vendor_root)
-        extracted_root.rename(vendor_root)
-
-    return True
-
-
-def ensure_voxcpm_training_sources() -> Path | None:
-    vendor_root = get_vendor_repo_root()
-    train_script = vendor_train_script_path()
-    if train_script.exists():
-        return train_script
-
-    if vendor_root.exists() and not train_script.exists():
-        return None
-
-    installers = [install_voxcpm_training_sources_from_git, install_voxcpm_training_sources_from_archive]
-    errors: list[str] = []
-    for installer in installers:
-        try:
-            if installer(vendor_root) and train_script.exists():
-                return train_script
-        except Exception as exc:
-            errors.append(f"{installer.__name__}: {exc}")
-
-    if errors:
-        joined = "\n".join(errors)
-        raise FileNotFoundError(
-            "Unable to bootstrap VoxCPM training sources automatically.\n"
-            f"Attempts:\n{joined}"
-        )
-
-    return None
+def local_train_script_path() -> Path:
+    return Path(__file__).resolve().with_name(LOCAL_TRAIN_SCRIPT_NAME)
 
 
 def resolve_train_script_path(explicit_path: str) -> Path:
     candidates: list[Path] = []
     if explicit_path.strip():
         candidates.append(Path(explicit_path).expanduser().resolve())
+
+    candidates.append(local_train_script_path())
 
     spec = importlib.util.find_spec("voxcpm")
     if spec and spec.origin:
@@ -164,23 +93,14 @@ def resolve_train_script_path(explicit_path: str) -> Path:
             ]
         )
 
-    workspace_candidates = [
-        vendor_train_script_path(),
-        Path(__file__).resolve().parents[3] / "VoxCPM" / "scripts" / "train_voxcpm_finetune.py",
-    ]
-    candidates.extend(workspace_candidates)
-
     for candidate in candidates:
         if candidate.exists():
             return candidate
 
-    bootstrapped = ensure_voxcpm_training_sources()
-    if bootstrapped and bootstrapped.exists():
-        return bootstrapped
-
     joined = "\n".join(str(candidate) for candidate in candidates)
     raise FileNotFoundError(
-        "Unable to locate VoxCPM training entrypoint scripts/train_voxcpm_finetune.py.\n"
+        "Unable to locate a local VoxCPM training entrypoint.\n"
+        f"Expected bundled script: {local_train_script_path()}\n"
         f"Checked:\n{joined}"
     )
 
