@@ -190,6 +190,76 @@ verify_torch_cpu_runtime() {
     run_checked "$1" "$VENV_PYTHON" -c "import torch, torchaudio, torchvision; print(torch.__version__)"
 }
 
+get_torch_runtime_metadata() {
+    if [ ! -x "$VENV_PYTHON" ]; then
+        return 1
+    fi
+
+    append_log "[init-task-runtime] inspect installed torch runtime metadata"
+    output=$(
+        "$VENV_PYTHON" -c "import torch, torchaudio, torchvision; print(f'{torch.__version__}|{torch.version.cuda or ''''}|{int(bool(torch.cuda.is_available()))}')" \
+            2>>"$TASK_LOG_FILE"
+    ) || return 1
+    printf '%s\n' "$output" >>"$TASK_LOG_FILE"
+    printf '%s\n' "$output"
+}
+
+torch_cuda_version_to_tag() {
+    version=$1
+    printf '%s\n' "$version" | sed -n 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)$/\1\2/p'
+}
+
+torch_cpu_initialized() {
+    metadata=$(get_torch_runtime_metadata) || return 1
+    old_ifs=$IFS
+    IFS='|'
+    set -- $metadata
+    IFS=$old_ifs
+    torch_version=$1
+    torch_cuda=${2-}
+
+    if [ -n "$torch_cuda" ]; then
+        append_log "[init-task-runtime] existing torch runtime uses CUDA $torch_cuda, which does not match current CPU mode"
+        return 1
+    fi
+
+    append_log "[init-task-runtime] detected compatible CPU torch runtime version $torch_version; offline initialization check passed"
+    return 0
+}
+
+torch_cuda_initialized() {
+    candidates=$1
+    metadata=$(get_torch_runtime_metadata) || return 1
+    old_ifs=$IFS
+    IFS='|'
+    set -- $metadata
+    IFS=$old_ifs
+    torch_version=$1
+    torch_cuda=${2-}
+    cuda_available=${3-0}
+
+    if [ "$cuda_available" != '1' ]; then
+        append_log '[init-task-runtime] installed torch runtime reports cuda_available=False; runtime does not match current GPU mode'
+        return 1
+    fi
+
+    installed_tag=$(torch_cuda_version_to_tag "$torch_cuda")
+    if [ -z "$installed_tag" ]; then
+        append_log '[init-task-runtime] installed torch runtime does not expose a usable CUDA version; runtime does not match current GPU mode'
+        return 1
+    fi
+
+    for candidate_tag in $candidates; do
+        if [ "$candidate_tag" = "$installed_tag" ]; then
+            append_log "[init-task-runtime] detected compatible CUDA torch runtime cu$installed_tag (torch $torch_version); offline initialization check passed"
+            return 0
+        fi
+    done
+
+    append_log "[init-task-runtime] installed torch CUDA tag cu$installed_tag is incompatible with the current GPU environment; expected one of: $candidates"
+    return 1
+}
+
 ensure_base_dependencies() {
     run_checked "install project requirements" "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
     append_log "[init-task-runtime] base Python dependencies are ready"
@@ -227,12 +297,18 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
 fi
 
 ensure_env
-ensure_base_dependencies
 
 if [ "$CPU_MODE" -eq 1 ]; then
     append_log "[init-task-runtime] CPU mode enabled; skipping CUDA detection"
+    if torch_cpu_initialized; then
+        append_log "[init-task-runtime] local task runtime already matches current CPU mode; skipping dependency installation"
+        append_log "[init-task-runtime] local task runtime is ready"
+        exit 0
+    fi
+
+    ensure_base_dependencies
     if verify_torch_cpu_runtime "verify existing torch runtime"; then
-        append_log "[init-task-runtime] existing torch runtime is already usable; skipping torch reinstall"
+        append_log "[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall"
     else
         run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     fi
@@ -242,8 +318,15 @@ else
     cuda_major=$1
     cuda_minor=$2
     cuda_candidates=$(select_cuda_tag "$cuda_major" "$cuda_minor")
+    if torch_cuda_initialized "$cuda_candidates"; then
+        append_log "[init-task-runtime] local task runtime already matches current GPU mode; skipping dependency installation"
+        append_log "[init-task-runtime] local task runtime is ready"
+        exit 0
+    fi
+
+    ensure_base_dependencies
     if verify_torch_cuda_runtime "verify existing torch CUDA runtime"; then
-        append_log "[init-task-runtime] existing torch CUDA runtime is already usable; skipping torch reinstall"
+        append_log "[init-task-runtime] existing torch CUDA runtime is already usable after base dependency sync; skipping torch reinstall"
     else
         install_compatible_torch_cuda "$cuda_candidates" >/dev/null
     fi
