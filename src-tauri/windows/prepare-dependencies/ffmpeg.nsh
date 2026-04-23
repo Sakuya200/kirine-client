@@ -1,6 +1,6 @@
 Function InstallBundledFfmpeg
-  StrCpy $0 "$INSTDIR\lib\ffmpeg-8.0.1-essentials_build"
-  StrCpy $1 "$0\bin\ffmpeg.exe"
+  StrCpy $4 "$INSTDIR\lib\ffmpeg-8.0.1-essentials_build"
+  StrCpy $1 "$4\bin\ffmpeg.exe"
   StrCpy $2 "$INSTDIR\resources\ffmpeg-8.0.1-essentials_build.zip"
 
   DetailPrint "Checking FFmpeg availability..."
@@ -26,7 +26,7 @@ Function InstallBundledFfmpeg
   ${EndIf}
 
   IfFileExists "$1" ffmpeg_ready 0
-  MessageBox MB_ICONEXCLAMATION "FFmpeg archive extraction completed, but ffmpeg.exe was not found in $0\bin."
+  MessageBox MB_ICONEXCLAMATION "FFmpeg archive extraction completed, but ffmpeg.exe was not found in $4\bin."
   Goto ffmpeg_cleanup
 
 ffmpeg_missing_archive:
@@ -34,7 +34,7 @@ ffmpeg_missing_archive:
   Goto ffmpeg_done
 
 ffmpeg_ready:
-  Push "$0\bin"
+  Push "$4\bin"
   Call AddToUserPathIfMissing
 
 ffmpeg_cleanup:

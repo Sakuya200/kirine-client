@@ -1,6 +1,6 @@
 Function InstallBundledSox
-  StrCpy $0 "$INSTDIR\lib\sox"
-  StrCpy $1 "$0\sox.exe"
+  StrCpy $4 "$INSTDIR\lib\sox"
+  StrCpy $1 "$4\sox.exe"
   StrCpy $2 "$INSTDIR\resources\sox-14.4.2-win32.exe"
 
   DetailPrint "Checking SoX availability..."
@@ -15,9 +15,9 @@ Function InstallBundledSox
   ${EndIf}
 
   IfFileExists "$2" 0 sox_missing_installer
-  CreateDirectory "$0"
-  DetailPrint "Installing bundled SoX to $0"
-  StrCpy $0 '"$2" /S /D=$0'
+  CreateDirectory "$4"
+  DetailPrint "Installing bundled SoX to $4"
+  StrCpy $0 '"$2" /S /D=$4'
   Call RunHiddenCommandWait
   StrCpy $3 "$0"
   ${If} $3 != 0
@@ -26,7 +26,7 @@ Function InstallBundledSox
   ${EndIf}
 
   IfFileExists "$1" sox_ready 0
-  MessageBox MB_ICONEXCLAMATION "SoX installer completed, but sox.exe was not found in $0."
+  MessageBox MB_ICONEXCLAMATION "SoX installer completed, but sox.exe was not found in $4."
   Goto sox_cleanup
 
 sox_missing_installer:
@@ -34,7 +34,7 @@ sox_missing_installer:
   Goto sox_done
 
 sox_ready:
-  Push "$0"
+  Push "$4"
   Call AddToUserPathIfMissing
 
 sox_cleanup:
