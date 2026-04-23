@@ -15,7 +15,7 @@ import { HISTORY_TASK_ROUTE_PATH, HistoryTaskType } from '@/enums/task';
         class="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
       >
         <ArrowLeftIcon class="h-4 w-4" aria-hidden="true" />
-        <span>回到模型训练</span>
+        <span>回到模型微调</span>
       </RouterLink>
     </div>
   </div>

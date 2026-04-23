@@ -24,7 +24,7 @@ export const getHistoryTaskReplayId = (value: string | null | Array<string | nul
 };
 
 export const HISTORY_TASK_TYPE_TEXT: Record<HistoryTaskType, string> = {
-  [HistoryTaskType.ModelTraining]: '模型训练',
+  [HistoryTaskType.ModelTraining]: '模型微调',
   [HistoryTaskType.TextToSpeech]: '文本转语音',
   [HistoryTaskType.VoiceClone]: '声音克隆'
 };

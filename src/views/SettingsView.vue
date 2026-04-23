@@ -178,7 +178,7 @@ onMounted(async () => {
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <p class="rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2 text-xs leading-5 text-stone-600">
-              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。训练参数与 LoRA 配置已迁移到对应任务页面。
+              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。微调参数与 LoRA 配置已迁移到对应任务页面。
             </p>
             <label class="block">
               <span class="mb-1 block text-xs text-stone-500">模型目录</span>

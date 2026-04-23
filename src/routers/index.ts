@@ -14,7 +14,7 @@ export const appRoutes = [
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.ModelTraining],
     name: HistoryTaskType.ModelTraining,
-    meta: { title: '模型训练' },
+    meta: { title: '模型微调' },
     component: ModelTrainingView
   },
   {

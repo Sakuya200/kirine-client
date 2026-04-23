@@ -140,7 +140,7 @@ let isActiveTaskRefreshInFlight = false;
 let isHistoryRefreshInFlight = false;
 
 const trainingChecklist = [
-  '准备最少 1 条音频样本与对应文本稿，建议 24kHz 以上质量。',
+  '准备最少 1 条音频样本与对应文本稿，作为微调数据输入，建议 24kHz 以上质量。',
   '确保样本语言一致，避免中途切换语言导致风格漂移。',
   '上传前先裁剪静音段，控制单条样本长度在 15 秒以内。'
 ];
@@ -188,15 +188,15 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
 );
 
 const baseModelSummary = computed(() => {
-  return '训练任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
+  return '微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
 });
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
-    return '正在创建模型训练任务，请稍候';
+    return '正在创建模型微调任务，请稍候';
   }
 
   if (isCancelling.value) {
-    return '正在请求终止模型训练任务，请稍候';
+    return '正在请求终止模型微调任务，请稍候';
   }
 
   if (activeTrainingTask.value?.status === TaskStatus.Pending || activeTrainingTask.value?.status === TaskStatus.Running) {
@@ -474,12 +474,12 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
     recentTrainingHistory.value = records.filter(isModelTrainingHistoryRecord).slice(0, 5);
 
     if (notifyOnSuccess) {
-      uiStore.notifySuccess('模型训练任务状态已刷新。', 2200);
+      uiStore.notifySuccess('模型微调任务状态已刷新。', 2200);
     }
   } catch (error) {
     recentTrainingHistory.value = [];
     if (!silentOnError) {
-      uiStore.notifyError(formatErrorMessage('刷新模型训练历史任务失败，请检查 Rust 后端日志', error));
+      uiStore.notifyError(formatErrorMessage('刷新模型微调历史任务失败，请检查 Rust 后端日志', error));
     }
   } finally {
     isHistoryRefreshInFlight = false;
@@ -524,7 +524,7 @@ const refreshActiveTaskStatus = async () => {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
-    console.log(formatErrorMessage('刷新模型训练任务状态失败，请检查 Rust 后端日志', error));
+    console.log(formatErrorMessage('刷新模型微调任务状态失败，请检查 Rust 后端日志', error));
   } finally {
     isActiveTaskRefreshInFlight = false;
   }
@@ -551,7 +551,7 @@ const cancelActiveTrainingTask = async () => {
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型训练任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
   } finally {
     isCancelling.value = false;
   }
@@ -563,7 +563,7 @@ const startTraining = async () => {
   }
 
   isStarting.value = true;
-  uiStore.notifyInfo('正在创建模型训练任务。', 2200);
+  uiStore.notifyInfo('正在创建模型微调任务。', 2200);
 
   try {
     const payload = await invoke<ModelTrainingTaskResultPayload>('create_model_training_task', {
@@ -590,11 +590,11 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型训练任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
+      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('模型训练任务创建失败', error));
+    uiStore.notifyError(formatErrorMessage('模型微调任务创建失败', error));
   } finally {
     isStarting.value = false;
   }
@@ -625,12 +625,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="模型训练" description="上传训练样本与标注内容，创建可用于文本转语音的本地说话人模型。" eyebrow="Model-Training" />
+    <PageHeader title="模型微调" description="上传微调样本与标注内容，配置参数并创建可用于文本转语音的本地说话人模型。" eyebrow="Model-Fine-Tuning" />
 
     <BaseLoadingBanner v-if="trainingBusyLabel" :label="trainingBusyLabel" />
 
-    <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="训练数据导入" subtitle="支持逐条导入和按数据集导入，两种方式都需要音频与文本对齐">
+    <div class="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <PanelCard title="微调数据导入" subtitle="支持逐条导入和按数据集导入，两种方式都需要音频与文本对齐">
         <div class="grid gap-4 xl:grid-cols-2">
           <section class="flex h-full flex-col rounded-2xl border border-brand-200 bg-white/80 p-4">
             <div class="mb-3">
@@ -638,7 +638,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="min-h-[68px]">
               <p class="text-sm font-semibold text-slate-800">一对一上传</p>
-              <p class="mt-1 text-xs leading-5 text-stone-500">提供一段音频和对应台词，导入后记为单样本。</p>
+              <p class="mt-1 text-xs leading-5 text-stone-500">提供一段音频和对应台词，导入后记为单样本微调数据。</p>
             </div>
 
             <label class="mt-4 block text-sm text-slate-700">
@@ -677,7 +677,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="min-h-[68px]">
               <p class="text-sm font-semibold text-slate-800">批量上传</p>
-              <p class="mt-1 text-xs leading-5 text-stone-500">提供音频压缩包与数据标注文件，导入后记为样本集。</p>
+              <p class="mt-1 text-xs leading-5 text-stone-500">提供音频压缩包与数据标注文件，导入后记为批量微调数据。</p>
             </div>
 
             <label class="mt-4 block text-sm text-slate-700">
@@ -732,100 +732,37 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <ul v-if="importedSamples.length > 0" class="mt-4 space-y-3">
-            <li v-for="sample in importedSamples" :key="sample.id" class="rounded-xl border border-brand-200 bg-white/90 p-3">
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <p class="text-sm font-semibold text-slate-800">{{ sample.title }}</p>
-                    <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">
-                      {{ MODEL_TRAINING_SAMPLE_TYPE_TEXT[sample.type] }}
-                    </span>
+          <div class="mt-4 max-h-[360px] overflow-y-auto pr-1">
+            <ul v-if="importedSamples.length > 0" class="space-y-3">
+              <li v-for="sample in importedSamples" :key="sample.id" class="rounded-xl border border-brand-200 bg-white/90 p-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <p class="text-sm font-semibold text-slate-800">{{ sample.title }}</p>
+                      <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">
+                        {{ MODEL_TRAINING_SAMPLE_TYPE_TEXT[sample.type] }}
+                      </span>
+                    </div>
+                    <p class="mt-1 text-xs text-stone-500">{{ sample.detail }}</p>
+                    <p v-if="sample.transcriptPreview" class="mt-2 text-xs text-slate-600">{{ sample.transcriptPreview }}</p>
                   </div>
-                  <p class="mt-1 text-xs text-stone-500">{{ sample.detail }}</p>
-                  <p v-if="sample.transcriptPreview" class="mt-2 text-xs text-slate-600">{{ sample.transcriptPreview }}</p>
+                  <BaseButton tone="quiet" size="sm" @click="removeImportedSample(sample.id)">
+                    <TrashIcon class="h-4 w-4" aria-hidden="true" />
+                    <span>移除</span>
+                  </BaseButton>
                 </div>
-                <BaseButton tone="quiet" size="sm" @click="removeImportedSample(sample.id)">
-                  <TrashIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>移除</span>
-                </BaseButton>
-              </div>
-            </li>
-          </ul>
+              </li>
+            </ul>
 
-          <div v-else class="mt-4 rounded-xl border border-dashed border-brand-200 bg-white/80 p-4 text-xs text-stone-500">
-            还没有导入任何样本。单样本和样本集都可以加入训练列表。
+            <div v-else class="rounded-xl border border-dashed border-brand-200 bg-white/80 p-4 text-xs text-stone-500">
+              还没有导入任何样本。单样本和样本集都可以加入微调列表。
+            </div>
           </div>
         </div>
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard class="z-20" title="基础参数">
-          <div class="space-y-3 text-sm text-slate-700">
-            <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">训练输出名称</span>
-              <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
-            </label>
-            <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
-            <BaseListbox
-              v-model="form.language"
-              v-model:selected-option="selectedLanguageOption"
-              label="语种"
-              :options="MODEL_TRAINING_LANGUAGE_OPTIONS"
-            />
-            <div>
-              <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-              <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
-            </div>
-            <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
-              <p>训练摘要</p>
-              <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-              <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
-              <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.useLora ? 'LoRA 微调' : '全量微调' }}。</p>
-              <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
-                LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
-                {{ form.modelParams.loraDropout ?? 0 }}。
-              </p>
-              <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
-              <p class="mt-1">
-                当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
-                {{ form.modelParams.enableGradientCheckpointing ? '已启用' : '未启用' }}。
-              </p>
-            </div>
-          </div>
-          <div class="mt-4 flex flex-wrap gap-2">
-            <BaseButton :disabled="!canStartTraining" @click="startTraining">
-              <BaseLoadingIndicator v-if="isStarting" size="sm" tone="muted" />
-              <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isStarting ? '创建中...' : '开始训练' }}</span>
-            </BaseButton>
-            <BaseButton
-              v-if="activeTrainingTask && [TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
-              tone="quiet"
-              :disabled="isCancelling"
-              @click="cancelActiveTrainingTask"
-            >
-              <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
-              <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isCancelling ? '终止中...' : '终止当前任务' }}</span>
-            </BaseButton>
-            <BaseButton tone="ghost" @click="resetForm">
-              <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-              <span>重置表单</span>
-            </BaseButton>
-          </div>
-          <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-3 text-xs text-stone-600">
-            <p>当前活动任务</p>
-            <p class="mt-1">
-              任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
-              {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
-            </p>
-            <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
-          </div>
-        </PanelCard>
-
-        <PanelCard class="z-0" title="准备清单" subtitle="正式接入训练脚本前，先确保数据质量">
+        <PanelCard class="z-0" title="准备清单" subtitle="开始微调前，先确保数据质量">
           <ul class="space-y-2 text-sm text-slate-700">
             <li v-for="item in trainingChecklist" :key="item" class="flex gap-2">
               <CheckCircleIcon class="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
@@ -834,7 +771,7 @@ onBeforeUnmount(() => {
           </ul>
         </PanelCard>
 
-        <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型训练任务，数据来自统一历史记录">
+        <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型微调任务，数据来自统一历史记录">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :disabled="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
               <BaseLoadingIndicator v-if="isRefreshingHistory" size="sm" tone="muted" />
@@ -843,16 +780,99 @@ onBeforeUnmount(() => {
             </BaseButton>
           </template>
 
-          <RecentTaskList
-            :items="recentTaskItems"
-            :selected-task-id="activeTrainingTask?.taskId ?? null"
-            empty-text="还没有历史任务。开始训练后会自动加入这里。"
-            action-label="查看"
-            @select="loadHistoryItem"
-          />
+          <div class="max-h-[420px] overflow-y-auto pr-1">
+            <RecentTaskList
+              :items="recentTaskItems"
+              :selected-task-id="activeTrainingTask?.taskId ?? null"
+              empty-text="还没有历史任务。开始微调后会自动加入这里。"
+              action-label="查看"
+              @select="loadHistoryItem"
+            />
+          </div>
         </PanelCard>
       </div>
     </div>
+
+    <PanelCard class="z-20" title="微调参数" subtitle="模型微调参数配置">
+      <div class="space-y-5 text-sm text-slate-700">
+        <div class="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          <label class="block md:col-span-2 2xl:col-span-1">
+            <span class="mb-1 block text-xs text-stone-500">微调输出名称</span>
+            <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
+          </label>
+          <div class="md:col-span-1 2xl:col-span-1">
+            <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
+          </div>
+          <div class="md:col-span-1 2xl:col-span-1">
+            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+          </div>
+          <div class="md:col-span-2 2xl:col-span-1">
+            <BaseListbox
+              v-model="form.language"
+              v-model:selected-option="selectedLanguageOption"
+              label="语种"
+              :options="MODEL_TRAINING_LANGUAGE_OPTIONS"
+            />
+          </div>
+        </div>
+
+        <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
+          <p class="mt-1 text-xs leading-5 text-stone-500">当选择不同的基础模型时，可配置的微调参数会有所不同，请参考不同模型的官方文档。</p>
+          <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
+        </section>
+
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+          <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
+            <p>微调摘要</p>
+            <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
+            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+            <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.useLora ? 'LoRA 微调' : '全量微调' }}。</p>
+            <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
+              LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
+              {{ form.modelParams.loraDropout ?? 0 }}。
+            </p>
+            <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
+            <p class="mt-1">
+              当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
+              {{ form.modelParams.enableGradientCheckpointing ? '已启用' : '未启用' }}。
+            </p>
+          </div>
+
+          <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
+            <div class="flex items-center justify-center gap-2">
+              <BaseButton :disabled="!canStartTraining" @click="startTraining">
+                <BaseLoadingIndicator v-if="isStarting" size="sm" tone="muted" />
+                <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isStarting ? '创建中...' : '开始微调' }}</span>
+              </BaseButton>
+              <BaseButton
+                tone="quiet"
+                :disabled="isCancelling || !activeTrainingTask || ![TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
+                @click="cancelActiveTrainingTask"
+              >
+                <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
+                <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isCancelling ? '终止中...' : '终止微调' }}</span>
+              </BaseButton>
+              <BaseButton tone="ghost" @click="resetForm">
+                <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
+                <span>重置表单</span>
+              </BaseButton>
+            </div>
+
+            <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
+              <p>当前活动任务</p>
+              <p class="mt-1">
+                任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
+                {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
+              </p>
+              <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </PanelCard>
 
     <ModelTrainingTemplateDownloadDialog :open="isTemplateDialogOpen" @close="isTemplateDialogOpen = false" />
   </div>

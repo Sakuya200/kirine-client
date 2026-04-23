@@ -156,7 +156,7 @@ const cancelTrainingTask = async (historyId: number) => {
     await loadHistory();
     uiStore.notifySuccess(`已发送任务 ${historyId} 的终止请求。`, 2600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型训练任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
   } finally {
     isMutating.value = false;
   }
@@ -169,11 +169,11 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="历史任务" description="统一查看模型训练、文本转语音与声音克隆任务，支持筛选、搜索、详情查看与删除。" eyebrow="Task History" />
+    <PageHeader title="历史任务" description="统一查看模型微调、文本转语音与声音克隆任务，支持筛选、搜索、详情查看与删除。" eyebrow="Task History" />
 
     <BaseLoadingBanner v-if="historyBusyLabel" :label="historyBusyLabel" />
 
-    <PanelCard title="任务列表" subtitle="统一展示模型训练、文本转语音与声音克隆任务，数据来自本地数据库。">
+    <PanelCard title="任务列表" subtitle="统一展示模型微调、文本转语音与声音克隆任务，数据来自本地数据库。">
       <template #actions>
         <BaseButton tone="ghost" :disabled="isLoading" @click="loadHistory">
           <BaseLoadingIndicator v-if="isLoading" size="sm" tone="muted" />
