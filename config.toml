@@ -11,7 +11,3 @@ api_token = ""
 [training]
 hardware_type = "cuda"
 attn_implementation = "sdpa"
-lora_mode = "disabled"
-lora_rank = 16
-lora_alpha = 32
-lora_dropout = "0.05"
