@@ -19,7 +19,7 @@ use crate::{
             training_index_jsonl_path, training_output_jsonl_path,
         },
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
@@ -552,8 +552,7 @@ impl Qwen3TTSModelTaskPipeline {
         .await?;
 
         self.validate_prepared_model_downloads(paths)?;
-        self
-            .mark_training_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
+        self.mark_training_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
             .await?;
 
         Ok(())
@@ -576,7 +575,9 @@ impl Qwen3TTSModelTaskPipeline {
         model_scale: &str,
     ) -> Result<()> {
         let _ = qwen3_tts_prepared_variant_key(model_scale)?;
-        service.set_model_downloaded_impl(base_model, model_scale, true).await
+        service
+            .set_model_downloaded_impl(base_model, model_scale, true)
+            .await
     }
 
     fn validate_prepared_model_downloads(&self, paths: &TrainingPaths) -> Result<()> {

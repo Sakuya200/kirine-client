@@ -14,15 +14,15 @@ use crate::{
         local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
         task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{task_history as task_history_entity, tts_task as tts_task_entity},
             LocalService,
         },
         models::{
-            HistoryTaskType, Qwen3TtsTextToSpeechModelParams, TaskStatus,
-            TextToSpeechFormat, UpdateTaskStatusPayload,
+            HistoryTaskType, Qwen3TtsTextToSpeechModelParams, TaskStatus, TextToSpeechFormat,
+            UpdateTaskStatusPayload,
         },
         pipeline::{
             model_paths::llm_model_display_name,
@@ -232,9 +232,11 @@ impl Qwen3TTSModelTaskPipeline {
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             text: task_detail.text,
-            voice_prompt: from_str::<Qwen3TtsTextToSpeechModelParams>(&task_detail.model_params_json)
-                .map(|params| params.voice_prompt)
-                .unwrap_or_default(),
+            voice_prompt: from_str::<Qwen3TtsTextToSpeechModelParams>(
+                &task_detail.model_params_json,
+            )
+            .map(|params| params.voice_prompt)
+            .unwrap_or_default(),
             output_file_path: resolve_task_path(
                 Path::new(service.data_dir()),
                 &task_detail
@@ -248,7 +250,12 @@ impl Qwen3TTSModelTaskPipeline {
         })
     }
 
-    fn resolve_tts_paths(&self, service: &LocalService, base_model: &str, model_scale: &str) -> Result<TtsPaths> {
+    fn resolve_tts_paths(
+        &self,
+        service: &LocalService,
+        base_model: &str,
+        model_scale: &str,
+    ) -> Result<TtsPaths> {
         let platform = ScriptPlatform::current();
         let src_model_root = resolve_src_model_root(service.app_dir())?;
         let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
@@ -309,8 +316,7 @@ impl Qwen3TTSModelTaskPipeline {
             return Ok(());
         }
 
-        let mut download_script_args =
-            vec!["--base-model".to_string(), paths.base_model.clone()];
+        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
         download_script_args.extend(qwen3_tts_download_script_args(
             &paths.src_model_root,
             &paths.model_scale,
@@ -327,8 +333,7 @@ impl Qwen3TTSModelTaskPipeline {
         .await?;
 
         self.validate_prepared_tts_downloads(paths)?;
-        self
-            .mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
+        self.mark_tts_base_model_downloaded(service, &paths.base_model, &paths.model_scale)
             .await?;
 
         Ok(())
@@ -351,13 +356,17 @@ impl Qwen3TTSModelTaskPipeline {
         model_scale: &str,
     ) -> Result<()> {
         let _ = qwen3_tts_prepared_variant_key(model_scale)?;
-        service.set_model_downloaded_impl(base_model, model_scale, true).await
+        service
+            .set_model_downloaded_impl(base_model, model_scale, true)
+            .await
     }
 
     fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
         let mut missing_paths = Vec::new();
 
-        for path in qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
+        for path in
+            qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
+        {
             if !path.exists() {
                 missing_paths.push(path.display().to_string());
             }
