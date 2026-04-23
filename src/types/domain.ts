@@ -98,8 +98,15 @@ export interface ModelInfo {
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];
+  downloaded: boolean;
   createTime: string;
   modifyTime: string;
+}
+
+export interface ModelMutationResult {
+  model: ModelInfo;
+  removedPaths: string[];
+  preservedPaths: string[];
 }
 
 export interface ModelTrainingHistoryRecord extends HistoryRecordBase {

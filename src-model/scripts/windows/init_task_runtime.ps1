@@ -106,6 +106,36 @@ function Get-CommandOutput {
     }
 }
 
+function Get-ExternalCommandOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+
+        [string[]]$Arguments = @()
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $previousPythonIoEncoding = $env:PYTHONIOENCODING
+    $previousPythonUtf8 = $env:PYTHONUTF8
+
+    try {
+        $ErrorActionPreference = 'Continue'
+        $env:PYTHONIOENCODING = 'utf-8'
+        $env:PYTHONUTF8 = '1'
+        $output = & $Command @Arguments 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+
+        return $output.Trim()
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        $env:PYTHONIOENCODING = $previousPythonIoEncoding
+        $env:PYTHONUTF8 = $previousPythonUtf8
+    }
+}
+
 function Get-CudaVersion {
     foreach ($commandSpec in @(
             @{ Command = 'nvidia-smi'; Arguments = @() },
@@ -200,6 +230,13 @@ function Get-TorchCpuVerifyArguments {
     )
 }
 
+function Get-TorchRuntimeMetadataArguments {
+    return @(
+        '-c',
+        "import torch, torchaudio, torchvision; print(f'{torch.__version__}|{torch.version.cuda or ''''}|{int(bool(torch.cuda.is_available()))}')"
+    )
+}
+
 function Test-LoggedCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -230,6 +267,89 @@ function Test-LoggedCommand {
         $env:PYTHONIOENCODING = $previousPythonIoEncoding
         $env:PYTHONUTF8 = $previousPythonUtf8
     }
+}
+
+function Get-TorchRuntimeMetadata {
+    if (-not (Test-Path -LiteralPath $venvPython)) {
+        return $null
+    }
+
+    $output = Get-ExternalCommandOutput -Command $venvPython -Arguments (Get-TorchRuntimeMetadataArguments)
+    if ([string]::IsNullOrWhiteSpace($output)) {
+        return $null
+    }
+
+    $parts = $output -split '\|', 3
+    if ($parts.Length -ne 3) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] failed to parse torch runtime metadata output: $output"
+        return $null
+    }
+
+    return @{
+        torch_version  = $parts[0]
+        torch_cuda     = $parts[1]
+        cuda_available = ($parts[2] -eq '1')
+    }
+}
+
+function Convert-TorchCudaVersionToTag {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TorchCudaVersion
+    )
+
+    if ($TorchCudaVersion -match '^(\d+)\.(\d+)$') {
+        return "{0}{1}" -f [int]$Matches[1], [int]$Matches[2]
+    }
+
+    return $null
+}
+
+function Test-TorchCpuInitialized {
+    $metadata = Get-TorchRuntimeMetadata
+    if ($null -eq $metadata) {
+        return $false
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$metadata.torch_cuda)) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] existing torch runtime uses CUDA $($metadata.torch_cuda), which does not match current CPU mode"
+        return $false
+    }
+
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] detected compatible CPU torch runtime version $($metadata.torch_version); offline initialization check passed"
+    return $true
+}
+
+function Test-TorchCudaInitialized {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IEnumerable]$CudaCandidates
+    )
+
+    $metadata = Get-TorchRuntimeMetadata
+    if ($null -eq $metadata) {
+        return $false
+    }
+
+    if (-not [bool]$metadata.cuda_available) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] installed torch runtime reports cuda_available=False; runtime does not match current GPU mode'
+        return $false
+    }
+
+    $installedTag = Convert-TorchCudaVersionToTag -TorchCudaVersion ([string]$metadata.torch_cuda)
+    if ([string]::IsNullOrWhiteSpace($installedTag)) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] installed torch runtime does not expose a usable CUDA version; runtime does not match current GPU mode'
+        return $false
+    }
+
+    $candidateTags = @($CudaCandidates | ForEach-Object { [string]$_.Tag })
+    if ($candidateTags -notcontains $installedTag) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] installed torch CUDA tag cu$installedTag is incompatible with the current GPU environment; expected one of: $($candidateTags -join ', ')"
+        return $false
+    }
+
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] detected compatible CUDA torch runtime cu$installedTag (torch $($metadata.torch_version)); offline initialization check passed"
+    return $true
 }
 
 function Ensure-BaseDependencies {
@@ -301,12 +421,18 @@ try {
     }
 
     Ensure-Venv
-    Ensure-BaseDependencies
 
     if ($parsed['--cpu-mode']) {
         Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] CPU mode enabled; skipping CUDA detection'
+        if (Test-TorchCpuInitialized) {
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] local task runtime already matches current CPU mode; skipping dependency installation'
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] local task runtime is ready'
+            exit 0
+        }
+
+        Ensure-BaseDependencies
         if (Test-TorchCpuRuntime) {
-            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch runtime is already usable; skipping torch reinstall'
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall'
         }
         else {
             Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cpu')
@@ -315,8 +441,15 @@ try {
     else {
         $cudaVersion = Get-CudaVersion
         $cudaCandidates = Select-CudaTag -Version $cudaVersion
+        if (Test-TorchCudaInitialized -CudaCandidates $cudaCandidates) {
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] local task runtime already matches current GPU mode; skipping dependency installation'
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] local task runtime is ready'
+            exit 0
+        }
+
+        Ensure-BaseDependencies
         if (Test-TorchCudaRuntime) {
-            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch CUDA runtime is already usable; skipping torch reinstall'
+            Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch CUDA runtime is already usable after base dependency sync; skipping torch reinstall'
         }
         else {
             $null = Install-CompatibleTorchCuda -CudaCandidates $cudaCandidates

@@ -13,6 +13,7 @@ pub struct Model {
     pub supported_feature_list_json: String,
     pub create_time: String,
     pub modify_time: String,
+    pub downloaded: bool,
     pub deleted: i32,
 }
 

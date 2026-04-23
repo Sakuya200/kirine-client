@@ -369,8 +369,17 @@ pub struct ModelInfo {
     pub required_model_name_list: Vec<String>,
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,
+    pub downloaded: bool,
     pub create_time: String,
     pub modify_time: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMutationResult {
+    pub model: ModelInfo,
+    pub removed_paths: Vec<String>,
+    pub preserved_paths: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

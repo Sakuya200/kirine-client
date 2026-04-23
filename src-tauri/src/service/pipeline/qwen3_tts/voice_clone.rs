@@ -13,7 +13,7 @@ use crate::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
         task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{
@@ -26,20 +26,19 @@ use crate::{
             model_paths::llm_model_display_name,
             qwen3_tts::{
                 qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
-                qwen3_tts_prepared_variant_key, qwen3_tts_voice_clone_init_model_path,
-                Qwen3TTSModelTaskPipeline,
+                qwen3_tts_voice_clone_init_model_path, Qwen3TTSModelTaskPipeline,
             },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
-            VoiceClonePipelineRequest,
+            validate_and_download, validate_and_init, PipelineBootstrapPaths,
+            VoiceClonePipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
         audio::{
-            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path,
-            resolve_temp_wav_path,
+            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
         },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
         process::{run_logged_command, run_logged_python_script},
@@ -118,8 +117,8 @@ enum VoiceCloneCommandLabel {
 impl VoiceCloneCommandLabel {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::InitTaskRuntime => "initialize voice clone runtime",
-            Self::DownloadModels => "download voice clone base models",
+            Self::InitTaskRuntime => INIT_MODEL_RUNTIME_LABEL,
+            Self::DownloadModels => DOWNLOAD_MODEL_ARTIFACTS_LABEL,
             Self::RunInference => "run voice clone inference",
             Self::NormalizeReferenceAudio => "normalize voice clone reference audio",
             Self::ConvertAudio => "convert voice clone audio",
@@ -143,7 +142,8 @@ impl Qwen3TTSModelTaskPipeline {
                 .await?;
             let runtime =
                 VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
-            let paths = self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
+            let paths =
+                self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
             let log_dir = resolve_local_log_dir()?;
 
             self.prepare_voice_clone_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -272,104 +272,64 @@ impl Qwen3TTSModelTaskPipeline {
         log_dir: &Path,
         runtime: VoiceCloneRuntimeOptions,
     ) -> Result<()> {
-        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
-        if runtime.is_cpu() {
-            init_script_args.push("--cpu-mode".to_string());
-        }
+        let bootstrap_paths = PipelineBootstrapPaths {
+            base_model: &paths.base_model,
+            model_scale: &paths.model_scale,
+            src_model_root: &paths.src_model_root,
+            venv_python_path: &paths.venv_python_path,
+            init_task_runtime_script_path: &paths.init_task_runtime_script_path,
+            download_models_script_path: &paths.download_models_script_path,
+        };
 
-        self.run_voice_clone_stage_script(
-            &paths.init_task_runtime_script_path,
-            &paths.src_model_root,
+        validate_and_init(
+            bootstrap_paths,
             task_id,
             log_dir,
-            init_script_args,
+            runtime.is_cpu(),
             VoiceCloneCommandLabel::InitTaskRuntime,
+            |script_path, working_dir, task_id, log_dir, script_args, label| async move {
+                self.run_voice_clone_stage_script(
+                    &script_path,
+                    &working_dir,
+                    task_id,
+                    &log_dir,
+                    script_args,
+                    label,
+                )
+                .await
+            },
         )
         .await?;
 
-        if self.voice_clone_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
-            info!(
-                base_model = %paths.base_model,
-                training_mode = %runtime.mode_label(&paths.base_model)?,
-                "base model is already marked as downloaded; skipping download-models stage"
-            );
-            self.validate_prepared_voice_clone_downloads(paths)?;
-            return Ok(());
-        }
-
-        let mut download_script_args =
-            vec!["--base-model".to_string(), paths.base_model.clone()];
-        download_script_args.extend(qwen3_tts_download_script_args(
-            &paths.src_model_root,
-            &paths.model_scale,
-        )?);
-
-        self.run_voice_clone_stage_script(
-            &paths.download_models_script_path,
-            &paths.src_model_root,
+        validate_and_download(
+            service,
+            bootstrap_paths,
             task_id,
             log_dir,
-            download_script_args,
+            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?,
             VoiceCloneCommandLabel::DownloadModels,
+            |script_path, working_dir, task_id, log_dir, script_args, label| async move {
+                self.run_voice_clone_stage_script(
+                    &script_path,
+                    &working_dir,
+                    task_id,
+                    &log_dir,
+                    script_args,
+                    label,
+                )
+                .await
+            },
+            || self.validate_prepared_voice_clone_downloads(paths),
         )
         .await?;
-
-        self.validate_prepared_voice_clone_downloads(paths)?;
-        self.mark_voice_clone_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
         Ok(())
     }
 
-    fn voice_clone_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
-        let config = load_configs()
-            .context("failed to load config.toml before checking voice clone base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-
-        Ok(config
-            .prepared_base_models()
-            .iter()
-            .any(|prepared| prepared == &variant_key || prepared == base_model))
-    }
-
-    fn mark_voice_clone_base_model_downloaded(
-        &self,
-        _service: &LocalService,
-        _base_model: &str,
-        model_scale: &str,
-    ) -> Result<()> {
-        let mut config = load_configs()
-            .context("failed to load config.toml before updating prepared base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-        if config
-            .training
-            .prepared_base_models
-            .iter()
-            .any(|prepared| prepared == &variant_key)
-        {
-            return Ok(());
-        }
-
-        config.training.prepared_base_models.push(variant_key);
-
-        save_configs(&config)
-            .context("failed to persist training.prepared_base_models to config.toml")
-    }
-
     fn validate_prepared_voice_clone_downloads(&self, paths: &VoiceClonePaths) -> Result<()> {
-        let mut missing_paths = Vec::new();
-
-        for path in qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)? {
-            if !path.exists() {
-                missing_paths.push(path.display().to_string());
-            }
-        }
-
-        if missing_paths.is_empty() {
-            return Ok(());
-        }
-
-        bail!(
-            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
-            missing_paths.join(", ")
+        crate::service::pipeline::validate_downloaded_paths(
+            &paths.base_model,
+            &paths.model_scale,
+            &qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?,
         )
     }
 

@@ -46,7 +46,6 @@ pub struct RemoteConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
-    pub prepared_base_models: Vec<String>,
     pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
     pub lora_mode: LoraMode,
@@ -58,7 +57,6 @@ pub struct TrainingConfig {
 impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
-            prepared_base_models: Vec::new(),
             hardware_type: HardwareType::default(),
             attn_implementation: AttentionImplementation::default(),
             lora_mode: LoraMode::default(),
@@ -134,10 +132,6 @@ impl EnvConfig {
         self.remote
             .as_ref()
             .and_then(|remote| remote.api_token.as_deref())
-    }
-
-    pub fn prepared_base_models(&self) -> &[String] {
-        &self.training.prepared_base_models
     }
 
     pub fn attn_implementation(&self) -> AttentionImplementation {

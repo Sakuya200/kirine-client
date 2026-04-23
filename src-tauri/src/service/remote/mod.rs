@@ -11,7 +11,7 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
             CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
-            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
             UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskResult,
         },
@@ -65,6 +65,14 @@ impl Service for RemoteService {
 
     async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
         biz::unsupported("list_model_infos")
+    }
+
+    async fn install_model(&self, _model_id: i64) -> Result<ModelMutationResult> {
+        biz::unsupported("install_model")
+    }
+
+    async fn uninstall_model(&self, _model_id: i64) -> Result<ModelMutationResult> {
+        biz::unsupported("uninstall_model")
     }
 
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {

@@ -27,7 +27,7 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
             CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
-            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
             UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskResult,
         },
@@ -84,6 +84,14 @@ impl Service for LocalService {
 
     async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
         self.list_model_infos_impl().await
+    }
+
+    async fn install_model(&self, model_id: i64) -> Result<ModelMutationResult> {
+        self.install_model_impl(model_id).await
+    }
+
+    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
+        self.uninstall_model_impl(model_id).await
     }
 
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {

@@ -49,7 +49,7 @@ impl MigrationTrait for Migration {
                 .execute(Statement::from_string(
                     backend,
                     format!(
-                        r#"INSERT OR REPLACE INTO model_info (id, base_model, model_name, model_scale, required_model_name_list_json, required_model_repo_id_list_json, supported_feature_list_json, create_time, modify_time, deleted) VALUES ({id}, 'qwen3_tts', 'Qwen3-TTS', '{model_scale}', '{model_names}', '{repo_ids}', '["text-to-speech","voice-clone","model-training"]', '{DEFAULT_TIMESTAMP}', '{DEFAULT_TIMESTAMP}', 0)"#
+                        r#"INSERT OR REPLACE INTO model_info (id, base_model, model_name, model_scale, required_model_name_list_json, required_model_repo_id_list_json, supported_feature_list_json, create_time, modify_time, downloaded, deleted) VALUES ({id}, 'qwen3_tts', 'Qwen3-TTS', '{model_scale}', '{model_names}', '{repo_ids}', '["text-to-speech","voice-clone","model-training"]', '{DEFAULT_TIMESTAMP}', '{DEFAULT_TIMESTAMP}', 1, 0)"#
                     ),
                 ))
                 .await?;

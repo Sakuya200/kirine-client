@@ -54,11 +54,6 @@ impl LlmModelPaths for VoxCpm2ModelPaths {
     }
 }
 
-pub(crate) fn vox_cpm2_prepared_variant_key(model_scale: &str) -> Result<String> {
-    validate_vox_cpm2_model_scale(model_scale)?;
-    Ok(format!("{}:{}", VOX_CPM2_BASE_MODEL, VOX_CPM2_MODEL_SCALE))
-}
-
 pub(crate) fn vox_cpm2_download_script_args(
     src_model_root: &Path,
     model_scale: &str,

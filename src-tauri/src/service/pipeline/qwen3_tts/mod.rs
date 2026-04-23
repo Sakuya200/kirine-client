@@ -103,11 +103,6 @@ pub(crate) fn qwen3_tts_variant_definition(
         })
 }
 
-pub(crate) fn qwen3_tts_prepared_variant_key(model_scale: &str) -> Result<String> {
-    let variant = qwen3_tts_variant_definition(model_scale)?;
-    Ok(format!("{}:{}", QWEN3_TTS_BASE_MODEL, variant.model_scale))
-}
-
 pub(crate) fn qwen3_tts_download_script_args(
     src_model_root: &Path,
     model_scale: &str,

@@ -6,6 +6,7 @@ import {
   Cog6ToothIcon,
   MicrophoneIcon,
   MusicalNoteIcon,
+  ServerStackIcon,
   SpeakerWaveIcon,
   UserGroupIcon
 } from '@heroicons/vue/24/outline';
@@ -26,6 +27,7 @@ const navIcons: Record<string, Component> = {
   [HistoryTaskType.ModelTraining]: MicrophoneIcon,
   [HistoryTaskType.TextToSpeech]: SpeakerWaveIcon,
   [HistoryTaskType.VoiceClone]: MusicalNoteIcon,
+  models: ServerStackIcon,
   speakers: UserGroupIcon,
   history: ClockIcon,
   settings: Cog6ToothIcon

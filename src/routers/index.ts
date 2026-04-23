@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 
 import { HISTORY_TASK_ROUTE_PATH, HistoryTaskType } from '@/enums/task';
 import HistoryView from '@/views/HistoryView.vue';
+import ModelManageView from '@/views/ModelManageView.vue';
 import ModelTrainingView from '@/views/ModelTrainingView.vue';
 import NotFoundView from '@/views/NotFoundView.vue';
 import SettingsView from '@/views/SettingsView.vue';
@@ -13,7 +14,7 @@ export const appRoutes = [
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.ModelTraining],
     name: HistoryTaskType.ModelTraining,
-    meta: { title: '模型训练' },
+    meta: { title: '模型微调' },
     component: ModelTrainingView
   },
   {
@@ -27,6 +28,12 @@ export const appRoutes = [
     name: HistoryTaskType.VoiceClone,
     meta: { title: '声音克隆' },
     component: VoiceCloneView
+  },
+  {
+    path: '/models',
+    name: 'models',
+    meta: { title: '模型管理' },
+    component: ModelManageView
   },
   {
     path: '/speakers',

@@ -5,7 +5,7 @@ import { computed, ref } from 'vue';
 import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, ModelInfo } from '@/types/domain';
+import type { BaseModel, ModelInfo, ModelMutationResult } from '@/types/domain';
 
 const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   id: typeof item.id === 'number' ? item.id : 0,
@@ -20,6 +20,7 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
         .map(feature => feature.trim())
         .filter(Boolean)
     : [],
+  downloaded: item.downloaded === true,
   createTime: item.createTime ?? '',
   modifyTime: item.modifyTime ?? ''
 });
@@ -61,6 +62,42 @@ export const useModelStore = defineStore('models', () => {
     }
   };
 
+  const replaceModel = (nextModel: ModelInfo) => {
+    items.value = items.value.map(item => (item.id === nextModel.id ? nextModel : item));
+  };
+
+  const installModel = async (modelId: number) => {
+    try {
+      const result = await invoke<ModelMutationResult>('install_model', { modelId });
+      const normalized = {
+        ...result,
+        model: normalizeModelInfo(result.model)
+      };
+      replaceModel(normalized.model);
+      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelScale} 已安装。`, 3200);
+      return normalized;
+    } catch (error) {
+      uiStore.notifyError(formatErrorMessage('安装模型失败', error));
+      return null;
+    }
+  };
+
+  const uninstallModel = async (modelId: number) => {
+    try {
+      const result = await invoke<ModelMutationResult>('uninstall_model', { modelId });
+      const normalized = {
+        ...result,
+        model: normalizeModelInfo(result.model)
+      };
+      replaceModel(normalized.model);
+      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelScale} 已卸载。`, 3200);
+      return normalized;
+    } catch (error) {
+      uiStore.notifyError(formatErrorMessage('卸载模型失败', error));
+      return null;
+    }
+  };
+
   const ensureLoaded = async () => {
     if (!initialized.value && !isLoading.value) {
       await loadModels();
@@ -90,9 +127,11 @@ export const useModelStore = defineStore('models', () => {
     byBaseModel,
     loadModels,
     ensureLoaded,
+    installModel,
     getModelsByFeature,
     getModelLabel,
     getModelScaleOptions,
+    uninstallModel,
     supportsModelFeature
   };
 });

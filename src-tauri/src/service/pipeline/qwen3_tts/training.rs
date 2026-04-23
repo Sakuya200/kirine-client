@@ -19,7 +19,7 @@ use crate::{
             training_index_jsonl_path, training_output_jsonl_path,
         },
     },
-    config::{load_configs, save_configs, BaseModel, HardwareType},
+    config::{load_configs, BaseModel, HardwareType},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
@@ -30,16 +30,18 @@ use crate::{
             UpdateTaskStatusPayload,
         },
         pipeline::{
+            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
             model_paths::llm_model_display_name,
             qwen3_tts::{
                 qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
-                qwen3_tts_prepared_variant_key, qwen3_tts_training_init_model_path,
+                qwen3_tts_training_init_model_path,
                 qwen3_tts_training_tokenizer_model_path, Qwen3TTSModelTaskPipeline,
             },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
+            validate_and_download, validate_and_init, PipelineBootstrapPaths,
             TrainingPipelineRequest,
         },
     },
@@ -143,8 +145,8 @@ enum TrainingCommandLabel {
 impl TrainingCommandLabel {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::InitTaskRuntime => "initialize local task runtime",
-            Self::DownloadModels => "download local base models",
+            Self::InitTaskRuntime => INIT_MODEL_RUNTIME_LABEL,
+            Self::DownloadModels => DOWNLOAD_MODEL_ARTIFACTS_LABEL,
             Self::NormalizeAudio => "normalize training audio",
             Self::EncodeAudio => "encode audio data",
             Self::RunTraining => "run training pipeline",
@@ -507,106 +509,65 @@ impl Qwen3TTSModelTaskPipeline {
             "preparing local model environment via required init-task-runtime and optional download-models stages"
         );
 
-        let mut init_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
-        if runtime.is_cpu() {
-            init_script_args.push("--cpu-mode".to_string());
-        }
+        let bootstrap_paths = PipelineBootstrapPaths {
+            base_model: &paths.base_model,
+            model_scale: &paths.model_scale,
+            src_model_root: &paths.src_model_root,
+            venv_python_path: &paths.venv_python_path,
+            init_task_runtime_script_path: &paths.init_task_runtime_script_path,
+            download_models_script_path: &paths.download_models_script_path,
+        };
 
-        self.run_training_script(
-            &paths.init_task_runtime_script_path,
-            &paths.src_model_root,
+        validate_and_init(
+            bootstrap_paths,
             task_id,
             log_dir,
-            init_script_args,
+            runtime.is_cpu(),
             TrainingCommandLabel::InitTaskRuntime,
+            |script_path, working_dir, task_id, log_dir, script_args, label| async move {
+                self.run_training_script(
+                    &script_path,
+                    &working_dir,
+                    task_id,
+                    &log_dir,
+                    script_args,
+                    label,
+                )
+                .await
+            },
         )
         .await?;
 
-        if self.training_base_model_downloaded(&paths.base_model, &paths.model_scale)? {
-            info!(
-                base_model = %paths.base_model,
-                training_mode = %runtime.mode_label(&paths.base_model)?,
-                "base model is already marked as downloaded; skipping download-models stage"
-            );
-            self.validate_prepared_model_downloads(paths)?;
-            return Ok(());
-        }
-
-        let mut download_script_args = vec!["--base-model".to_string(), paths.base_model.clone()];
-        download_script_args.extend(qwen3_tts_download_script_args(
-            &paths.src_model_root,
-            &paths.model_scale,
-        )?);
-
-        self.run_training_script(
-            &paths.download_models_script_path,
-            &paths.src_model_root,
+        validate_and_download(
+            service,
+            bootstrap_paths,
             task_id,
             log_dir,
-            download_script_args,
+            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?,
             TrainingCommandLabel::DownloadModels,
+            |script_path, working_dir, task_id, log_dir, script_args, label| async move {
+                self.run_training_script(
+                    &script_path,
+                    &working_dir,
+                    task_id,
+                    &log_dir,
+                    script_args,
+                    label,
+                )
+                .await
+            },
+            || self.validate_prepared_model_downloads(paths),
         )
         .await?;
-
-        self.validate_prepared_model_downloads(paths)?;
-        self.mark_training_base_model_downloaded(service, &paths.base_model, &paths.model_scale)?;
 
         Ok(())
     }
 
-    fn training_base_model_downloaded(&self, base_model: &str, model_scale: &str) -> Result<bool> {
-        let config = load_configs()
-            .context("failed to load config.toml before checking base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-
-        Ok(config
-            .prepared_base_models()
-            .iter()
-            .any(|prepared| prepared == &variant_key || prepared == base_model))
-    }
-
-    fn mark_training_base_model_downloaded(
-        &self,
-        _service: &LocalService,
-        _base_model: &str,
-        model_scale: &str,
-    ) -> Result<()> {
-        let mut config = load_configs()
-            .context("failed to load config.toml before updating prepared base model marker")?;
-        let variant_key = qwen3_tts_prepared_variant_key(model_scale)?;
-        if config
-            .training
-            .prepared_base_models
-            .iter()
-            .any(|prepared| prepared == &variant_key)
-        {
-            return Ok(());
-        }
-
-        config.training.prepared_base_models.push(variant_key);
-
-        save_configs(&config)
-            .context("failed to persist training.prepared_base_models to config.toml")
-    }
-
     fn validate_prepared_model_downloads(&self, paths: &TrainingPaths) -> Result<()> {
-        let mut missing_paths = Vec::new();
-
-        for path in
-            qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?
-        {
-            if !path.exists() {
-                missing_paths.push(path.display().to_string());
-            }
-        }
-
-        if missing_paths.is_empty() {
-            return Ok(());
-        }
-
-        bail!(
-            "基础模型变体已在 config.toml 的 prepared_base_models 中标记为完成，但以下路径缺失: {}。如需重新下载，请手动清理 training.prepared_base_models 后重试。",
-            missing_paths.join(", ")
+        crate::service::pipeline::validate_downloaded_paths(
+            &paths.base_model,
+            &paths.model_scale,
+            &qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?,
         )
     }
     async fn run_encode_audio(
