@@ -27,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from moss_tts_local.finetuning.common import load_jsonl, normalize_audio_path_list, resolve_jsonl_paths
 from moss_tts_local.finetuning.dataset import MossTTSSFTDataset
-from moss_tts_local.common import install_torchaudio_load_fallback
+from moss_tts_local.common import apply_model_runtime_compat, install_torchaudio_load_fallback
 
 
 SCHEDULER_CHOICES = (
@@ -384,6 +384,7 @@ def main() -> None:
         torch_dtype=model_dtype,
         attn_implementation=attn_implementation,
     )
+    model = apply_model_runtime_compat(model)
 
     model_config = getattr(model, "config", None)
     n_heads = int(getattr(model_config, "n_vq", 0)) + 1
@@ -515,11 +516,13 @@ def _training_loop(
         model.train()
         for batch in train_dataloader:
             with accelerator.accumulate(model):
+                target_n_vq = max(int(batch["input_ids"].shape[-1]) - 1, 1)
                 outputs = model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
                     labels=batch["labels"],
                     channelwise_loss_weight=resolved_channelwise_loss_weight,
+                    n_vq_for_inference=target_n_vq,
                 )
                 loss = outputs.loss
                 accelerator.backward(loss)

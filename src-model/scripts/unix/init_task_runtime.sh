@@ -270,7 +270,7 @@ install_compatible_torch_cuda() {
     failed_tags=''
 
     for candidate_tag in $candidates; do
-        if run_checked "install torch wheels for cu$candidate_tag" "$VENV_PYTHON" -m pip install --no-cache-dir torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/cu$candidate_tag" \
+        if run_checked "install torch wheels for cu$candidate_tag" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall --no-cache-dir torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/cu$candidate_tag" \
             && verify_torch_cuda_runtime "verify torch CUDA runtime using cu$candidate_tag"; then
             append_log "[init-task-runtime] verified working PyTorch CUDA runtime using cu$candidate_tag"
             printf '%s\n' "$candidate_tag"
@@ -310,7 +310,7 @@ if [ "$CPU_MODE" -eq 1 ]; then
     if verify_torch_cpu_runtime "verify existing torch runtime"; then
         append_log "[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall"
     else
-        run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     fi
 else
     cuda_version=$(detect_cuda_version)

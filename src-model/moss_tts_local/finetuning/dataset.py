@@ -131,7 +131,7 @@ class MossTTSSFTDataset(Dataset):
         user_message = self.processor.build_user_message(**user_kwargs)
         prompt = self.processor([[user_message]], mode="generation", n_vq=target_n_vq)
         assistant_message = self.processor.build_assistant_message(audio_codes_list=[target_codes])
-        conversation = self.processor([[user_message, assistant_message]], mode="computing_loss", n_vq=target_n_vq)
+        conversation = self.processor([[user_message, assistant_message]], mode="continuation", n_vq=target_n_vq)
 
         full_input_ids = conversation["input_ids"][0].cpu()
         prompt_length = int(prompt["input_ids"][0].shape[0])

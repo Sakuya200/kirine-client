@@ -7,6 +7,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from types import MethodType
 from types import SimpleNamespace
 from typing import Sequence
 
@@ -185,6 +186,35 @@ def resolve_runtime_options(device: str, requested_attn_implementation: str, tor
     )
 
 
+def apply_model_runtime_compat(model) -> object:
+    if getattr(model, "_kirine_runtime_compat_applied", False):
+        return model
+
+    original_forward = model.forward
+
+    def compat_forward(self, *args, **kwargs):
+        local_transformer_config = getattr(self, "local_transformer_config", None)
+        channels = getattr(self, "channels", None)
+        if local_transformer_config is not None and channels is not None and not hasattr(local_transformer_config, "channels"):
+            local_transformer_config.channels = channels
+
+        original_audio_vocab_size = getattr(self.config, "audio_vocab_size", None)
+        try:
+            lm_heads = getattr(self, "lm_heads", None)
+            if original_audio_vocab_size is not None and lm_heads is not None and len(lm_heads) > 1:
+                audio_head_vocab_size = int(lm_heads[1].out_features)
+                if audio_head_vocab_size > 0:
+                    self.config.audio_vocab_size = audio_head_vocab_size
+            return original_forward(*args, **kwargs)
+        finally:
+            if original_audio_vocab_size is not None:
+                self.config.audio_vocab_size = original_audio_vocab_size
+
+    model.forward = MethodType(compat_forward, model)
+    model._kirine_runtime_compat_applied = True
+    return model
+
+
 def load_backend(model_path: str, device: str, requested_attn_implementation: str) -> tuple[object, object, SimpleNamespace, RuntimeOptions]:
     import torch
     import torchaudio
@@ -207,6 +237,7 @@ def load_backend(model_path: str, device: str, requested_attn_implementation: st
         model_kwargs["attn_implementation"] = runtime.attn_implementation
 
     model = AutoModel.from_pretrained(model_path, **model_kwargs).to(runtime.device)
+    model = apply_model_runtime_compat(model)
     model.eval()
 
     deps = SimpleNamespace(torch=torch, torchaudio=torchaudio)

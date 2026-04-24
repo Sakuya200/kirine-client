@@ -45,7 +45,7 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
     let original_dir = std::env::current_dir().expect("failed to capture current dir");
     let temp_dir = TempConfigDir::new();
     let config_path = temp_dir.config_path();
-    fs::write(&config_path, "[training]\nlora_rank = 24\n")
+    fs::write(&config_path, "[training]\nhardware_type = \"cuda\"\n")
         .expect("failed to write config fixture");
 
     std::env::set_current_dir(&temp_dir.path).expect("failed to enter temp config dir");
@@ -57,7 +57,7 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
         assert!(config.data_dir().is_some());
         assert!(config.log_dir().is_some());
         assert!(config.model_dir().is_some());
-        assert_eq!(config.lora_rank(), 24);
+        assert_eq!(config.hardware_type().to_string(), "cuda");
         assert_eq!(config.api_url(), Some(""));
         assert_eq!(config.api_token(), Some(""));
 
@@ -67,7 +67,7 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
         assert!(persisted.contains("[remote]"));
         assert!(persisted.contains("api_url = \"\""));
         assert!(persisted.contains("api_token = \"\""));
-        assert!(persisted.contains("lora_rank = 24"));
+        assert!(persisted.contains("hardware_type = \"cuda\""));
     })();
 
     std::env::set_current_dir(original_dir).expect("failed to restore current dir");

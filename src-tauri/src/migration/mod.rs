@@ -23,9 +23,9 @@ impl MigratorTrait for Migrator {
             Box::new(create_local_schema::Migration),
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
             Box::new(seed_vox_cpm2_model_info::Migration),
-            Box::new(seed_moss_tts_local_model_info::Migration),
             Box::new(add_vox_cpm2_lora_feature_flag::Migration),
             Box::new(add_model_info_downloaded_flag::Migration),
+            Box::new(seed_moss_tts_local_model_info::Migration),
         ]
     }
 }
