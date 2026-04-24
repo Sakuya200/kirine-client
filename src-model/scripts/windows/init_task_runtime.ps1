@@ -377,7 +377,7 @@ function Install-CompatibleTorchCuda {
         $candidateTag = $candidate.Tag
 
         try {
-            Invoke-LoggedCommand -Description "install torch wheels for cu$candidateTag" -Command $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', 'torchaudio', '--index-url', "https://download.pytorch.org/whl/cu$candidateTag")
+            Invoke-LoggedCommand -Description "install torch wheels for cu$candidateTag" -Command $venvPython -Arguments @('-m', 'pip', 'install', '--no-cache-dir', 'torch', 'torchvision', 'torchaudio', '--index-url', "https://download.pytorch.org/whl/cu$candidateTag")
             Invoke-LoggedCommand -Description "verify torch CUDA runtime using cu$candidateTag" -Command $venvPython -Arguments (Get-TorchCudaVerifyArguments)
             Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] verified working PyTorch CUDA runtime using cu$candidateTag"
             return $candidateTag
@@ -435,7 +435,7 @@ try {
             Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall'
         }
         else {
-            Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cpu')
+            Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--no-cache-dir', 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cpu')
         }
     }
     else {

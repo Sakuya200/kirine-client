@@ -8,6 +8,7 @@ use crate::Result;
 mod add_model_info_downloaded_flag;
 mod add_vox_cpm2_lora_feature_flag;
 mod create_local_schema;
+mod seed_moss_tts_local_model_info;
 mod seed_qwen3_tts_preset_speakers;
 mod seed_vox_cpm2_model_info;
 
@@ -22,6 +23,7 @@ impl MigratorTrait for Migrator {
             Box::new(create_local_schema::Migration),
             Box::new(seed_qwen3_tts_preset_speakers::Migration),
             Box::new(seed_vox_cpm2_model_info::Migration),
+            Box::new(seed_moss_tts_local_model_info::Migration),
             Box::new(add_vox_cpm2_lora_feature_flag::Migration),
             Box::new(add_model_info_downloaded_flag::Migration),
         ]
@@ -79,7 +81,24 @@ mod tests {
         assert!(scales.contains(&"qwen3_tts:1.7B".to_string()));
         assert!(scales.contains(&"qwen3_tts:0.6B".to_string()));
         assert!(scales.contains(&"vox_cpm2:2B".to_string()));
-        assert!(model_infos.iter().all(|item| item.downloaded));
+        assert!(scales.contains(&"moss_tts_local:1.7B".to_string()));
+        let moss_info = model_infos
+            .iter()
+            .find(|item| item.base_model == "moss_tts_local" && item.model_scale == "1.7B")
+            .expect("moss model info should exist");
+        assert!(!moss_info.downloaded);
+        assert!(moss_info
+            .supported_feature_list
+            .iter()
+            .any(|feature| feature == "text-to-speech"));
+        assert!(moss_info
+            .supported_feature_list
+            .iter()
+            .any(|feature| feature == "voice-clone"));
+        assert!(moss_info
+            .supported_feature_list
+            .iter()
+            .any(|feature| feature == "model-training"));
         assert!(vox_info
             .supported_feature_list
             .iter()

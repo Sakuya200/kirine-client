@@ -89,11 +89,59 @@ resolve_modelscope_command() {
     return 1
 }
 
+resolve_huggingface_command() {
+    if [ -x "$VENV_DIR/bin/hf" ]; then
+        printf '%s\n' "$VENV_DIR/bin/hf"
+        return 0
+    fi
+
+    if [ -x "$VENV_DIR/bin/huggingface-cli" ]; then
+        printf '%s\n' "$VENV_DIR/bin/huggingface-cli"
+        return 0
+    fi
+
+    return 1
+}
+
+download_via_modelscope() {
+    model_id=$1
+    target_dir=$2
+    modelscope_command=$3
+
+    set -- $modelscope_command
+    run_checked "download $model_id via modelscope" "$@" download --model "$model_id" --local_dir "$target_dir"
+}
+
+download_via_huggingface() {
+    model_id=$1
+    target_dir=$2
+    huggingface_command=$3
+
+    if [ -n "$huggingface_command" ]; then
+        run_checked "download $model_id via huggingface" "$huggingface_command" download "$model_id" --local-dir "$target_dir"
+        return 0
+    fi
+
+    if [ -x "$VENV_PYTHON" ]; then
+        run_checked \
+            "download $model_id via huggingface-python" \
+            "$VENV_PYTHON" \
+            -c \
+            'import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id=sys.argv[1], local_dir=sys.argv[2], local_dir_use_symlinks=False)' \
+            "$model_id" \
+            "$target_dir"
+        return 0
+    fi
+
+    return 1
+}
+
 download_model() {
     model_id=$1
     model_name=$2
     target_root_dir=$3
     modelscope_command=$4
+    huggingface_command=$5
     target_dir="$target_root_dir/$model_name"
 
     if [ -e "$target_dir" ]; then
@@ -101,8 +149,22 @@ download_model() {
         return 0
     fi
 
-    set -- $modelscope_command
-    run_checked "download $model_id" "$@" download --model "$model_id" --local_dir "$target_dir"
+    mkdir -p "$target_dir"
+
+    if [ -n "$modelscope_command" ]; then
+        if download_via_modelscope "$model_id" "$target_dir" "$modelscope_command"; then
+            return 0
+        fi
+        append_log "[download-models] modelscope failed for $model_id, falling back to Hugging Face"
+    fi
+
+    if [ -n "$huggingface_command" ]; then
+        download_via_huggingface "$model_id" "$target_dir" "$huggingface_command"
+        return 0
+    fi
+
+    echo "[download-models] Neither ModelScope nor Hugging Face download backend is available. Run init-task-runtime first." >&2
+    return 65
 }
 
 ensure_task_log_file
@@ -121,10 +183,13 @@ fi
 
 mkdir -p "$TARGET_ROOT_DIR"
 
-modelscope_command=$(resolve_modelscope_command) || {
-    echo "[download-models] ModelScope CLI is unavailable. Run init-task-runtime first." >&2
+modelscope_command=$(resolve_modelscope_command || true)
+huggingface_command=$(resolve_huggingface_command || true)
+
+if [ -z "$modelscope_command" ] && [ -z "$huggingface_command" ] && [ ! -x "$VENV_PYTHON" ]; then
+    echo "[download-models] Neither ModelScope nor Hugging Face download backend is available. Run init-task-runtime first." >&2
     exit 65
-}
+fi
 
 parsed_lists=$(
     "$VENV_PYTHON" -c 'import json, sys
@@ -146,7 +211,7 @@ for model_id, model_name in zip(model_ids, model_names):
 }
 
 printf '%s\n' "$parsed_lists" | while IFS="$TAB" read -r model_id model_name; do
-    download_model "$model_id" "$model_name" "$TARGET_ROOT_DIR" "$modelscope_command"
+    download_model "$model_id" "$model_name" "$TARGET_ROOT_DIR" "$modelscope_command" "$huggingface_command"
 done
 
 append_log "[download-models] required models are ready"

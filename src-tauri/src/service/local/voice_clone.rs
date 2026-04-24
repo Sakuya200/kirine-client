@@ -15,7 +15,11 @@ use crate::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
         models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
-        models::{VoxCpm2VoiceCloneMode, VoxCpm2VoiceCloneModelParams},
+        models::{
+            MossTtsLocalVoiceCloneModelParams, VoxCpm2VoiceCloneMode,
+            VoxCpm2VoiceCloneModelParams,
+        },
+        pipeline::moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
         LocalService,
     },
     utils::time::now_string,
@@ -47,6 +51,8 @@ impl LocalService {
             if matches!(params.mode, VoxCpm2VoiceCloneMode::Ultimate) && ref_text.is_empty() {
                 bail!("Ultimate 克隆模式要求填写参考音频台词");
             }
+        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
+            serde_json::from_value::<MossTtsLocalVoiceCloneModelParams>(payload.model_params.clone())?;
         } else if ref_text.is_empty() {
             bail!("参考音频台词不能为空");
         }

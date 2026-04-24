@@ -113,19 +113,90 @@ function Invoke-LoggedCommand {
 function Resolve-ModelScopeCommand {
     $modelscopeExe = Join-Path $venvDir 'Scripts\modelscope.exe'
     if (Test-Path -LiteralPath $modelscopeExe) {
-        return [pscustomobject]@{ Command = $modelscopeExe; Prefix = @() }
+        return [pscustomobject]@{ Backend = 'modelscope'; Command = $modelscopeExe; Prefix = @() }
     }
 
     $modelscopeCmd = Join-Path $venvDir 'Scripts\modelscope.cmd'
     if (Test-Path -LiteralPath $modelscopeCmd) {
-        return [pscustomobject]@{ Command = $modelscopeCmd; Prefix = @() }
+        return [pscustomobject]@{ Backend = 'modelscope'; Command = $modelscopeCmd; Prefix = @() }
     }
 
     if (Test-Path -LiteralPath $venvPython) {
-        return [pscustomobject]@{ Command = $venvPython; Prefix = @('-m', 'modelscope.cli.cli') }
+        return [pscustomobject]@{ Backend = 'modelscope'; Command = $venvPython; Prefix = @('-m', 'modelscope.cli.cli') }
     }
 
-    throw "[download-models] ModelScope CLI is unavailable because the Python runtime is missing at $venvPython. Run init-task-runtime first."
+    return $null
+}
+
+function Resolve-HuggingFaceCommand {
+    $hfExe = Join-Path $venvDir 'Scripts\hf.exe'
+    if (Test-Path -LiteralPath $hfExe) {
+        return [pscustomobject]@{ Backend = 'huggingface'; Command = $hfExe; Prefix = @() }
+    }
+
+    $hfCmd = Join-Path $venvDir 'Scripts\hf.cmd'
+    if (Test-Path -LiteralPath $hfCmd) {
+        return [pscustomobject]@{ Backend = 'huggingface'; Command = $hfCmd; Prefix = @() }
+    }
+
+    $legacyHfExe = Join-Path $venvDir 'Scripts\huggingface-cli.exe'
+    if (Test-Path -LiteralPath $legacyHfExe) {
+        return [pscustomobject]@{ Backend = 'huggingface-legacy'; Command = $legacyHfExe; Prefix = @() }
+    }
+
+    $legacyHfCmd = Join-Path $venvDir 'Scripts\huggingface-cli.cmd'
+    if (Test-Path -LiteralPath $legacyHfCmd) {
+        return [pscustomobject]@{ Backend = 'huggingface-legacy'; Command = $legacyHfCmd; Prefix = @() }
+    }
+
+    if (Test-Path -LiteralPath $venvPython) {
+        return [pscustomobject]@{
+            Backend = 'huggingface-python'
+            Command = $venvPython
+            Prefix  = @(
+                '-c',
+                'import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id=sys.argv[1], local_dir=sys.argv[2], local_dir_use_symlinks=False)'
+            )
+        }
+    }
+
+    return $null
+}
+
+function Get-DownloadArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$CommandSpec,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ModelId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TargetDir
+    )
+
+    $arguments = @()
+    $arguments += $CommandSpec.Prefix
+
+    switch ($CommandSpec.Backend) {
+        'modelscope' {
+            $arguments += @('download', '--model', $ModelId, '--local_dir', $TargetDir)
+        }
+        'huggingface' {
+            $arguments += @('download', $ModelId, '--local-dir', $TargetDir)
+        }
+        'huggingface-legacy' {
+            $arguments += @('download', $ModelId, '--local-dir', $TargetDir)
+        }
+        'huggingface-python' {
+            $arguments += @($ModelId, $TargetDir)
+        }
+        default {
+            throw "[download-models] Unsupported download backend: $($CommandSpec.Backend)"
+        }
+    }
+
+    return $arguments
 }
 
 function Download-Model {
@@ -136,8 +207,13 @@ function Download-Model {
         [Parameter(Mandatory = $true)]
         [string]$TargetDir,
 
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$CommandSpec
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject]$PrimaryCommandSpec,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject]$FallbackCommandSpec
     )
 
     if (-not (Test-Path -LiteralPath $TargetDir)) {
@@ -146,10 +222,27 @@ function Download-Model {
 
     Append-TaskLog -TaskLogFile $taskLogFile -Value "[download-models] ensuring model is ready at $TargetDir"
 
-    $arguments = @()
-    $arguments += $CommandSpec.Prefix
-    $arguments += @('download', '--model', $ModelId, '--local_dir', $TargetDir)
-    Invoke-LoggedCommand -Description "download $ModelId" -Command $CommandSpec.Command -Arguments $arguments
+    if ($null -eq $PrimaryCommandSpec -and $null -eq $FallbackCommandSpec) {
+        throw '[download-models] Neither ModelScope nor Hugging Face download backends are available. Run init-task-runtime first.'
+    }
+
+    if ($null -ne $PrimaryCommandSpec) {
+        try {
+            $primaryArguments = Get-DownloadArguments -CommandSpec $PrimaryCommandSpec -ModelId $ModelId -TargetDir $TargetDir
+            Invoke-LoggedCommand -Description "download $ModelId via $($PrimaryCommandSpec.Backend)" -Command $PrimaryCommandSpec.Command -Arguments $primaryArguments
+            return
+        }
+        catch {
+            Append-TaskLog -TaskLogFile $taskLogFile -Value "[download-models] primary backend $($PrimaryCommandSpec.Backend) failed for ${ModelId}: $($_.Exception.Message)"
+            if ($null -eq $FallbackCommandSpec) {
+                throw
+            }
+            Append-TaskLog -TaskLogFile $taskLogFile -Value "[download-models] falling back to $($FallbackCommandSpec.Backend) for $ModelId"
+        }
+    }
+
+    $fallbackArguments = Get-DownloadArguments -CommandSpec $FallbackCommandSpec -ModelId $ModelId -TargetDir $TargetDir
+    Invoke-LoggedCommand -Description "download $ModelId via $($FallbackCommandSpec.Backend)" -Command $FallbackCommandSpec.Command -Arguments $fallbackArguments
 }
 
 try {
@@ -161,7 +254,8 @@ try {
         New-Item -ItemType Directory -Path $targetRootDir -Force | Out-Null
     }
 
-    $commandSpec = Resolve-ModelScopeCommand
+    $primaryCommandSpec = Resolve-ModelScopeCommand
+    $fallbackCommandSpec = Resolve-HuggingFaceCommand
     for ($index = 0; $index -lt $modelIdList.Count; $index++) {
         $modelId = [string]$modelIdList[$index]
         $modelName = [string]$modelNameList[$index]
@@ -171,7 +265,7 @@ try {
         }
 
         $targetDir = Join-Path $targetRootDir $modelName
-        Download-Model -ModelId $modelId -TargetDir $targetDir -CommandSpec $commandSpec
+        Download-Model -ModelId $modelId -TargetDir $targetDir -PrimaryCommandSpec $primaryCommandSpec -FallbackCommandSpec $fallbackCommandSpec
     }
 
     Append-TaskLog -TaskLogFile $taskLogFile -Value '[download-models] required models are ready'

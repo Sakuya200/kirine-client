@@ -1,6 +1,7 @@
 pub mod api;
 pub mod llm_models;
 pub mod model_paths;
+pub mod moss_tts_local;
 pub mod qwen3_tts;
 pub mod script_paths;
 pub mod vox_cpm2;
@@ -15,7 +16,10 @@ use tracing::info;
 
 use crate::{service::local::LocalService, Result};
 
-use self::{qwen3_tts::QWEN3_TTS_BASE_MODEL, vox_cpm2::VOX_CPM2_BASE_MODEL};
+use self::{
+    moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL, qwen3_tts::QWEN3_TTS_BASE_MODEL,
+    vox_cpm2::VOX_CPM2_BASE_MODEL,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TrainingPipelineRequest {
@@ -214,6 +218,7 @@ pub(crate) fn resolve_model_task_pipeline(
     base_model: &str,
 ) -> Result<&'static dyn ModelTaskPipeline> {
     match base_model.trim() {
+        MOSS_TTS_LOCAL_BASE_MODEL => Ok(&moss_tts_local::MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE),
         QWEN3_TTS_BASE_MODEL => Ok(&qwen3_tts::QWEN3_TTS_MODEL_TASK_PIPELINE),
         VOX_CPM2_BASE_MODEL => Ok(&vox_cpm2::VOX_CPM2_MODEL_TASK_PIPELINE),
         other => Err(io::Error::new(
@@ -229,6 +234,7 @@ pub(crate) fn resolve_inference_model_path(
     model_root_path: &Path,
 ) -> Result<PathBuf> {
     match base_model.trim() {
+        MOSS_TTS_LOCAL_BASE_MODEL => moss_tts_local::resolve_inference_model_path(model_root_path),
         QWEN3_TTS_BASE_MODEL => qwen3_tts::resolve_inference_model_path(model_root_path),
         VOX_CPM2_BASE_MODEL => vox_cpm2::resolve_inference_model_path(model_root_path),
         other => Err(io::Error::new(

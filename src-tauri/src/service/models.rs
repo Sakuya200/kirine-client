@@ -390,11 +390,46 @@ pub struct Qwen3TtsTextToSpeechModelParams {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct MossTtsLocalTextToSpeechModelParams {
+    pub n_vq_for_inference: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Qwen3TtsTrainingModelParams {
     pub epoch_count: i64,
     pub batch_size: i64,
     pub gradient_accumulation_steps: i64,
     pub enable_gradient_checkpointing: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MossTtsLocalTrainingModelParams {
+    pub epoch_count: i64,
+    pub batch_size: i64,
+    pub gradient_accumulation_steps: i64,
+    pub enable_gradient_checkpointing: bool,
+    #[serde(default)]
+    pub learning_rate: Option<f64>,
+    #[serde(default)]
+    pub weight_decay: Option<f64>,
+    #[serde(default)]
+    pub warmup_ratio: Option<f64>,
+    #[serde(default)]
+    pub warmup_steps: Option<i64>,
+    #[serde(default)]
+    pub max_grad_norm: Option<f64>,
+    #[serde(default)]
+    pub mixed_precision: Option<String>,
+    #[serde(default)]
+    pub channelwise_loss_weight: Option<String>,
+    #[serde(default)]
+    pub skip_reference_audio_codes: Option<bool>,
+    #[serde(default)]
+    pub prep_batch_size: Option<i64>,
+    #[serde(default)]
+    pub prep_n_vq: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -501,6 +536,12 @@ pub struct VoxCpm2VoiceCloneModelParams {
     pub style_prompt: String,
     pub cfg_value: f64,
     pub inference_timesteps: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MossTtsLocalVoiceCloneModelParams {
+    pub n_vq_for_inference: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

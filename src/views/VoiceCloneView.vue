@@ -14,6 +14,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
+import MossTtsLocalVoiceCloneParamsForm from '@/components/moss_tts_local/MossTtsLocalVoiceCloneParamsForm.vue';
 import Qwen3TtsVoiceCloneParamsForm from '@/components/qwen3_tts/Qwen3TtsVoiceCloneParamsForm.vue';
 import VoxCpm2VoiceCloneParamsForm from '@/components/vox_cpm2/VoxCpm2VoiceCloneParamsForm.vue';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
@@ -78,6 +79,7 @@ interface SelectedAudioFile {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const MOSS_TTS_LOCAL_BASE_MODEL = 'moss_tts_local';
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
 const createQwen3VoiceCloneParams = () => ({});
@@ -89,8 +91,16 @@ const createVoxCpm2VoiceCloneParams = () => ({
   inferenceTimesteps: 10
 });
 
+const createMossVoiceCloneParams = () => ({
+  nVqForInference: 32
+});
+
 const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2VoiceCloneParams(), ...modelParams } : { ...createQwen3VoiceCloneParams(), ...modelParams };
+  baseModel === VOX_CPM2_BASE_MODEL
+    ? { ...createVoxCpm2VoiceCloneParams(), ...modelParams }
+    : baseModel === MOSS_TTS_LOCAL_BASE_MODEL
+      ? { ...createMossVoiceCloneParams(), ...modelParams }
+      : { ...createQwen3VoiceCloneParams(), ...modelParams };
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
@@ -135,9 +145,12 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const isMossTtsLocalModel = computed(() => form.baseModel === MOSS_TTS_LOCAL_BASE_MODEL);
 const currentCloneMode = computed(() => String(form.modelParams.mode ?? 'reference'));
-const requiresReferenceText = computed(() => !isVoxCpm2Model.value || currentCloneMode.value === 'ultimate');
-const activeVoiceCloneParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2VoiceCloneParamsForm : Qwen3TtsVoiceCloneParamsForm));
+const requiresReferenceText = computed(() => (isVoxCpm2Model.value ? currentCloneMode.value === 'ultimate' : !isMossTtsLocalModel.value));
+const activeVoiceCloneParamsComponent = computed(() =>
+  isVoxCpm2Model.value ? VoxCpm2VoiceCloneParamsForm : isMossTtsLocalModel.value ? MossTtsLocalVoiceCloneParamsForm : Qwen3TtsVoiceCloneParamsForm
+);
 const canGenerate = computed(
   () =>
     Boolean(form.baseModel) &&
@@ -151,12 +164,15 @@ const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   isVoxCpm2Model.value
     ? `当前克隆模式为 ${currentCloneMode.value === 'ultimate' ? 'Ultimate 克隆' : '参考音频克隆'}。`
-    : '当前克隆模式为参考音频 + 参考台词克隆。',
+    : isMossTtsLocalModel.value
+      ? '当前克隆模式为参考音频条件克隆，参考台词可选。'
+      : '当前克隆模式为参考音频 + 参考台词克隆。',
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
   requiresReferenceText.value
     ? `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
     : `当前模式不要求参考台词，目标台词 ${charCount.value} 字。`,
+  isMossTtsLocalModel.value ? `当前并行码本数 nVQ=${Number(form.modelParams.nVqForInference ?? 32)}。` : '模型参数已按当前基础模型切换。',
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
@@ -537,7 +553,7 @@ onBeforeUnmount(() => {
               v-model="form.refText"
               rows="4"
               class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-              :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : 'Ultimate 模式需要与参考音频逐字对应的文本；当前模式可留空'"
+              :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : '当前模型参考音频文本可留空'"
             />
           </label>
 
@@ -607,6 +623,9 @@ onBeforeUnmount(() => {
               <p class="mt-1">参考音频：{{ activeResult.refAudioName }}</p>
               <p v-if="activeResult.modelParams.mode" class="mt-1">
                 克隆模式：{{ activeResult.modelParams.mode === 'ultimate' ? 'Ultimate' : 'Reference' }}
+              </p>
+              <p v-else-if="activeResult.baseModel === MOSS_TTS_LOCAL_BASE_MODEL" class="mt-1">
+                并行码本数 nVQ：{{ activeResult.modelParams.nVqForInference ?? 32 }}
               </p>
               <p v-if="activeResult.refText" class="mt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>

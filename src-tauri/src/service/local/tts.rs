@@ -19,10 +19,12 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, Qwen3TtsTextToSpeechModelParams,
-            SpeakerStatus, TaskStatus, TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
+            CreateTextToSpeechTaskPayload, HistoryTaskType, MossTtsLocalTextToSpeechModelParams,
+            Qwen3TtsTextToSpeechModelParams, SpeakerStatus, TaskStatus,
+            TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
         },
         pipeline::{
+            moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
             qwen3_tts::qwen3_tts_preset_custom_voice_model_path, resolve_inference_model_path,
             script_paths::resolve_src_model_root, vox_cpm2::VOX_CPM2_BASE_MODEL,
         },
@@ -90,6 +92,10 @@ impl LocalService {
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
         let model_params = if base_model == VOX_CPM2_BASE_MODEL {
             serde_json::to_value(serde_json::from_value::<VoxCpm2TextToSpeechModelParams>(
+                payload.model_params.clone(),
+            )?)?
+        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
+            serde_json::to_value(serde_json::from_value::<MossTtsLocalTextToSpeechModelParams>(
                 payload.model_params.clone(),
             )?)?
         } else {
