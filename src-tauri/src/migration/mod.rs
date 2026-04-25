@@ -6,13 +6,14 @@ use sea_orm_migration::prelude::*;
 use crate::Result;
 
 mod add_model_info_downloaded_flag;
+mod add_model_training_description;
 mod add_vox_cpm2_lora_feature_flag;
 mod create_local_schema;
 mod seed_moss_tts_local_model_info;
 mod seed_qwen3_tts_preset_speakers;
 mod seed_vox_cpm2_model_info;
 
-const LOCAL_SCHEMA_VERSION: &str = "18";
+const LOCAL_SCHEMA_VERSION: &str = "19";
 
 pub(crate) struct Migrator;
 
@@ -26,6 +27,7 @@ impl MigratorTrait for Migrator {
             Box::new(add_vox_cpm2_lora_feature_flag::Migration),
             Box::new(add_model_info_downloaded_flag::Migration),
             Box::new(seed_moss_tts_local_model_info::Migration),
+            Box::new(add_model_training_description::Migration),
         ]
     }
 }
@@ -67,6 +69,10 @@ mod tests {
             .table_has_column("model_info", "downloaded")
             .await
             .expect("check model_info downloaded column"));
+        assert!(harness
+            .table_has_column("model_training_tasks", "description")
+            .await
+            .expect("check model_training_tasks description column"));
 
         let model_infos = harness.list_model_infos().await.expect("list model infos");
         let scales = model_infos

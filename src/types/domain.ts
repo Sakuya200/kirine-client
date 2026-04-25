@@ -38,6 +38,7 @@ export interface ModelTrainingTaskDetail {
   baseModel: BaseModel;
   modelScale: string;
   modelName: string;
+  description: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
   samples: ModelTrainingSampleDetail[];

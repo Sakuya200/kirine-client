@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { QWEN3_TTS_DEFAULT_PARAMS } from '@/components/qwen3_tts/textToSpeechParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
 }
@@ -11,7 +13,7 @@ const emit = defineEmits<{
 }>();
 
 const voicePrompt = computed({
-  get: () => String(props.modelValue.voicePrompt ?? ''),
+  get: () => String(props.modelValue.voicePrompt ?? QWEN3_TTS_DEFAULT_PARAMS.voicePrompt),
   set: value => {
     emit('update:modelValue', {
       ...props.modelValue,

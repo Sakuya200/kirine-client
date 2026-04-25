@@ -14,9 +14,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
-import MossTtsLocalVoiceCloneParamsForm from '@/components/moss_tts_local/MossTtsLocalVoiceCloneParamsForm.vue';
-import Qwen3TtsVoiceCloneParamsForm from '@/components/qwen3_tts/Qwen3TtsVoiceCloneParamsForm.vue';
-import VoxCpm2VoiceCloneParamsForm from '@/components/vox_cpm2/VoxCpm2VoiceCloneParamsForm.vue';
+import { getVoiceCloneModelRegistryEntry } from '@/components/form/voiceCloneRegistry';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
@@ -77,30 +75,10 @@ interface SelectedAudioFile {
   fileName: string;
   filePath: string;
 }
-
-const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
-const MOSS_TTS_LOCAL_BASE_MODEL = 'moss_tts_local';
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
-const createQwen3VoiceCloneParams = () => ({});
-
-const createVoxCpm2VoiceCloneParams = () => ({
-  mode: 'reference',
-  stylePrompt: '',
-  cfgValue: 2.0,
-  inferenceTimesteps: 10
-});
-
-const createMossVoiceCloneParams = () => ({
-  nVqForInference: 32
-});
-
 const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL
-    ? { ...createVoxCpm2VoiceCloneParams(), ...modelParams }
-    : baseModel === MOSS_TTS_LOCAL_BASE_MODEL
-      ? { ...createMossVoiceCloneParams(), ...modelParams }
-      : { ...createQwen3VoiceCloneParams(), ...modelParams };
+  getVoiceCloneModelRegistryEntry(baseModel).normalizeParams(modelParams);
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
@@ -115,7 +93,7 @@ const form = reactive({
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
-  modelParams: createQwen3VoiceCloneParams() as Record<string, unknown>
+  modelParams: getVoiceCloneModelRegistryEntry('').createDefaultParams() as Record<string, unknown>
 });
 const languageOptions = Object.values(AppLanguage).map(value => ({
   label: APP_LANGUAGE_LABELS[value],
@@ -144,13 +122,9 @@ const modelOptions = computed(() =>
   }))
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
-const isMossTtsLocalModel = computed(() => form.baseModel === MOSS_TTS_LOCAL_BASE_MODEL);
-const currentCloneMode = computed(() => String(form.modelParams.mode ?? 'reference'));
-const requiresReferenceText = computed(() => (isVoxCpm2Model.value ? currentCloneMode.value === 'ultimate' : !isMossTtsLocalModel.value));
-const activeVoiceCloneParamsComponent = computed(() =>
-  isVoxCpm2Model.value ? VoxCpm2VoiceCloneParamsForm : isMossTtsLocalModel.value ? MossTtsLocalVoiceCloneParamsForm : Qwen3TtsVoiceCloneParamsForm
-);
+const activeVoiceCloneConfig = computed(() => getVoiceCloneModelRegistryEntry(form.baseModel));
+const requiresReferenceText = computed(() => activeVoiceCloneConfig.value.requiresReferenceText(form.modelParams));
+const activeVoiceCloneParamsComponent = computed(() => activeVoiceCloneConfig.value.paramsComponent);
 const canGenerate = computed(
   () =>
     Boolean(form.baseModel) &&
@@ -162,19 +136,22 @@ const canGenerate = computed(
 );
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
-  isVoxCpm2Model.value
-    ? `当前克隆模式为 ${currentCloneMode.value === 'ultimate' ? 'Ultimate 克隆' : '参考音频克隆'}。`
-    : isMossTtsLocalModel.value
-      ? '当前克隆模式为参考音频条件克隆，参考台词可选。'
-      : '当前克隆模式为参考音频 + 参考台词克隆。',
+  activeVoiceCloneConfig.value.buildModeSummary(form.modelParams),
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
   requiresReferenceText.value
     ? `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
     : `当前模式不要求参考台词，目标台词 ${charCount.value} 字。`,
-  isMossTtsLocalModel.value ? `当前并行码本数 nVQ=${Number(form.modelParams.nVqForInference ?? 32)}。` : '模型参数已按当前基础模型切换。',
+  ...activeVoiceCloneConfig.value.buildCloneSummaryLines(form.modelParams),
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
+const activeResultSummaryLines = computed(() => {
+  if (!activeResult.value) {
+    return [];
+  }
+
+  return getVoiceCloneModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
+});
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
     taskId: item.taskId,
@@ -621,12 +598,7 @@ onBeforeUnmount(() => {
               <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
               <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
               <p class="mt-1">参考音频：{{ activeResult.refAudioName }}</p>
-              <p v-if="activeResult.modelParams.mode" class="mt-1">
-                克隆模式：{{ activeResult.modelParams.mode === 'ultimate' ? 'Ultimate' : 'Reference' }}
-              </p>
-              <p v-else-if="activeResult.baseModel === MOSS_TTS_LOCAL_BASE_MODEL" class="mt-1">
-                并行码本数 nVQ：{{ activeResult.modelParams.nVqForInference ?? 32 }}
-              </p>
+              <p v-for="line in activeResultSummaryLines" :key="line" class="mt-1">{{ line }}</p>
               <p v-if="activeResult.refText" class="mt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>

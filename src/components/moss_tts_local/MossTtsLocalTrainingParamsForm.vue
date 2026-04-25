@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS } from '@/components/moss_tts_local/trainingParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
   supportsLora?: boolean;
@@ -19,67 +21,67 @@ const updateValue = (key: string, value: unknown) => {
 };
 
 const epochCount = computed({
-  get: () => Number(props.modelValue.epochCount ?? 3),
+  get: () => Number(props.modelValue.epochCount ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.epochCount),
   set: value => updateValue('epochCount', value)
 });
 
 const batchSize = computed({
-  get: () => Number(props.modelValue.batchSize ?? 1),
+  get: () => Number(props.modelValue.batchSize ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.batchSize),
   set: value => updateValue('batchSize', value)
 });
 
 const gradientAccumulationSteps = computed({
-  get: () => Number(props.modelValue.gradientAccumulationSteps ?? 8),
+  get: () => Number(props.modelValue.gradientAccumulationSteps ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.gradientAccumulationSteps),
   set: value => updateValue('gradientAccumulationSteps', value)
 });
 
 const enableGradientCheckpointing = computed({
-  get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? true),
+  get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.enableGradientCheckpointing),
   set: value => updateValue('enableGradientCheckpointing', value)
 });
 
 const learningRate = computed({
-  get: () => Number(props.modelValue.learningRate ?? 1e-5),
+  get: () => Number(props.modelValue.learningRate ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.learningRate),
   set: value => updateValue('learningRate', value)
 });
 
 const weightDecay = computed({
-  get: () => Number(props.modelValue.weightDecay ?? 0.1),
+  get: () => Number(props.modelValue.weightDecay ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.weightDecay),
   set: value => updateValue('weightDecay', value)
 });
 
 const warmupRatio = computed({
-  get: () => Number(props.modelValue.warmupRatio ?? 0.03),
+  get: () => Number(props.modelValue.warmupRatio ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.warmupRatio),
   set: value => updateValue('warmupRatio', value)
 });
 
 const warmupSteps = computed({
-  get: () => Number(props.modelValue.warmupSteps ?? 0),
+  get: () => Number(props.modelValue.warmupSteps ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.warmupSteps),
   set: value => updateValue('warmupSteps', value)
 });
 
 const maxGradNorm = computed({
-  get: () => Number(props.modelValue.maxGradNorm ?? 1.0),
+  get: () => Number(props.modelValue.maxGradNorm ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.maxGradNorm),
   set: value => updateValue('maxGradNorm', value)
 });
 
 const mixedPrecision = computed({
-  get: () => String(props.modelValue.mixedPrecision ?? 'bf16'),
+  get: () => String(props.modelValue.mixedPrecision ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.mixedPrecision),
   set: value => updateValue('mixedPrecision', value)
 });
 
 const channelwiseLossWeight = computed({
-  get: () => String(props.modelValue.channelwiseLossWeight ?? '1,32'),
+  get: () => String(props.modelValue.channelwiseLossWeight ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.channelwiseLossWeight),
   set: value => updateValue('channelwiseLossWeight', value)
 });
 
 const skipReferenceAudioCodes = computed({
-  get: () => Boolean(props.modelValue.skipReferenceAudioCodes ?? true),
+  get: () => Boolean(props.modelValue.skipReferenceAudioCodes ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.skipReferenceAudioCodes),
   set: value => updateValue('skipReferenceAudioCodes', value)
 });
 
 const prepBatchSize = computed({
-  get: () => Number(props.modelValue.prepBatchSize ?? 16),
+  get: () => Number(props.modelValue.prepBatchSize ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.prepBatchSize),
   set: value => updateValue('prepBatchSize', value)
 });
 

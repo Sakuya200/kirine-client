@@ -352,6 +352,17 @@ pub struct UpdateSpeakerPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ImportModelAsSpeakerPayload {
+    pub base_model: BaseModel,
+    pub model_scale: String,
+    pub source_model_dir_path: String,
+    pub name: String,
+    pub description: String,
+    pub language: AppLanguage,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateTaskStatusPayload {
     pub task_id: i64,
     pub status: TaskStatus,
@@ -636,6 +647,7 @@ pub struct ModelTrainingTaskDetail {
     pub base_model: BaseModel,
     pub model_scale: String,
     pub model_name: String,
+    pub description: String,
     pub model_params: Value,
     pub sample_count: i64,
     pub samples: Vec<ModelTrainingSampleInput>,
@@ -753,6 +765,7 @@ pub struct CreateModelTrainingTaskPayload {
     pub base_model: BaseModel,
     pub model_scale: String,
     pub model_name: String,
+    pub description: String,
     pub model_params: Value,
     pub samples: Vec<ModelTrainingSampleInput>,
 }

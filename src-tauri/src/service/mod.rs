@@ -5,10 +5,10 @@ use crate::{
     config::{EnvConfig, StorageMode},
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
-        ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset,
-        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-        VoiceCloneTaskResult,
+        CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ImportModelAsSpeakerPayload,
+        ModelInfo, ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo,
+        TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+        UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
     },
     Result,
 };
@@ -47,6 +47,10 @@ pub trait Service: Send + Sync {
         Self: Sized;
     async fn close(&self) -> Result<()>;
     async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo>;
+    async fn import_model_as_speaker(
+        &self,
+        payload: ImportModelAsSpeakerPayload,
+    ) -> Result<SpeakerInfo>;
     async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>>;
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;

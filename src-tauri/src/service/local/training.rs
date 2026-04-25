@@ -33,9 +33,8 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, MossTtsLocalTrainingModelParams,
-            Qwen3TtsTrainingModelParams, SpeakerSource, SpeakerStatus, TaskStatus,
-            VoxCpm2TrainingModelParams,
+            ModelTrainingTaskResult, MossTtsLocalTrainingModelParams, Qwen3TtsTrainingModelParams,
+            SpeakerSource, SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
         },
         pipeline::{
             model_paths::{llm_model_display_name, speaker_model_dir},
@@ -141,6 +140,7 @@ impl LocalService {
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
+        let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_scale = payload.model_scale.trim().to_string();
         let model_params = if base_model == "vox_cpm2" {
@@ -174,7 +174,7 @@ impl LocalService {
             languages_json: Set(languages_json),
             samples: Set(0),
             base_model: Set(base_model.clone()),
-            description: Set("通过模型训练任务自动创建".to_string()),
+            description: Set(speaker_description),
             model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
@@ -339,6 +339,7 @@ impl LocalService {
             base_model: Set(base_model.clone()),
             model_scale: Set(model_scale.clone()),
             model_name: Set(speaker_name.clone()),
+            description: Set(payload.description.trim().to_string()),
             model_params_json: Set(serde_json::to_string(&model_params)?),
             sample_count: Set(sample_count),
             samples_json: Set(serde_json::to_string(&prepared.persisted_samples)?),

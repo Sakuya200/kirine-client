@@ -9,5 +9,5 @@ api_url = ""
 api_token = ""
 
 [training]
-hardware_type = "cuda"
+hardware_type = "cpu"
 attn_implementation = "sdpa"

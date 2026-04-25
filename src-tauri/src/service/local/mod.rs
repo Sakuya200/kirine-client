@@ -26,10 +26,10 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
-            ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskResult,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ImportModelAsSpeakerPayload,
+            ModelInfo, ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo,
+            TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
@@ -68,6 +68,10 @@ impl Service for LocalService {
 
     async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
         self.create_speaker_info_impl(payload).await
+    }
+
+    async fn import_model_as_speaker(&self, payload: ImportModelAsSpeakerPayload) -> Result<SpeakerInfo> {
+        self.import_model_as_speaker_impl(payload).await
     }
 
     async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>> {

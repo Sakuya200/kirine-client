@@ -10,10 +10,10 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ModelInfo,
-            ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskResult,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType,
+            ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
+            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
         },
         Service,
     },
@@ -49,6 +49,13 @@ impl Service for RemoteService {
 
     async fn create_speaker_info(&self, _payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
         biz::unsupported("create_speaker_info")
+    }
+
+    async fn import_model_as_speaker(
+        &self,
+        _payload: ImportModelAsSpeakerPayload,
+    ) -> Result<SpeakerInfo> {
+        biz::unsupported("import_model_as_speaker")
     }
 
     async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>> {
