@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS, normalizeVoxCpm2VoiceCloneParams } from '@/components/vox_cpm2/voiceCloneParams';
 import BaseListbox from '../common/BaseListbox.vue';
 
 interface Props {
@@ -12,6 +13,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: Record<string, unknown>];
 }>();
 
+const normalizedModelValue = computed(() => normalizeVoxCpm2VoiceCloneParams(props.modelValue));
+
 const updateValue = (key: string, value: unknown) => {
   emit('update:modelValue', {
     ...props.modelValue,
@@ -20,7 +23,7 @@ const updateValue = (key: string, value: unknown) => {
 };
 
 const mode = computed({
-  get: () => String(props.modelValue.mode ?? 'reference'),
+  get: () => String(normalizedModelValue.value.mode ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.mode),
   set: value => updateValue('mode', value)
 });
 
@@ -30,17 +33,17 @@ const modeOptions = [
 ];
 
 const stylePrompt = computed({
-  get: () => String(props.modelValue.stylePrompt ?? ''),
+  get: () => String(normalizedModelValue.value.stylePrompt ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.stylePrompt),
   set: value => updateValue('stylePrompt', value)
 });
 
 const cfgValue = computed({
-  get: () => Number(props.modelValue.cfgValue ?? 2.0),
+  get: () => Number(normalizedModelValue.value.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue),
   set: value => updateValue('cfgValue', value)
 });
 
 const inferenceTimesteps = computed({
-  get: () => Number(props.modelValue.inferenceTimesteps ?? 10),
+  get: () => Number(normalizedModelValue.value.inferenceTimesteps ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.inferenceTimesteps),
   set: value => updateValue('inferenceTimesteps', value)
 });
 </script>

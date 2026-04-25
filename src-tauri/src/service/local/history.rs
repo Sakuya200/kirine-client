@@ -374,6 +374,7 @@ impl LocalService {
             base_model: row.base_model,
             model_scale: row.model_scale,
             model_name: row.model_name,
+            description: row.description,
             model_params: serde_json::from_str(&row.model_params_json)?,
             sample_count: row.sample_count,
             samples,

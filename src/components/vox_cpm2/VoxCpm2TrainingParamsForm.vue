@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { VOX_CPM2_TRAINING_DEFAULT_PARAMS, normalizeVoxCpm2TrainingParams } from '@/components/vox_cpm2/trainingParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
   supportsLora?: boolean;
@@ -10,6 +12,8 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   'update:modelValue': [value: Record<string, unknown>];
 }>();
+
+const normalizedModelValue = computed(() => normalizeVoxCpm2TrainingParams(props.modelValue));
 
 const updateValue = (key: string, value: unknown) => {
   emit('update:modelValue', {
@@ -28,47 +32,43 @@ const updateLoraState = (value: boolean) => {
 
 const useLora = computed({
   get: () => {
-    if (typeof props.modelValue.useLora === 'boolean') {
-      return props.modelValue.useLora;
-    }
-
-    return String(props.modelValue.trainingMode ?? 'lora') !== 'full';
+    return Boolean(normalizedModelValue.value.useLora);
   },
   set: value => updateLoraState(value)
 });
 
 const loraRank = computed({
-  get: () => Number(props.modelValue.loraRank ?? 32),
+  get: () => Number(normalizedModelValue.value.loraRank ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.loraRank),
   set: value => updateValue('loraRank', value)
 });
 
 const loraAlpha = computed({
-  get: () => Number(props.modelValue.loraAlpha ?? 32),
+  get: () => Number(normalizedModelValue.value.loraAlpha ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.loraAlpha),
   set: value => updateValue('loraAlpha', value)
 });
 
 const loraDropout = computed({
-  get: () => String(props.modelValue.loraDropout ?? '0.0'),
+  get: () => String(normalizedModelValue.value.loraDropout ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.loraDropout),
   set: value => updateValue('loraDropout', value)
 });
 
 const epochCount = computed({
-  get: () => Number(props.modelValue.epochCount ?? 2),
+  get: () => Number(normalizedModelValue.value.epochCount ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.epochCount),
   set: value => updateValue('epochCount', value)
 });
 
 const batchSize = computed({
-  get: () => Number(props.modelValue.batchSize ?? 4),
+  get: () => Number(normalizedModelValue.value.batchSize ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.batchSize),
   set: value => updateValue('batchSize', value)
 });
 
 const gradientAccumulationSteps = computed({
-  get: () => Number(props.modelValue.gradientAccumulationSteps ?? 1),
+  get: () => Number(normalizedModelValue.value.gradientAccumulationSteps ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.gradientAccumulationSteps),
   set: value => updateValue('gradientAccumulationSteps', value)
 });
 
 const enableGradientCheckpointing = computed({
-  get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? false),
+  get: () => Boolean(normalizedModelValue.value.enableGradientCheckpointing ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.enableGradientCheckpointing),
   set: value => updateValue('enableGradientCheckpointing', value)
 });
 </script>

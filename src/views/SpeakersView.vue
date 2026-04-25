@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ArrowPathIcon, EyeIcon, PencilSquareIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { ArrowDownTrayIcon, ArrowPathIcon, EyeIcon, FolderOpenIcon, PencilSquareIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline';
+import { open } from '@tauri-apps/plugin-dialog';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -9,6 +10,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { AppLanguage } from '@/enums/language';
 import { SPEAKER_STATUS_STYLES, SPEAKER_STATUS_TEXT, SpeakerStatus } from '@/enums/status';
+import { HistoryTaskType } from '@/enums/task';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import type { SpeakerProfile } from '@/types/domain';
@@ -39,17 +41,47 @@ const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
 const selectedLanguage = ref<LanguageFilterValue>(languageOptions[0].value);
 const selectedStatus = ref<StatusFilterValue>(statusOptions[0].value);
 const isEditDialogOpen = ref(false);
+const isImportDialogOpen = ref(false);
 const isDeleteDialogOpen = ref(false);
 const editForm = reactive({
   id: null as number | null,
   name: '',
   description: ''
 });
+const importForm = reactive({
+  baseModel: '',
+  modelScale: '',
+  sourceModelDirPath: '',
+  name: '',
+  description: '',
+  language: AppLanguage.Chinese as AppLanguage
+});
+
+const importableModelOptions = computed(() =>
+  modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
+    label: item.modelName,
+    value: item.baseModel
+  }))
+);
+const importModelScaleOptions = computed(() => modelStore.getModelScaleOptions(importForm.baseModel));
+const importLanguageOptions: Array<{ value: AppLanguage; label: string }> = [
+  { value: AppLanguage.Chinese, label: '中文' },
+  { value: AppLanguage.English, label: '英文' },
+  { value: AppLanguage.Japanese, label: '日文' }
+];
 
 const selectedSpeaker = computed(() => speakerStore.speakers.find(speaker => speaker.id === selectedSpeakerId.value) ?? null);
 const deleteTarget = computed(() => speakerStore.speakers.find(speaker => speaker.id === deleteTargetId.value) ?? null);
 const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
 const canSaveSpeaker = computed(() => editForm.name.trim().length > 0 && editForm.description.trim().length > 0);
+const canImportSpeaker = computed(
+  () =>
+    importForm.baseModel.trim().length > 0 &&
+    importForm.modelScale.trim().length > 0 &&
+    importForm.sourceModelDirPath.trim().length > 0 &&
+    importForm.name.trim().length > 0 &&
+    importForm.description.trim().length > 0
+);
 
 const filteredSpeakers = computed(() => {
   const keyword = trimmedKeyword.value;
@@ -102,6 +134,55 @@ const closeEditDialog = () => {
   isEditDialogOpen.value = false;
 };
 
+const resetImportForm = () => {
+  importForm.baseModel = String(importableModelOptions.value[0]?.value ?? '');
+  importForm.modelScale = String(importModelScaleOptions.value[0]?.value ?? '');
+  importForm.sourceModelDirPath = '';
+  importForm.name = '';
+  importForm.description = '';
+  importForm.language = AppLanguage.Chinese;
+};
+
+const openImportDialog = () => {
+  resetImportForm();
+  isImportDialogOpen.value = true;
+};
+
+const closeImportDialog = () => {
+  isImportDialogOpen.value = false;
+};
+
+const pickImportModelDirectory = async () => {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: '选择已下载模型目录'
+  });
+
+  if (typeof selected === 'string') {
+    importForm.sourceModelDirPath = selected;
+  }
+};
+
+const submitImportSpeaker = async () => {
+  if (!canImportSpeaker.value) {
+    return;
+  }
+
+  const imported = await speakerStore.importSpeaker({
+    baseModel: importForm.baseModel,
+    modelScale: importForm.modelScale,
+    sourceModelDirPath: importForm.sourceModelDirPath.trim(),
+    name: importForm.name.trim(),
+    description: importForm.description.trim(),
+    language: importForm.language
+  });
+
+  if (imported) {
+    closeImportDialog();
+  }
+};
+
 const saveSpeaker = async () => {
   if (!canSaveSpeaker.value) {
     return;
@@ -149,6 +230,36 @@ const confirmDelete = async () => {
   }
 };
 
+watch(
+  importableModelOptions,
+  options => {
+    if (options.length === 0) {
+      importForm.baseModel = '';
+      return;
+    }
+
+    if (!options.some(option => option.value === importForm.baseModel)) {
+      importForm.baseModel = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  importModelScaleOptions,
+  options => {
+    if (options.length === 0) {
+      importForm.modelScale = '';
+      return;
+    }
+
+    if (!options.some(option => option.value === importForm.modelScale)) {
+      importForm.modelScale = String(options[0]?.value ?? '');
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(async () => {
   if (!modelStore.initialized) {
     await modelStore.loadModels();
@@ -185,10 +296,16 @@ onMounted(async () => {
 
     <PanelCard title="说话人列表" subtitle="支持搜索、语言过滤、状态过滤、详情查看、编辑与删除操作">
       <template #actions>
-        <BaseButton tone="ghost" :disabled="speakerStore.isLoading" @click="speakerStore.refreshSpeakers()">
-          <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-          <span>{{ speakerStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
-        </BaseButton>
+        <div class="flex flex-wrap gap-2">
+          <BaseButton tone="ghost" :disabled="importableModelOptions.length === 0" @click="openImportDialog">
+            <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
+            <span>导入模型</span>
+          </BaseButton>
+          <BaseButton tone="ghost" :disabled="speakerStore.isLoading" @click="speakerStore.refreshSpeakers()">
+            <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
+            <span>{{ speakerStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
+          </BaseButton>
+        </div>
       </template>
 
       <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -292,6 +409,61 @@ onMounted(async () => {
         <BaseButton :disabled="!canSaveSpeaker" @click="saveSpeaker">
           <PencilSquareIcon class="h-4 w-4" aria-hidden="true" />
           <span>保存修改</span>
+        </BaseButton>
+      </template>
+    </BaseDialog>
+
+    <BaseDialog :open="isImportDialogOpen" title="导入外部模型" @close="closeImportDialog">
+      <div class="space-y-4">
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">模型类型</span>
+          <BaseListbox v-model="importForm.baseModel" :options="importableModelOptions" />
+        </label>
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">模型参数大小</span>
+          <BaseListbox v-model="importForm.modelScale" :options="importModelScaleOptions" />
+        </label>
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">语言</span>
+          <BaseListbox v-model="importForm.language" :options="importLanguageOptions" />
+        </label>
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">模型目录</span>
+          <div class="flex gap-2">
+            <input
+              v-model="importForm.sourceModelDirPath"
+              class="min-w-0 flex-1 rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+              placeholder="请选择已下载模型所在目录"
+              readonly
+            />
+            <BaseButton tone="ghost" @click="pickImportModelDirectory">
+              <FolderOpenIcon class="h-4 w-4" aria-hidden="true" />
+              <span>选择目录</span>
+            </BaseButton>
+          </div>
+        </label>
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
+          <input v-model="importForm.name" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入说话人名称" />
+        </label>
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">说话人描述</span>
+          <textarea
+            v-model="importForm.description"
+            rows="4"
+            class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2"
+            placeholder="请输入说话人描述或使用场景"
+          />
+        </label>
+      </div>
+      <template #footer>
+        <BaseButton tone="ghost" @click="closeImportDialog">
+          <XMarkIcon class="h-4 w-4" aria-hidden="true" />
+          <span>取消</span>
+        </BaseButton>
+        <BaseButton :disabled="!canImportSpeaker" @click="submitImportSpeaker">
+          <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
+          <span>确认导入</span>
         </BaseButton>
       </template>
     </BaseDialog>

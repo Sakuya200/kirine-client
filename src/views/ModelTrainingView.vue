@@ -21,10 +21,8 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import { getTrainingModelRegistryEntry } from '@/components/form/modelTrainingRegistry';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
-import MossTtsLocalTrainingParamsForm from '@/components/moss_tts_local/MossTtsLocalTrainingParamsForm.vue';
-import Qwen3TtsTrainingParamsForm from '@/components/qwen3_tts/Qwen3TtsTrainingParamsForm.vue';
-import VoxCpm2TrainingParamsForm from '@/components/vox_cpm2/VoxCpm2TrainingParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -71,76 +69,18 @@ interface ModelTrainingTaskResultPayload {
   createTime: string;
   status: TaskStatus;
 }
-
-const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
-const MOSS_TTS_LOCAL_BASE_MODEL = 'moss_tts_local';
 const LORA_FEATURE = 'lora';
 
-const createQwen3TrainingParams = () => ({
-  epochCount: 30,
-  batchSize: 8,
-  gradientAccumulationSteps: 4,
-  enableGradientCheckpointing: false
-});
-
-const createVoxCpm2TrainingParams = () => ({
-  trainingMode: 'lora',
-  useLora: true,
-  loraRank: 32,
-  loraAlpha: 32,
-  loraDropout: '0.0',
-  epochCount: 2,
-  batchSize: 4,
-  gradientAccumulationSteps: 1,
-  enableGradientCheckpointing: false
-});
-
-const createMossTrainingParams = () => ({
-  epochCount: 3,
-  batchSize: 1,
-  gradientAccumulationSteps: 8,
-  enableGradientCheckpointing: true,
-  learningRate: 1e-5,
-  weightDecay: 0.1,
-  warmupRatio: 0.03,
-  warmupSteps: 0,
-  maxGradNorm: 1.0,
-  mixedPrecision: 'bf16',
-  channelwiseLossWeight: '1,32',
-  skipReferenceAudioCodes: true,
-  prepBatchSize: 16,
-  prepNVq: null
-});
-
-const normalizeVoxCpm2TrainingParams = (modelParams: Record<string, unknown>) => {
-  const defaults = createVoxCpm2TrainingParams();
-  const legacyTrainingMode = String(modelParams.trainingMode ?? '').trim();
-  const useLora = typeof modelParams.useLora === 'boolean' ? modelParams.useLora : legacyTrainingMode !== 'full';
-
-  return {
-    ...defaults,
-    ...modelParams,
-    useLora,
-    trainingMode: useLora ? 'lora' : 'full',
-    loraRank: Number(modelParams.loraRank ?? defaults.loraRank),
-    loraAlpha: Number(modelParams.loraAlpha ?? defaults.loraAlpha),
-    loraDropout: String(modelParams.loraDropout ?? defaults.loraDropout).trim() || defaults.loraDropout
-  };
-};
-
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL
-    ? normalizeVoxCpm2TrainingParams(modelParams)
-    : baseModel === MOSS_TTS_LOCAL_BASE_MODEL
-      ? { ...createMossTrainingParams(), ...modelParams }
-      : { ...createQwen3TrainingParams(), ...modelParams };
+  getTrainingModelRegistryEntry(baseModel).normalizeParams(modelParams);
 
 const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
   modelScale: '',
   modelName: 'speaker_a_custom',
-  modelParams: createQwen3TrainingParams() as Record<string, unknown>,
+  description: '',
+  modelParams: getTrainingModelRegistryEntry('').createDefaultParams() as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
@@ -176,12 +116,9 @@ const modelOptions = computed(() =>
   }))
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
-const isMossTtsLocalModel = computed(() => form.baseModel === MOSS_TTS_LOCAL_BASE_MODEL);
+const activeTrainingModelConfig = computed(() => getTrainingModelRegistryEntry(form.baseModel));
 const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
-const activeTrainingParamsComponent = computed(() =>
-  isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : isMossTtsLocalModel.value ? MossTtsLocalTrainingParamsForm : Qwen3TtsTrainingParamsForm
-);
+const activeTrainingParamsComponent = computed(() => activeTrainingModelConfig.value.paramsComponent);
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -192,6 +129,7 @@ const canStartTraining = computed(() => {
 
   return (
     form.modelName.trim().length > 0 &&
+    form.description.trim().length > 0 &&
     importedSamples.value.length > 0 &&
     epochCount > 0 &&
     batchSize > 0 &&
@@ -213,11 +151,8 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 
-const baseModelSummary = computed(() => {
-  return isMossTtsLocalModel.value
-    ? 'MOSS-TTS Local 使用单卡训练封装，不启用 FSDP 或 DeepSpeed；若切换硬件，请先前往设置页保存。'
-    : '微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
-});
+const baseModelSummary = computed(() => activeTrainingModelConfig.value.baseSummary);
+const modelSpecificSummaryLines = computed(() => activeTrainingModelConfig.value.buildSummaryLines(form.modelParams));
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
     return '正在创建模型微调任务，请稍候';
@@ -419,6 +354,7 @@ const resetForm = () => {
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
   form.modelScale = String(modelScaleOptions.value[0]?.value ?? '');
   form.modelName = 'speaker_a_custom';
+  form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
   form.singleAudioFile = null;
   form.singleTranscript = '';
@@ -454,6 +390,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.baseModel = record.detail.baseModel;
   form.modelScale = record.detail.modelScale;
   form.modelName = record.detail.modelName;
+  form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
   form.singleAudioFile = null;
   form.singleTranscript = '';
@@ -600,6 +537,7 @@ const startTraining = async () => {
         baseModel: form.baseModel,
         modelScale: form.modelScale,
         modelName: form.modelName.trim(),
+        description: form.description.trim(),
         modelParams: form.modelParams,
         samples: importedSamples.value.map(sample => ({
           id: sample.id,
@@ -823,18 +761,18 @@ onBeforeUnmount(() => {
 
     <PanelCard class="z-20" title="微调参数" subtitle="模型微调参数配置">
       <div class="space-y-5 text-sm text-slate-700">
-        <div class="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-          <label class="block md:col-span-2 2xl:col-span-1">
+        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <label class="block xl:col-span-1">
             <span class="mb-1 block text-xs text-stone-500">微调输出名称</span>
             <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
           </label>
-          <div class="md:col-span-1 2xl:col-span-1">
+          <div class="xl:col-span-1">
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           </div>
-          <div class="md:col-span-1 2xl:col-span-1">
+          <div class="xl:col-span-1">
             <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
           </div>
-          <div class="md:col-span-2 2xl:col-span-1">
+          <div class="md:col-span-2 xl:col-span-1">
             <BaseListbox
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
@@ -843,6 +781,16 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
+
+        <label class="block">
+          <span class="mb-1 block text-xs text-stone-500">说话人描述</span>
+          <textarea
+            v-model="form.description"
+            rows="2"
+            class="min-h-[42px] w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+            placeholder="请输入说话人描述，用于后续在说话人列表中识别模型"
+          />
+        </label>
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
@@ -855,19 +803,8 @@ onBeforeUnmount(() => {
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
             <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
-            <p v-if="isVoxCpm2Model" class="mt-1">当前微调模式 {{ form.modelParams.useLora ? 'LoRA 微调' : '全量微调' }}。</p>
-            <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
-              LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
-              {{ form.modelParams.loraDropout ?? 0 }}。
-            </p>
-            <p v-if="isMossTtsLocalModel" class="mt-1">
-              学习率 {{ form.modelParams.learningRate ?? 0.00001 }}，权重衰减 {{ form.modelParams.weightDecay ?? 0.1 }}，混合精度
-              {{ form.modelParams.mixedPrecision ?? 'bf16' }}。
-            </p>
-            <p v-if="isMossTtsLocalModel" class="mt-1">
-              预处理批次 {{ form.modelParams.prepBatchSize ?? 16 }}，预处理 nVQ {{ form.modelParams.prepNVq ?? '默认' }}，参考音频编码
-              {{ form.modelParams.skipReferenceAudioCodes ? '跳过' : '保留' }}。
-            </p>
+            <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
+            <p v-for="line in modelSpecificSummaryLines" :key="line" class="mt-1">{{ line }}</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">
               当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点

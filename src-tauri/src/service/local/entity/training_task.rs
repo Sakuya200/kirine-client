@@ -10,6 +10,7 @@ pub struct Model {
     pub base_model: String,
     pub model_scale: String,
     pub model_name: String,
+    pub description: String,
     pub model_params_json: String,
     pub sample_count: i64,
     pub samples_json: String,

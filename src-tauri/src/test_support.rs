@@ -174,6 +174,7 @@ impl LocalServiceHarness {
                 base_model: "vox_cpm2".to_string(),
                 model_scale: "2B".to_string(),
                 model_name: "vox_lora_test".to_string(),
+                description: "用于测试的 Vox 训练说话人".to_string(),
                 model_params,
                 samples: vec![ModelTrainingSampleInput {
                     id: 1,

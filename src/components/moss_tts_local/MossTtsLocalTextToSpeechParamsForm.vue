@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { MOSS_TTS_LOCAL_TTS_DEFAULT_PARAMS } from '@/components/moss_tts_local/textToSpeechParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
 }
@@ -11,7 +13,7 @@ const emit = defineEmits<{
 }>();
 
 const nVqForInference = computed({
-  get: () => Number(props.modelValue.nVqForInference ?? 32),
+  get: () => Number(props.modelValue.nVqForInference ?? MOSS_TTS_LOCAL_TTS_DEFAULT_PARAMS.nVqForInference),
   set: value => {
     emit('update:modelValue', {
       ...props.modelValue,

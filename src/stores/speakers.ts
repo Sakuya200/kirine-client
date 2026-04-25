@@ -24,6 +24,15 @@ interface UpdateSpeakerPayload {
   description: string;
 }
 
+interface ImportSpeakerPayload {
+  baseModel: BaseModel;
+  modelScale: string;
+  sourceModelDirPath: string;
+  name: string;
+  description: string;
+  language: AppLanguage;
+}
+
 const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
   const languages = Array.isArray(item.languages) ? item.languages : [];
   const safeStatus: SpeakerStatus =
@@ -131,6 +140,30 @@ export const useSpeakerStore = defineStore('speakers', () => {
     }
   };
 
+  const importSpeaker = async (payload: ImportSpeakerPayload) => {
+    try {
+      const imported = normalizeSpeaker(
+        await invoke<SpeakerProfile>('import_model_as_speaker', {
+          payload: {
+            baseModel: payload.baseModel,
+            modelScale: payload.modelScale,
+            sourceModelDirPath: payload.sourceModelDirPath,
+            name: payload.name,
+            description: payload.description,
+            language: payload.language
+          }
+        })
+      );
+
+      speakers.value = [imported, ...speakers.value.filter(item => item.id !== imported.id)];
+      uiStore.notifySuccess(`已导入说话人“${imported.name}”。`, 3200);
+      return true;
+    } catch (error) {
+      uiStore.notifyError(formatErrorMessage('导入说话人失败', error));
+      return false;
+    }
+  };
+
   const removeSpeaker = async (speakerId: number) => {
     const speaker = speakers.value.find(item => item.id === speakerId);
 
@@ -172,6 +205,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
     loadSpeakers,
     refreshSpeakers,
     updateSpeaker,
+    importSpeaker,
     removeSpeaker,
     getLanguageLabel
   };

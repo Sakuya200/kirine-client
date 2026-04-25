@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::service::{
-    models::{CreateSpeakerPayload, SpeakerInfo, UpdateSpeakerPayload},
+    models::{CreateSpeakerPayload, ImportModelAsSpeakerPayload, SpeakerInfo, UpdateSpeakerPayload},
     ServiceState,
 };
 
@@ -28,6 +28,20 @@ pub async fn list_speaker_infos(
         .service()
         .map_err(|err| err.to_string())?
         .list_speaker_infos()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn import_model_as_speaker(
+    payload: ImportModelAsSpeakerPayload,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<SpeakerInfo, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .import_model_as_speaker(payload)
         .await
         .map_err(|err| err.to_string())
 }

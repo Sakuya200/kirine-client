@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { QWEN3_TRAINING_DEFAULT_PARAMS } from '@/components/qwen3_tts/trainingParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
   supportsLora?: boolean;
@@ -19,22 +21,22 @@ const updateValue = (key: string, value: unknown) => {
 };
 
 const epochCount = computed({
-  get: () => Number(props.modelValue.epochCount ?? 30),
+  get: () => Number(props.modelValue.epochCount ?? QWEN3_TRAINING_DEFAULT_PARAMS.epochCount),
   set: value => updateValue('epochCount', value)
 });
 
 const batchSize = computed({
-  get: () => Number(props.modelValue.batchSize ?? 8),
+  get: () => Number(props.modelValue.batchSize ?? QWEN3_TRAINING_DEFAULT_PARAMS.batchSize),
   set: value => updateValue('batchSize', value)
 });
 
 const gradientAccumulationSteps = computed({
-  get: () => Number(props.modelValue.gradientAccumulationSteps ?? 4),
+  get: () => Number(props.modelValue.gradientAccumulationSteps ?? QWEN3_TRAINING_DEFAULT_PARAMS.gradientAccumulationSteps),
   set: value => updateValue('gradientAccumulationSteps', value)
 });
 
 const enableGradientCheckpointing = computed({
-  get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? false),
+  get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? QWEN3_TRAINING_DEFAULT_PARAMS.enableGradientCheckpointing),
   set: value => updateValue('enableGradientCheckpointing', value)
 });
 </script>

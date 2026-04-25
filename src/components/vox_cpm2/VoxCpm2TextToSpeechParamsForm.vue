@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { VOX_CPM2_TTS_DEFAULT_PARAMS } from '@/components/vox_cpm2/textToSpeechParams';
+
 interface Props {
   modelValue: Record<string, unknown>;
 }
@@ -18,12 +20,12 @@ const updateValue = (key: string, value: unknown) => {
 };
 
 const cfgValue = computed({
-  get: () => Number(props.modelValue.cfgValue ?? 2.0),
+  get: () => Number(props.modelValue.cfgValue ?? VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue),
   set: value => updateValue('cfgValue', value)
 });
 
 const inferenceTimesteps = computed({
-  get: () => Number(props.modelValue.inferenceTimesteps ?? 10),
+  get: () => Number(props.modelValue.inferenceTimesteps ?? VOX_CPM2_TTS_DEFAULT_PARAMS.inferenceTimesteps),
   set: value => updateValue('inferenceTimesteps', value)
 });
 </script>
