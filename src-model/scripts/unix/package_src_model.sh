@@ -27,7 +27,7 @@ output_file = Path(os.environ["OUTPUT_FILE"]).resolve()
 exclude_directory_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "venv", ".venv"}
 exclude_suffixes = {".pyc", ".pyo"}
 source_directories = ("scripts",)
-model_directories = ("qwen3_tts", "vox_cpm2")
+model_directories = ("qwen3_tts", "vox_cpm2", "moss_tts_local")
 model_script_suffixes = {".py", ".ps1", ".sh"}
 model_requirement_names = {"requirements.txt", "requirements-dev.txt"}
 

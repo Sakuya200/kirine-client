@@ -43,7 +43,7 @@ $excludeExtensions = @('.pyc', '.pyo')
 $modelScriptExtensions = @('.py', '.ps1', '.sh')
 $modelRequirementFileNames = @('requirements.txt', 'requirements-dev.txt')
 $sourceDirectories = @('scripts')
-$modelDirectories = @('qwen3_tts', 'vox_cpm2')
+$modelDirectories = @('qwen3_tts', 'vox_cpm2', 'moss_tts_local')
 
 if (Test-Path -LiteralPath $OutputFile) {
     Remove-Item -LiteralPath $OutputFile -Force
