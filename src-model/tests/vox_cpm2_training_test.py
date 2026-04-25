@@ -28,7 +28,7 @@ def load_runtime_module():
 
 
 class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
-    def test_resolve_train_script_path_uses_vendor_checkout_when_available(self):
+    def test_resolve_train_script_path_uses_localized_script_when_available(self):
         module = load_module()
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -37,18 +37,17 @@ class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
             fake_training_path.parent.mkdir(parents=True, exist_ok=True)
             fake_training_path.write_text("# stub", encoding="utf-8")
 
-            vendor_script = temp_root / "src-model" / "vendor" / "VoxCPM" / "scripts" / "train_voxcpm_finetune.py"
-            vendor_script.parent.mkdir(parents=True, exist_ok=True)
-            vendor_script.write_text("# train", encoding="utf-8")
+            local_script = temp_root / "src-model" / "vox_cpm2" / "train_voxcpm_finetune.py"
+            local_script.write_text("# train", encoding="utf-8")
 
             with patch.object(module, "__file__", str(fake_training_path)), patch.object(
                 module.importlib.util, "find_spec", return_value=None
             ):
                 resolved = module.resolve_train_script_path("")
 
-            self.assertEqual(resolved, vendor_script.resolve())
+            self.assertEqual(resolved, local_script.resolve())
 
-    def test_resolve_train_script_path_bootstraps_vendor_sources_when_missing(self):
+    def test_resolve_train_script_path_raises_when_no_local_or_installed_script_exists(self):
         module = load_module()
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -57,19 +56,39 @@ class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
             fake_training_path.parent.mkdir(parents=True, exist_ok=True)
             fake_training_path.write_text("# stub", encoding="utf-8")
 
-            vendor_script = temp_root / "src-model" / "vendor" / "VoxCPM" / "scripts" / "train_voxcpm_finetune.py"
-
-            def fake_bootstrap() -> Path:
-                vendor_script.parent.mkdir(parents=True, exist_ok=True)
-                vendor_script.write_text("# train", encoding="utf-8")
-                return vendor_script
-
             with patch.object(module, "__file__", str(fake_training_path)), patch.object(
                 module.importlib.util, "find_spec", return_value=None
-            ), patch.object(module, "ensure_voxcpm_training_sources", side_effect=fake_bootstrap):
+            ):
+                with self.assertRaises(FileNotFoundError) as context:
+                    module.resolve_train_script_path("")
+
+            self.assertIn("Expected bundled script", str(context.exception))
+
+    def test_resolve_train_script_path_uses_installed_package_script_as_fallback(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            fake_training_path = temp_root / "src-model" / "vox_cpm2" / "training.py"
+            fake_training_path.parent.mkdir(parents=True, exist_ok=True)
+            fake_training_path.write_text("# stub", encoding="utf-8")
+
+            site_packages_root = temp_root / "venv" / "Lib" / "site-packages"
+            package_root = site_packages_root / "voxcpm"
+            package_root.mkdir(parents=True, exist_ok=True)
+            package_init = package_root / "__init__.py"
+            package_init.write_text("# init", encoding="utf-8")
+            installed_script = site_packages_root / "scripts" / "train_voxcpm_finetune.py"
+            installed_script.parent.mkdir(parents=True, exist_ok=True)
+            installed_script.write_text("# installed train", encoding="utf-8")
+            fake_spec = SimpleNamespace(origin=str(package_init))
+
+            with patch.object(module, "__file__", str(fake_training_path)), patch.object(
+                module.importlib.util, "find_spec", return_value=fake_spec
+            ):
                 resolved = module.resolve_train_script_path("")
 
-            self.assertEqual(resolved, vendor_script.resolve())
+            self.assertEqual(resolved, installed_script.resolve())
 
     def test_estimate_training_schedule_accounts_for_gradient_accumulation(self):
         module = load_module()

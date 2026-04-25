@@ -9,10 +9,7 @@ use std::{
 use tracing::{error, info};
 
 use crate::{
-    config::{
-        resolve_base_log_dir, AttentionImplementation, HardwareType, LoraMode,
-        StorageMode,
-    },
+    config::{resolve_base_log_dir, AttentionImplementation, HardwareType, StorageMode},
     Result,
 };
 
@@ -48,10 +45,6 @@ pub struct RemoteConfig {
 pub struct TrainingConfig {
     pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
-    pub lora_mode: LoraMode,
-    pub lora_rank: u32,
-    pub lora_alpha: u32,
-    pub lora_dropout: String,
 }
 
 impl Default for TrainingConfig {
@@ -59,10 +52,6 @@ impl Default for TrainingConfig {
         Self {
             hardware_type: HardwareType::default(),
             attn_implementation: AttentionImplementation::default(),
-            lora_mode: LoraMode::default(),
-            lora_rank: 16,
-            lora_alpha: 32,
-            lora_dropout: "0.05".to_string(),
         }
     }
 }
@@ -87,20 +76,6 @@ impl TrainingConfig {
         attn_implementation: AttentionImplementation,
     ) -> Self {
         self.attn_implementation = attn_implementation;
-        self
-    }
-
-    pub fn with_lora_settings(
-        mut self,
-        lora_mode: LoraMode,
-        lora_rank: u32,
-        lora_alpha: u32,
-        lora_dropout: String,
-    ) -> Self {
-        self.lora_mode = lora_mode;
-        self.lora_rank = lora_rank;
-        self.lora_alpha = lora_alpha;
-        self.lora_dropout = lora_dropout;
         self
     }
 }
@@ -140,22 +115,6 @@ impl EnvConfig {
 
     pub fn hardware_type(&self) -> HardwareType {
         self.training.hardware_type
-    }
-
-    pub fn lora_mode(&self) -> LoraMode {
-        self.training.lora_mode
-    }
-
-    pub fn lora_rank(&self) -> u32 {
-        self.training.lora_rank
-    }
-
-    pub fn lora_alpha(&self) -> u32 {
-        self.training.lora_alpha
-    }
-
-    pub fn lora_dropout(&self) -> &str {
-        &self.training.lora_dropout
     }
 }
 

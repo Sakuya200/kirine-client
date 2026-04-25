@@ -15,6 +15,9 @@ use crate::{
         local::entity::model_info as model_info_entity,
         models::{ModelInfo, ModelMutationResult},
         pipeline::{
+            moss_tts_local::{
+                moss_tts_local_download_script_args, moss_tts_local_prepared_model_download_paths,
+            },
             qwen3_tts::{qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths},
             script_paths::{resolve_src_model_root, src_model_venv_python_path, ScriptPlatform},
             validate_and_download, validate_and_init, validate_downloaded_paths,
@@ -23,8 +26,7 @@ use crate::{
         },
         LocalService,
     },
-    utils::process::run_logged_command,
-    utils::time::now_string,
+    utils::{process::run_logged_command, time::now_string},
     Result,
 };
 
@@ -282,6 +284,9 @@ fn resolve_model_download_paths(
     match base_model.trim() {
         "qwen3_tts" => qwen3_tts_prepared_model_download_paths(src_model_root, model_scale),
         "vox_cpm2" => vox_cpm2_prepared_model_download_paths(src_model_root, model_scale),
+        "moss_tts_local" => {
+            moss_tts_local_prepared_model_download_paths(src_model_root, model_scale)
+        }
         other => bail!("不支持的基础模型类型: {}", other),
     }
 }
@@ -294,6 +299,7 @@ fn resolve_model_download_script_args(
     match base_model.trim() {
         "qwen3_tts" => qwen3_tts_download_script_args(src_model_root, model_scale),
         "vox_cpm2" => vox_cpm2_download_script_args(src_model_root, model_scale),
+        "moss_tts_local" => moss_tts_local_download_script_args(src_model_root, model_scale),
         other => bail!("不支持的基础模型类型: {}", other),
     }
 }

@@ -14,6 +14,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
+import MossTtsLocalTextToSpeechParamsForm from '@/components/moss_tts_local/MossTtsLocalTextToSpeechParamsForm.vue';
 import Qwen3TtsTextToSpeechParamsForm from '@/components/qwen3_tts/Qwen3TtsTextToSpeechParamsForm.vue';
 import VoxCpm2TextToSpeechParamsForm from '@/components/vox_cpm2/VoxCpm2TextToSpeechParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
@@ -79,6 +80,7 @@ interface TextToSpeechAudioAssetPayload {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const MOSS_TTS_LOCAL_BASE_MODEL = 'moss_tts_local';
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const createQwen3TtsModelParams = () => ({
@@ -90,8 +92,16 @@ const createVoxCpm2TtsModelParams = () => ({
   inferenceTimesteps: 10
 });
 
+const createMossTtsModelParams = () => ({
+  nVqForInference: 32
+});
+
 const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL ? { ...createVoxCpm2TtsModelParams(), ...modelParams } : { ...createQwen3TtsModelParams(), ...modelParams };
+  baseModel === VOX_CPM2_BASE_MODEL
+    ? { ...createVoxCpm2TtsModelParams(), ...modelParams }
+    : baseModel === MOSS_TTS_LOCAL_BASE_MODEL
+      ? { ...createMossTtsModelParams(), ...modelParams }
+      : { ...createQwen3TtsModelParams(), ...modelParams };
 
 const form = reactive({
   speakerId: null as number | null,
@@ -143,7 +153,14 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
 const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
-const activeTextToSpeechParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TextToSpeechParamsForm : Qwen3TtsTextToSpeechParamsForm));
+const isMossTtsLocalModel = computed(() => form.baseModel === MOSS_TTS_LOCAL_BASE_MODEL);
+const activeTextToSpeechParamsComponent = computed(() =>
+  isVoxCpm2Model.value
+    ? VoxCpm2TextToSpeechParamsForm
+    : isMossTtsLocalModel.value
+      ? MossTtsLocalTextToSpeechParamsForm
+      : Qwen3TtsTextToSpeechParamsForm
+);
 const canGenerate = computed(
   () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
 );
@@ -154,9 +171,11 @@ const generationTips = computed(() => [
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`,
   isVoxCpm2Model.value
     ? `当前 CFG=${Number(form.modelParams.cfgValue ?? 2.0)}，推理步数=${Number(form.modelParams.inferenceTimesteps ?? 10)}。`
-    : trimmedVoicePrompt.value
-      ? `声音 Prompt：${trimmedVoicePrompt.value}`
-      : '未填写声音 Prompt，将使用默认声音风格。'
+    : isMossTtsLocalModel.value
+      ? `当前并行码本数 nVQ=${Number(form.modelParams.nVqForInference ?? 32)}。`
+      : trimmedVoicePrompt.value
+        ? `声音 Prompt：${trimmedVoicePrompt.value}`
+        : '未填写声音 Prompt，将使用默认声音风格。'
 ]);
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -631,6 +650,9 @@ onMounted(async () => {
               <p v-if="activeResult.modelParams.voicePrompt" class="mt-1">声音 Prompt：{{ activeResult.modelParams.voicePrompt }}</p>
               <p v-if="activeResult.baseModel === VOX_CPM2_BASE_MODEL" class="mt-1">
                 CFG {{ activeResult.modelParams.cfgValue ?? 2.0 }} · 步数 {{ activeResult.modelParams.inferenceTimesteps ?? 10 }}
+              </p>
+              <p v-else-if="activeResult.baseModel === MOSS_TTS_LOCAL_BASE_MODEL" class="mt-1">
+                并行码本数 nVQ：{{ activeResult.modelParams.nVqForInference ?? 32 }}
               </p>
               <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>

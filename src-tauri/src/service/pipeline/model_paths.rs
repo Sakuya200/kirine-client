@@ -2,6 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::llm_models::LlmModelDefinition;
+use super::moss_tts_local::{MOSS_TTS_LOCAL_BASE_MODEL, MOSS_TTS_LOCAL_MODEL_PATHS};
 use super::qwen3_tts::{QWEN3_TTS_BASE_MODEL, QWEN3_TTS_MODEL_PATHS};
 use super::vox_cpm2::{VOX_CPM2_BASE_MODEL, VOX_CPM2_MODEL_PATHS};
 use crate::Result;
@@ -30,6 +31,7 @@ pub(crate) fn speaker_model_dir(
 
 pub(crate) fn llm_model_paths(base_model: &str) -> Result<&'static dyn LlmModelPaths> {
     match base_model.trim() {
+        MOSS_TTS_LOCAL_BASE_MODEL => Ok(&MOSS_TTS_LOCAL_MODEL_PATHS),
         QWEN3_TTS_BASE_MODEL => Ok(&QWEN3_TTS_MODEL_PATHS),
         VOX_CPM2_BASE_MODEL => Ok(&VOX_CPM2_MODEL_PATHS),
         other => Err(io::Error::new(

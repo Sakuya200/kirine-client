@@ -33,10 +33,14 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, Qwen3TtsTrainingModelParams, SpeakerSource, SpeakerStatus,
-            TaskStatus, VoxCpm2TrainingModelParams,
+            ModelTrainingTaskResult, MossTtsLocalTrainingModelParams,
+            Qwen3TtsTrainingModelParams, SpeakerSource, SpeakerStatus, TaskStatus,
+            VoxCpm2TrainingModelParams,
         },
-        pipeline::model_paths::{llm_model_display_name, speaker_model_dir},
+        pipeline::{
+            model_paths::{llm_model_display_name, speaker_model_dir},
+            moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
+        },
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -144,6 +148,10 @@ impl LocalService {
                 serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?
                     .normalized(),
             )?
+        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
+            serde_json::to_value(serde_json::from_value::<MossTtsLocalTrainingModelParams>(
+                payload.model_params.clone(),
+            )?)?
         } else {
             serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(
                 payload.model_params.clone(),

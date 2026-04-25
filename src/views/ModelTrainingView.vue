@@ -22,6 +22,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
+import MossTtsLocalTrainingParamsForm from '@/components/moss_tts_local/MossTtsLocalTrainingParamsForm.vue';
 import Qwen3TtsTrainingParamsForm from '@/components/qwen3_tts/Qwen3TtsTrainingParamsForm.vue';
 import VoxCpm2TrainingParamsForm from '@/components/vox_cpm2/VoxCpm2TrainingParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
@@ -72,6 +73,7 @@ interface ModelTrainingTaskResultPayload {
 }
 
 const VOX_CPM2_BASE_MODEL = 'vox_cpm2';
+const MOSS_TTS_LOCAL_BASE_MODEL = 'moss_tts_local';
 const LORA_FEATURE = 'lora';
 
 const createQwen3TrainingParams = () => ({
@@ -93,6 +95,23 @@ const createVoxCpm2TrainingParams = () => ({
   enableGradientCheckpointing: false
 });
 
+const createMossTrainingParams = () => ({
+  epochCount: 3,
+  batchSize: 1,
+  gradientAccumulationSteps: 8,
+  enableGradientCheckpointing: true,
+  learningRate: 1e-5,
+  weightDecay: 0.1,
+  warmupRatio: 0.03,
+  warmupSteps: 0,
+  maxGradNorm: 1.0,
+  mixedPrecision: 'bf16',
+  channelwiseLossWeight: '1,32',
+  skipReferenceAudioCodes: true,
+  prepBatchSize: 16,
+  prepNVq: null
+});
+
 const normalizeVoxCpm2TrainingParams = (modelParams: Record<string, unknown>) => {
   const defaults = createVoxCpm2TrainingParams();
   const legacyTrainingMode = String(modelParams.trainingMode ?? '').trim();
@@ -110,7 +129,11 @@ const normalizeVoxCpm2TrainingParams = (modelParams: Record<string, unknown>) =>
 };
 
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  baseModel === VOX_CPM2_BASE_MODEL ? normalizeVoxCpm2TrainingParams(modelParams) : { ...createQwen3TrainingParams(), ...modelParams };
+  baseModel === VOX_CPM2_BASE_MODEL
+    ? normalizeVoxCpm2TrainingParams(modelParams)
+    : baseModel === MOSS_TTS_LOCAL_BASE_MODEL
+      ? { ...createMossTrainingParams(), ...modelParams }
+      : { ...createQwen3TrainingParams(), ...modelParams };
 
 const form = reactive({
   language: AppLanguage.Chinese,
@@ -154,8 +177,11 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const isVoxCpm2Model = computed(() => form.baseModel === VOX_CPM2_BASE_MODEL);
+const isMossTtsLocalModel = computed(() => form.baseModel === MOSS_TTS_LOCAL_BASE_MODEL);
 const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
-const activeTrainingParamsComponent = computed(() => (isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : Qwen3TtsTrainingParamsForm));
+const activeTrainingParamsComponent = computed(() =>
+  isVoxCpm2Model.value ? VoxCpm2TrainingParamsForm : isMossTtsLocalModel.value ? MossTtsLocalTrainingParamsForm : Qwen3TtsTrainingParamsForm
+);
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -188,7 +214,9 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
 );
 
 const baseModelSummary = computed(() => {
-  return '微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
+  return isMossTtsLocalModel.value
+    ? 'MOSS-TTS Local 使用单卡训练封装，不启用 FSDP 或 DeepSpeed；若切换硬件，请先前往设置页保存。'
+    : '微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。';
 });
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
@@ -831,6 +859,14 @@ onBeforeUnmount(() => {
             <p v-if="isVoxCpm2Model && form.modelParams.useLora" class="mt-1">
               LoRA 参数 rank {{ form.modelParams.loraRank ?? 32 }}，alpha {{ form.modelParams.loraAlpha ?? 32 }}，dropout
               {{ form.modelParams.loraDropout ?? 0 }}。
+            </p>
+            <p v-if="isMossTtsLocalModel" class="mt-1">
+              学习率 {{ form.modelParams.learningRate ?? 0.00001 }}，权重衰减 {{ form.modelParams.weightDecay ?? 0.1 }}，混合精度
+              {{ form.modelParams.mixedPrecision ?? 'bf16' }}。
+            </p>
+            <p v-if="isMossTtsLocalModel" class="mt-1">
+              预处理批次 {{ form.modelParams.prepBatchSize ?? 16 }}，预处理 nVQ {{ form.modelParams.prepNVq ?? '默认' }}，参考音频编码
+              {{ form.modelParams.skipReferenceAudioCodes ? '跳过' : '保留' }}。
             </p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">
