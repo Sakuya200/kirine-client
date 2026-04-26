@@ -241,5 +241,9 @@ def train(argv: list[str] | None = None) -> None:
     run_training(args)
 
 
+def train_from_params(params) -> None:
+    run_training(params.to_namespace())
+
+
 if __name__ == "__main__":
     train()

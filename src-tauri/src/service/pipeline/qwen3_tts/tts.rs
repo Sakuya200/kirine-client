@@ -12,7 +12,9 @@ use tracing::{error, info};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
-        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+        task_paths::{
+            ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir, tts_params_json_path,
+        },
     },
     config::{load_configs, BaseModel, HardwareType},
     service::{
@@ -25,7 +27,11 @@ use crate::{
             UpdateTaskStatusPayload,
         },
         pipeline::{
-            model_paths::llm_model_display_name,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                TtsScriptArgs,
+            },
             qwen3_tts::{
                 qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
                 Qwen3TTSModelTaskPipeline,
@@ -69,14 +75,6 @@ impl TtsRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -89,6 +87,7 @@ struct TtsPaths {
     download_models_script_path: PathBuf,
     tts_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -136,7 +135,12 @@ impl Qwen3TTSModelTaskPipeline {
             let params = self
                 .load_tts_task_execution(service, request.task_id, request.speaker_id)
                 .await?;
-            let paths = self.resolve_tts_paths(service, &params.base_model, &params.model_scale)?;
+            let paths = self.resolve_tts_paths(
+                service,
+                request.task_id,
+                &params.base_model,
+                &params.model_scale,
+            )?;
             let log_dir = resolve_local_log_dir()?;
             let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
             self.prepare_tts_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -254,6 +258,7 @@ impl Qwen3TTSModelTaskPipeline {
     fn resolve_tts_paths(
         &self,
         service: &LocalService,
+        task_id: i64,
         base_model: &str,
         model_scale: &str,
     ) -> Result<TtsPaths> {
@@ -268,6 +273,12 @@ impl Qwen3TTSModelTaskPipeline {
             src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            HistoryTaskType::TextToSpeech,
+            task_id,
+        );
+        let params_json_path = tts_params_json_path(&sample_root);
 
         Ok(TtsPaths {
             base_model: base_model.to_string(),
@@ -278,6 +289,7 @@ impl Qwen3TTSModelTaskPipeline {
             download_models_script_path,
             tts_python_script_path,
             ffmpeg_python_script_path,
+            params_json_path,
         })
     }
 
@@ -406,40 +418,41 @@ impl Qwen3TTSModelTaskPipeline {
             .attn_implementation();
 
         info!(
-            tts_script = %paths.tts_python_script_path.display(),
-            model_path = %params.model_path,
-            speaker_name = %params.speaker_name,
-            output_path = %temp_wav_path.display(),
-            device = runtime.device(),
-            mode = %runtime.mode_label(&params.base_model)?,
-            "starting local tts inference through direct python invocation"
+            script = %paths.tts_python_script_path.display(),
+            params_file = %paths.params_json_path.display(),
+            "starting local tts inference through params-file python invocation"
         );
 
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
-        let mut script_args = vec![
-            "--init-model-path".to_string(),
-            params.model_path.clone(),
-            "--speaker".to_string(),
-            params.speaker_name.clone(),
-            "--text".to_string(),
-            params.text.clone(),
-            "--language".to_string(),
-            params.language.clone(),
-            "--output-path".to_string(),
-            temp_wav_path.to_string_lossy().to_string(),
-            "--logging-dir".to_string(),
-            metrics_log_dir.to_string_lossy().to_string(),
-            "--device".to_string(),
-            runtime.device().to_string(),
-            "--attn-implementation".to_string(),
-            attn_implementation.as_str().to_string(),
-        ];
-        if !params.voice_prompt.trim().is_empty() {
-            script_args.push("--instruct".to_string());
-            script_args.push(params.voice_prompt.clone());
-        }
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::TextToSpeech,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: Some(attn_implementation.as_str().to_string()),
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "tts.py".to_string(),
+                uses_shared_helpers: Vec::new(),
+            },
+            args: PythonScriptTaskArgs::TextToSpeech(TtsScriptArgs {
+                init_model_path: params.model_path.clone(),
+                text: params.text.clone(),
+                language: params.language.clone(),
+                speaker: params.speaker_name.clone(),
+                instruct: params.voice_prompt.clone(),
+                output_path: temp_wav_path.to_string_lossy().to_string(),
+                cfg_value: None,
+                inference_timesteps: None,
+                n_vq_for_inference: None,
+            }),
+        };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -448,7 +461,10 @@ impl Qwen3TTSModelTaskPipeline {
             TtsCommandLabel::RunInference.as_str(),
             &task_log_path,
             "python command completed successfully",
-            script_args,
+            vec![
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
+            ],
         )
         .await?;
 

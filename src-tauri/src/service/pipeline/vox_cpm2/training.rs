@@ -15,7 +15,7 @@ use crate::{
         local_paths::resolve_local_log_dir,
         task_paths::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
-            training_index_jsonl_path,
+            training_index_jsonl_path, training_params_json_path,
         },
     },
     config::{load_configs, BaseModel, HardwareType},
@@ -26,14 +26,18 @@ use crate::{
         },
         models::{SpeakerStatus, TaskStatus, UpdateTaskStatusPayload, VoxCpm2TrainingModelParams},
         pipeline::{
-            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
-            model_paths::{llm_model_display_name, speaker_model_dir},
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                TrainingScriptArgs,
+            },
+            model_paths::speaker_model_dir,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
-            TrainingPipelineRequest,
+            TrainingPipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
@@ -66,6 +70,9 @@ struct TrainingParams {
     epoch_count: i64,
     gradient_accumulation_steps: i64,
     enable_gradient_checkpointing: bool,
+    learning_rate: Option<String>,
+    weight_decay: Option<String>,
+    warmup_steps: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,14 +96,6 @@ impl TrainingRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -113,6 +112,7 @@ struct TrainingPaths {
     sample_root: PathBuf,
     input_jsonl: PathBuf,
     output_model_dir: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,6 +271,9 @@ impl VoxCpm2ModelTaskPipeline {
             epoch_count: params.epoch_count,
             gradient_accumulation_steps: params.gradient_accumulation_steps,
             enable_gradient_checkpointing: params.enable_gradient_checkpointing,
+            learning_rate: params.learning_rate(),
+            weight_decay: params.weight_decay(),
+            warmup_steps: params.warmup_steps(),
         })
     }
 
@@ -301,6 +304,7 @@ impl VoxCpm2ModelTaskPipeline {
             task_id,
         );
         let input_jsonl = training_index_jsonl_path(&sample_root);
+        let params_json_path = training_params_json_path(&sample_root);
         let output_model_dir = Self::training_output_model_dir(
             Path::new(service.model_dir()),
             speaker_id,
@@ -340,6 +344,7 @@ impl VoxCpm2ModelTaskPipeline {
             sample_root,
             input_jsonl,
             output_model_dir,
+            params_json_path,
         })
     }
 
@@ -530,19 +535,9 @@ impl VoxCpm2ModelTaskPipeline {
         mut cancel_rx: watch::Receiver<bool>,
     ) -> Result<LoggedCommandResult> {
         info!(
-            train_jsonl = %paths.input_jsonl.display(),
-            output_model_dir = %paths.output_model_dir.display(),
-            batch_size = params.batch_size,
-            epoch_count = params.epoch_count,
             script = %paths.train_python_script_path.display(),
-            training_mode = %params.training_mode,
-            use_lora = params.use_lora,
-            lora_rank = params.lora_rank,
-            lora_alpha = params.lora_alpha,
-            lora_dropout = params.lora_dropout,
-            runtime_mode = %runtime.mode_label(&paths.base_model)?,
-            device = runtime.training_device(),
-            "starting voxcpm2 training.py through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting voxcpm2 training.py through params-file python invocation"
         );
 
         if !paths.venv_python_path.exists() {
@@ -564,11 +559,56 @@ impl VoxCpm2ModelTaskPipeline {
             task_id,
         );
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
-        let gradient_flag = if params.enable_gradient_checkpointing {
-            "--enable-gradient-checkpointing"
-        } else {
-            "--no-enable-gradient-checkpointing"
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::Training,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.training_device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: None,
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "training.py".to_string(),
+                uses_shared_helpers: Vec::new(),
+            },
+            args: PythonScriptTaskArgs::Training(TrainingScriptArgs {
+                init_model_path: paths.init_model_path.to_string_lossy().to_string(),
+                codec_path: None,
+                tokenizer_model_path: None,
+                input_jsonl: paths.input_jsonl.to_string_lossy().to_string(),
+                output_jsonl: None,
+                output_model_path: paths.output_model_dir.to_string_lossy().to_string(),
+                batch_size: params.batch_size,
+                lr: params.learning_rate.clone(),
+                num_epochs: params.epoch_count,
+                speaker_name: None,
+                gradient_accumulation_steps: params.gradient_accumulation_steps,
+                enable_gradient_checkpointing: params.enable_gradient_checkpointing,
+                use_lora: params.use_lora,
+                training_mode: Some(params.training_mode.clone()),
+                lora_rank: Some(params.lora_rank),
+                lora_alpha: Some(params.lora_alpha),
+                lora_dropout: Some(params.lora_dropout.clone()),
+                weight_decay: params.weight_decay.clone(),
+                warmup_steps: params.warmup_steps,
+                warmup_ratio: None,
+                max_grad_norm: None,
+                mixed_precision: None,
+                channelwise_loss_weight: None,
+                skip_reference_audio_codes: None,
+                prep_batch_size: None,
+                prep_n_vq: None,
+                lr_scheduler_type: None,
+            }),
         };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
+
+        let script_args = vec![
+            "--params-file".to_string(),
+            paths.params_json_path.to_string_lossy().to_string(),
+        ];
 
         run_logged_python_script_cancellable(
             &paths.venv_python_path,
@@ -577,33 +617,7 @@ impl VoxCpm2ModelTaskPipeline {
             TrainingCommandLabel::RunTraining.as_str(),
             &task_log_path,
             "python command completed successfully",
-            vec![
-                "--train-jsonl".to_string(),
-                paths.input_jsonl.to_string_lossy().to_string(),
-                "--output-model-path".to_string(),
-                paths.output_model_dir.to_string_lossy().to_string(),
-                "--init-model-path".to_string(),
-                paths.init_model_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--batch-size".to_string(),
-                params.batch_size.to_string(),
-                "--num-epochs".to_string(),
-                params.epoch_count.to_string(),
-                "--device".to_string(),
-                runtime.training_device().to_string(),
-                "--gradient-accumulation-steps".to_string(),
-                params.gradient_accumulation_steps.to_string(),
-                "--training-mode".to_string(),
-                params.training_mode.clone(),
-                "--lora-rank".to_string(),
-                params.lora_rank.to_string(),
-                "--lora-alpha".to_string(),
-                params.lora_alpha.to_string(),
-                "--lora-dropout".to_string(),
-                params.lora_dropout.clone(),
-                gradient_flag.to_string(),
-            ],
+            script_args,
             &mut cancel_rx,
         )
         .await

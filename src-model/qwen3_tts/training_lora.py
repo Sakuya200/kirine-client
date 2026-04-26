@@ -12,3 +12,8 @@ def lora_unavailable_message() -> str:
 def train(argv: list[str] | None = None) -> None:
     del argv
     raise RuntimeError(lora_unavailable_message())
+
+
+def train_from_params(params) -> None:
+    del params
+    raise RuntimeError(lora_unavailable_message())

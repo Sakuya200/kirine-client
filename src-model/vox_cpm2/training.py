@@ -21,6 +21,7 @@ def ensure_src_root_on_path() -> None:
 
 ensure_src_root_on_path()
 
+from vox_cpm2.params import load_training_params
 from vox_cpm2 import RUNTIME_METADATA_FILE_NAME
 
 SRC_MODEL_ROOT = Path(__file__).resolve().parents[1]
@@ -38,25 +39,7 @@ LORA_DEFAULTS = {
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train-jsonl", dest="train_jsonl", type=str, required=True)
-    parser.add_argument("--output-model-path", dest="output_model_path", type=str, required=True)
-    parser.add_argument("--init-model-path", dest="init_model_path", type=str, required=True)
-    parser.add_argument("--logging-dir", dest="logging_dir", type=str, default="")
-    parser.add_argument("--batch-size", dest="batch_size", type=int, default=8)
-    parser.add_argument("--num-epochs", dest="num_epochs", type=int, default=1)
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--gradient-accumulation-steps", dest="gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--training-mode", dest="training_mode", choices=["full", "lora"], default="lora")
-    parser.add_argument("--lora-rank", dest="lora_rank", type=int, default=LORA_DEFAULTS["r"])
-    parser.add_argument("--lora-alpha", dest="lora_alpha", type=int, default=LORA_DEFAULTS["alpha"])
-    parser.add_argument("--lora-dropout", dest="lora_dropout", type=str, default=LORA_DEFAULTS["dropout"])
-    parser.add_argument(
-        "--enable-gradient-checkpointing",
-        dest="enable_gradient_checkpointing",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-    )
-    parser.add_argument("--train-script-path", dest="train_script_path", type=str, default="")
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
     return parser.parse_args(argv)
 
 
@@ -143,6 +126,24 @@ def resolve_warmup_steps(max_steps: int) -> int:
     return min(100, max(1, math.ceil(max_steps * 0.1)), max_steps - 1)
 
 
+def resolve_learning_rate(args: argparse.Namespace) -> float:
+    if args.learning_rate is not None:
+        return float(args.learning_rate)
+    return 1e-4 if args.training_mode == "lora" else 1e-5
+
+
+def resolve_weight_decay(args: argparse.Namespace) -> float:
+    if args.weight_decay is not None:
+        return float(args.weight_decay)
+    return 0.01
+
+
+def resolve_effective_warmup_steps(args: argparse.Namespace, max_steps: int) -> int:
+    if args.warmup_steps is not None:
+        return max(0, int(args.warmup_steps))
+    return resolve_warmup_steps(max_steps)
+
+
 def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_model_path: Path) -> dict[str, object]:
     checkpoint_dir = output_model_path / "checkpoints" / args.training_mode
     tensorboard_dir = output_model_path / "logs" / args.training_mode
@@ -170,9 +171,9 @@ def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_mo
         "log_interval": max(1, min(10, steps_per_epoch)),
         "valid_interval": max_steps,
         "save_interval": max(100, max_steps),
-        "learning_rate": 1e-4 if args.training_mode == "lora" else 1e-5,
-        "weight_decay": 0.01,
-        "warmup_steps": resolve_warmup_steps(max_steps),
+        "learning_rate": resolve_learning_rate(args),
+        "weight_decay": resolve_weight_decay(args),
+        "warmup_steps": resolve_effective_warmup_steps(args, max_steps),
         "max_steps": max_steps,
         "max_batch_tokens": 8192,
         "save_path": str(checkpoint_dir),
@@ -225,8 +226,7 @@ def write_runtime_metadata(output_model_path: Path, init_model_path: Path, train
         json.dump(metadata, file, ensure_ascii=False, indent=2)
 
 
-def train(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
+def run_training(args: argparse.Namespace) -> None:
     train_jsonl = Path(args.train_jsonl).expanduser().resolve()
     if not train_jsonl.exists():
         raise FileNotFoundError(f"Training manifest not found: {train_jsonl}")
@@ -249,6 +249,12 @@ def train(argv: list[str] | None = None) -> None:
     checkpoint_root = output_model_path / "checkpoints" / args.training_mode
     latest_checkpoint = resolve_latest_checkpoint(checkpoint_root)
     write_runtime_metadata(output_model_path, init_model_path, args.training_mode, latest_checkpoint)
+
+
+def train(argv: list[str] | None = None) -> None:
+    cli_args = parse_args(argv)
+    params = load_training_params(cli_args.params_file)
+    run_training(params.to_namespace())
 
 
 if __name__ == "__main__":

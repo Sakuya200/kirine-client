@@ -14,9 +14,16 @@ const TRAINING_AUDIOS_DIR_NAME: &str = "audios";
 const TRAINING_TEMP_DIR_NAME: &str = "_tmp";
 const TRAINING_INDEX_JSONL_NAME: &str = "index.jsonl";
 const TRAINING_OUTPUT_JSONL_NAME: &str = "train.jsonl";
+const TRAINING_PARAMS_JSON_NAME: &str = "training.params.json";
+const TTS_PARAMS_JSON_NAME: &str = "tts.params.json";
+const VOICE_CLONE_PARAMS_JSON_NAME: &str = "voice_clone.params.json";
 const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_radio";
 
-pub(crate) fn task_sample_dir(data_dir: &Path, task_type: HistoryTaskType, task_id: i64) -> PathBuf {
+pub(crate) fn task_sample_dir(
+    data_dir: &Path,
+    task_type: HistoryTaskType,
+    task_id: i64,
+) -> PathBuf {
     data_dir
         .join("samples")
         .join(format!("{}_{}", task_type.storage_dir(), task_id))
@@ -44,7 +51,9 @@ pub(crate) fn training_audios_dir(sample_root: &Path) -> PathBuf {
 }
 
 pub(crate) fn training_temp_extract_dir(sample_root: &Path, sample_id: i64) -> PathBuf {
-    sample_root.join(TRAINING_TEMP_DIR_NAME).join(sample_id.to_string())
+    sample_root
+        .join(TRAINING_TEMP_DIR_NAME)
+        .join(sample_id.to_string())
 }
 
 pub(crate) fn training_index_jsonl_path(sample_root: &Path) -> PathBuf {
@@ -55,8 +64,23 @@ pub(crate) fn training_output_jsonl_path(sample_root: &Path) -> PathBuf {
     sample_root.join(TRAINING_OUTPUT_JSONL_NAME)
 }
 
+pub(crate) fn training_params_json_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(TRAINING_PARAMS_JSON_NAME)
+}
+
+pub(crate) fn tts_params_json_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(TTS_PARAMS_JSON_NAME)
+}
+
+pub(crate) fn voice_clone_params_json_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(VOICE_CLONE_PARAMS_JSON_NAME)
+}
+
 pub(crate) fn training_reference_audio_path(sample_root: &Path, extension: &str) -> PathBuf {
-    sample_root.join(format!("{}{}", TRAINING_REFERENCE_AUDIO_BASENAME, extension))
+    sample_root.join(format!(
+        "{}{}",
+        TRAINING_REFERENCE_AUDIO_BASENAME, extension
+    ))
 }
 
 pub(crate) fn task_log_file_path(

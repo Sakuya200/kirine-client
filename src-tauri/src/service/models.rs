@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::BaseModel;
@@ -412,6 +412,14 @@ pub struct Qwen3TtsTrainingModelParams {
     pub batch_size: i64,
     pub gradient_accumulation_steps: i64,
     pub enable_gradient_checkpointing: bool,
+    #[serde(default)]
+    pub learning_rate: Option<String>,
+}
+
+impl Qwen3TtsTrainingModelParams {
+    pub fn learning_rate_value(&self) -> Option<String> {
+        normalized_optional_string(self.learning_rate.as_deref())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -422,15 +430,15 @@ pub struct MossTtsLocalTrainingModelParams {
     pub gradient_accumulation_steps: i64,
     pub enable_gradient_checkpointing: bool,
     #[serde(default)]
-    pub learning_rate: Option<f64>,
+    pub learning_rate: Option<String>,
     #[serde(default)]
-    pub weight_decay: Option<f64>,
+    pub weight_decay: Option<String>,
     #[serde(default)]
-    pub warmup_ratio: Option<f64>,
+    pub warmup_ratio: Option<String>,
     #[serde(default)]
     pub warmup_steps: Option<i64>,
     #[serde(default)]
-    pub max_grad_norm: Option<f64>,
+    pub max_grad_norm: Option<String>,
     #[serde(default)]
     pub mixed_precision: Option<String>,
     #[serde(default)]
@@ -515,28 +523,18 @@ const VOX_CPM2_DEFAULT_LORA_RANK: i64 = 32;
 const VOX_CPM2_DEFAULT_LORA_ALPHA: i64 = 32;
 const VOX_CPM2_DEFAULT_LORA_DROPOUT: &str = "0.0";
 
-fn deserialize_optional_stringified_value<'de, D>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Option::<Value>::deserialize(deserializer)?;
-    match value {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.trim().to_string())),
-        Some(Value::Number(value)) => Ok(Some(value.to_string())),
-        Some(other) => Err(D::Error::custom(format!(
-            "LoRA dropout 仅支持字符串或数字，当前为: {}",
-            other
-        ))),
-    }
+fn normalized_optional_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct VoxCpm2TextToSpeechModelParams {
-    pub cfg_value: f64,
+    #[serde(default)]
+    pub cfg_value: Option<String>,
     pub inference_timesteps: i64,
 }
 
@@ -545,7 +543,8 @@ pub struct VoxCpm2TextToSpeechModelParams {
 pub struct VoxCpm2VoiceCloneModelParams {
     pub mode: VoxCpm2VoiceCloneMode,
     pub style_prompt: String,
-    pub cfg_value: f64,
+    #[serde(default)]
+    pub cfg_value: Option<String>,
     pub inference_timesteps: i64,
 }
 
@@ -566,8 +565,14 @@ pub struct VoxCpm2TrainingModelParams {
     pub lora_rank: Option<i64>,
     #[serde(default)]
     pub lora_alpha: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_stringified_value")]
+    #[serde(default)]
     pub lora_dropout: Option<String>,
+    #[serde(default)]
+    pub learning_rate: Option<String>,
+    #[serde(default)]
+    pub weight_decay: Option<String>,
+    #[serde(default)]
+    pub warmup_steps: Option<i64>,
     pub epoch_count: i64,
     pub batch_size: i64,
     pub gradient_accumulation_steps: i64,
@@ -621,6 +626,18 @@ impl VoxCpm2TrainingModelParams {
             .filter(|value| !value.is_empty())
             .unwrap_or(VOX_CPM2_DEFAULT_LORA_DROPOUT)
             .to_string()
+    }
+
+    pub fn learning_rate(&self) -> Option<String> {
+        normalized_optional_string(self.learning_rate.as_deref())
+    }
+
+    pub fn weight_decay(&self) -> Option<String> {
+        normalized_optional_string(self.weight_decay.as_deref())
+    }
+
+    pub fn warmup_steps(&self) -> Option<i64> {
+        self.warmup_steps.map(|value| value.max(0))
     }
 }
 

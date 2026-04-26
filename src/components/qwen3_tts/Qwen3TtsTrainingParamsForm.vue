@@ -35,6 +35,11 @@ const gradientAccumulationSteps = computed({
   set: value => updateValue('gradientAccumulationSteps', value)
 });
 
+const learningRate = computed({
+  get: () => String(props.modelValue.learningRate ?? QWEN3_TRAINING_DEFAULT_PARAMS.learningRate),
+  set: value => updateValue('learningRate', value)
+});
+
 const enableGradientCheckpointing = computed({
   get: () => Boolean(props.modelValue.enableGradientCheckpointing ?? QWEN3_TRAINING_DEFAULT_PARAMS.enableGradientCheckpointing),
   set: value => updateValue('enableGradientCheckpointing', value)
@@ -64,6 +69,19 @@ const enableGradientCheckpointing = computed({
           class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
         />
       </label>
+      <label class="block">
+        <span class="mb-1 block text-xs text-stone-500">学习率</span>
+        <input
+          v-model="learningRate"
+          type="number"
+          min="0"
+          step="0.000001"
+          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+        />
+      </label>
+    </div>
+
+    <div class="grid gap-3 md:grid-cols-2">
       <label class="block">
         <span class="mb-1 block text-xs text-stone-500">梯度检查点</span>
         <span class="flex h-10 w-full items-center justify-between rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">

@@ -14,19 +14,13 @@ def ensure_src_root_on_path() -> Path:
 
 ensure_src_root_on_path()
 
-from moss_tts_local.common import (
-    add_shared_generation_args,
-    load_backend,
-    save_generated_audio,
-)
+from moss_tts_local.common import load_backend, save_generated_audio
+from moss_tts_local.params import load_voice_clone_params
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MOSS-TTS Local voice cloning inference.")
-    add_shared_generation_args(parser)
-    parser.add_argument("--text", type=str, required=True)
-    parser.add_argument("--ref_audio_path", "--ref-audio-path", dest="ref_audio_path", type=str, required=True)
-    parser.add_argument("--ref_text", "--ref-text", dest="ref_text", type=str, default="")
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
     return parser.parse_args(argv)
 
 
@@ -66,8 +60,8 @@ def generate_audio(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    generate_audio(args)
+    cli_args = parse_args(argv)
+    generate_audio(load_voice_clone_params(cli_args.params_file).to_namespace())
 
 
 if __name__ == "__main__":

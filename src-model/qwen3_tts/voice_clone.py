@@ -14,6 +14,8 @@ def ensure_src_root_on_path() -> None:
 
 ensure_src_root_on_path()
 
+from qwen3_tts.params import load_voice_clone_params
+
 
 @dataclass
 class VoiceCloneRuntimeOptions:
@@ -23,21 +25,7 @@ class VoiceCloneRuntimeOptions:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ref_audio_path", "--ref-audio-path", dest="ref_audio_path", type=str, required=True, help="Reference audio local path for voice cloning.")
-    parser.add_argument("--ref_text", "--ref-text", dest="ref_text", type=str, required=True, help="Reference text corresponding to the reference audio.")
-    parser.add_argument("--init_model_path", "--init-model-path", dest="init_model_path", type=str, default="Qwen/Qwen3-TTS-12Hz-1.7B-Base")
-    parser.add_argument("--language", type=str, default="Auto")
-    parser.add_argument("--output_path", "--output-path", dest="output_path", type=str, required=True)
-    parser.add_argument("--logging_dir", "--logging-dir", dest="logging_dir", type=str, default="")
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--text", type=str, required=True, help="Input text to be synthesized.")
-    parser.add_argument(
-        "--attn_implementation",
-        "--attn-implementation",
-        dest="attn_implementation",
-        type=str,
-        default="flash_attention_2",
-    )
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
     return parser.parse_args(argv)
 
 
@@ -110,8 +98,9 @@ def generate_voice_clone_audio(
 
 
 def main(argv: list[str] | None = None):
-    args = parse_args(argv)
-    generate_voice_clone_audio(args)
+    cli_args = parse_args(argv)
+    params = load_voice_clone_params(cli_args.params_file)
+    generate_voice_clone_audio(params.to_namespace())
 
 
 if __name__ == "__main__":

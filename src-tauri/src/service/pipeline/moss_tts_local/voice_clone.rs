@@ -11,7 +11,10 @@ use tracing::{error, info};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
-        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+        task_paths::{
+            ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
+            voice_clone_params_json_path,
+        },
     },
     config::{load_configs, BaseModel, HardwareType},
     service::{
@@ -22,11 +25,15 @@ use crate::{
             LocalService,
         },
         models::{
-            HistoryTaskType, MossTtsLocalVoiceCloneModelParams, TaskStatus,
-            TextToSpeechFormat, UpdateTaskStatusPayload,
+            HistoryTaskType, MossTtsLocalVoiceCloneModelParams, TaskStatus, TextToSpeechFormat,
+            UpdateTaskStatusPayload,
         },
         pipeline::{
-            model_paths::llm_model_display_name,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                VoiceCloneScriptArgs,
+            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -37,8 +44,7 @@ use crate::{
     },
     utils::{
         audio::{
-            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path,
-            resolve_temp_wav_path,
+            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
         },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
         process::{run_logged_command, run_logged_python_script},
@@ -73,14 +79,6 @@ impl VoiceCloneRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -94,6 +92,7 @@ struct VoiceClonePaths {
     voice_clone_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
     base_model_path: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -102,7 +101,6 @@ struct VoiceCloneTaskExecution {
     model_scale: String,
     language: String,
     format: TextToSpeechFormat,
-    ref_audio_name: String,
     ref_audio_path: String,
     ref_text: String,
     text: String,
@@ -140,14 +138,19 @@ impl MossTtsLocalModelTaskPipeline {
         let started_at = Instant::now();
 
         let result = async {
-            self.mark_voice_clone_running(service, request.task_id).await?;
+            self.mark_voice_clone_running(service, request.task_id)
+                .await?;
             let params = self
                 .load_voice_clone_task_execution(service, request.task_id)
                 .await?;
             let runtime =
                 VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
-            let paths =
-                self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
+            let paths = self.resolve_voice_clone_paths(
+                service,
+                request.task_id,
+                &params.base_model,
+                &params.model_scale,
+            )?;
             let log_dir = resolve_local_log_dir()?;
 
             self.prepare_voice_clone_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -190,17 +193,32 @@ impl MossTtsLocalModelTaskPipeline {
             .filter(voice_clone_task_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| format!("failed to load moss voice clone params for task {}", task_id))?
-            .ok_or_else(|| anyhow::anyhow!("未找到 MOSS-TTS Local 声音克隆任务执行参数: {}", task_id))?;
+            .with_context(|| {
+                format!(
+                    "failed to load moss voice clone params for task {}",
+                    task_id
+                )
+            })?
+            .ok_or_else(|| {
+                anyhow::anyhow!("未找到 MOSS-TTS Local 声音克隆任务执行参数: {}", task_id)
+            })?;
 
         task_history_entity::Entity::find_by_id(task_id)
             .filter(task_history_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
-            .with_context(|| format!("failed to load moss voice clone task history for task {}", task_id))?
-            .ok_or_else(|| anyhow::anyhow!("未找到 MOSS-TTS Local 声音克隆历史任务记录: {}", task_id))?;
+            .with_context(|| {
+                format!(
+                    "failed to load moss voice clone task history for task {}",
+                    task_id
+                )
+            })?
+            .ok_or_else(|| {
+                anyhow::anyhow!("未找到 MOSS-TTS Local 声音克隆历史任务记录: {}", task_id)
+            })?;
 
-        let params = serde_json::from_str::<MossTtsLocalVoiceCloneModelParams>(&row.model_params_json)?;
+        let params =
+            serde_json::from_str::<MossTtsLocalVoiceCloneModelParams>(&row.model_params_json)?;
 
         Ok(VoiceCloneTaskExecution {
             base_model: row.base_model,
@@ -210,7 +228,6 @@ impl MossTtsLocalModelTaskPipeline {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            ref_audio_name: row.ref_audio_name,
             ref_audio_path: resolve_task_path(Path::new(service.data_dir()), &row.ref_audio_path)
                 .to_string_lossy()
                 .to_string(),
@@ -229,6 +246,7 @@ impl MossTtsLocalModelTaskPipeline {
     fn resolve_voice_clone_paths(
         &self,
         service: &LocalService,
+        task_id: i64,
         base_model: &str,
         model_scale: &str,
     ) -> Result<VoiceClonePaths> {
@@ -243,7 +261,15 @@ impl MossTtsLocalModelTaskPipeline {
             src_model_model_python_script_path(&src_model_root, base_model, "voice_clone.py")?;
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
-        let base_model_path = src_model_root.join("base-models").join(MOSS_TTS_LOCAL_MODEL_NAME);
+        let base_model_path = src_model_root
+            .join("base-models")
+            .join(MOSS_TTS_LOCAL_MODEL_NAME);
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            HistoryTaskType::VoiceClone,
+            task_id,
+        );
+        let params_json_path = voice_clone_params_json_path(&sample_root);
 
         Ok(VoiceClonePaths {
             base_model: base_model.to_string(),
@@ -255,6 +281,7 @@ impl MossTtsLocalModelTaskPipeline {
             voice_clone_python_script_path,
             ffmpeg_python_script_path,
             base_model_path,
+            params_json_path,
         })
     }
 
@@ -324,7 +351,10 @@ impl MossTtsLocalModelTaskPipeline {
         crate::service::pipeline::validate_downloaded_paths(
             &paths.base_model,
             &paths.model_scale,
-            &moss_tts_local_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?,
+            &moss_tts_local_prepared_model_download_paths(
+                &paths.src_model_root,
+                &paths.model_scale,
+            )?,
         )
     }
 
@@ -334,7 +364,10 @@ impl MossTtsLocalModelTaskPipeline {
         params: &VoiceCloneTaskExecution,
     ) -> Result<()> {
         for (label, path) in [
-            ("MOSS-TTS Local voice clone venv python", &paths.venv_python_path),
+            (
+                "MOSS-TTS Local voice clone venv python",
+                &paths.venv_python_path,
+            ),
             (
                 "MOSS-TTS Local init-task-runtime script",
                 &paths.init_task_runtime_script_path,
@@ -347,7 +380,10 @@ impl MossTtsLocalModelTaskPipeline {
                 "MOSS-TTS Local voice clone python script",
                 &paths.voice_clone_python_script_path,
             ),
-            ("MOSS-TTS Local ffmpeg python script", &paths.ffmpeg_python_script_path),
+            (
+                "MOSS-TTS Local ffmpeg python script",
+                &paths.ffmpeg_python_script_path,
+            ),
             ("MOSS-TTS Local base model path", &paths.base_model_path),
         ] {
             if !path.exists() {
@@ -359,7 +395,10 @@ impl MossTtsLocalModelTaskPipeline {
             bail!("Reference audio file not found: {}", params.ref_audio_path);
         }
 
-        ensure_parent_dir(Path::new(&params.output_file_path), "moss voice clone output")?;
+        ensure_parent_dir(
+            Path::new(&params.output_file_path),
+            "moss voice clone output",
+        )?;
         Ok(())
     }
 
@@ -383,17 +422,43 @@ impl MossTtsLocalModelTaskPipeline {
 
         info!(
             script = %paths.voice_clone_python_script_path.display(),
-            ref_audio_name = %params.ref_audio_name,
-            ref_audio_path = %ref_audio_path.display(),
-            output_path = %params.output_file_path,
-            mode = %runtime.mode_label(&params.base_model)?,
-            device = runtime.device(),
-            "starting local moss voice clone inference through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting local moss voice clone inference through params-file python invocation"
         );
 
         let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
+
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::VoiceClone,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: Some(attn_implementation.as_str().to_string()),
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "voice_clone.py".to_string(),
+                uses_shared_helpers: vec!["common.py".to_string()],
+            },
+            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneScriptArgs {
+                ref_audio_path: ref_audio_path.to_string_lossy().to_string(),
+                ref_text: params.ref_text.clone(),
+                init_model_path: paths.base_model_path.to_string_lossy().to_string(),
+                language: params.language.clone(),
+                output_path: temp_wav_path.to_string_lossy().to_string(),
+                text: params.text.clone(),
+                mode: None,
+                style_prompt: None,
+                cfg_value: None,
+                inference_timesteps: None,
+                n_vq_for_inference: Some(params.n_vq_for_inference),
+            }),
+        };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -403,26 +468,8 @@ impl MossTtsLocalModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             vec![
-                "--init-model-path".to_string(),
-                paths.base_model_path.to_string_lossy().to_string(),
-                "--ref-audio-path".to_string(),
-                ref_audio_path.to_string_lossy().to_string(),
-                "--ref-text".to_string(),
-                params.ref_text.clone(),
-                "--text".to_string(),
-                params.text.clone(),
-                "--language".to_string(),
-                params.language.clone(),
-                "--n-vq-for-inference".to_string(),
-                params.n_vq_for_inference.to_string(),
-                "--output-path".to_string(),
-                temp_wav_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--device".to_string(),
-                runtime.device().to_string(),
-                "--attn-implementation".to_string(),
-                attn_implementation.as_str().to_string(),
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
             ],
         )
         .await?;

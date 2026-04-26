@@ -12,28 +12,29 @@ def ensure_src_root_on_path() -> None:
 
 ensure_src_root_on_path()
 
+from qwen3_tts.params import load_training_params
 
-def resolve_training_module(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument(
-        "--use-lora",
-        dest="use_lora",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-    )
-    route_args, forwarded_argv = parser.parse_known_args(argv)
 
-    if route_args.use_lora:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
+    return parser.parse_args(argv)
+
+
+def resolve_training_module(use_lora: bool):
+    if use_lora:
         from qwen3_tts import training_lora as target_module
     else:
         from qwen3_tts import training_full as target_module
 
-    return target_module, forwarded_argv
+    return target_module
 
 
 def train(argv: list[str] | None = None) -> None:
-    target_module, forwarded_argv = resolve_training_module(argv)
-    target_module.train(forwarded_argv)
+    cli_args = parse_args(argv)
+    params = load_training_params(cli_args.params_file)
+    target_module = resolve_training_module(params.use_lora)
+    target_module.train_from_params(params)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ const stylePrompt = computed({
 });
 
 const cfgValue = computed({
-  get: () => Number(normalizedModelValue.value.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue),
+  get: () => String(normalizedModelValue.value.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue),
   set: value => updateValue('cfgValue', value)
 });
 
@@ -68,13 +68,7 @@ const inferenceTimesteps = computed({
     <div class="grid gap-3 md:grid-cols-2">
       <label class="block">
         <span class="mb-1 block text-xs text-stone-500">CFG 值</span>
-        <input
-          v-model.number="cfgValue"
-          type="number"
-          min="0.1"
-          step="0.1"
-          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-        />
+        <input v-model="cfgValue" type="number" min="0.1" step="0.1" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" />
       </label>
       <label class="block">
         <span class="mb-1 block text-xs text-stone-500">推理步数</span>
