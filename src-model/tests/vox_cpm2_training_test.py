@@ -27,6 +27,18 @@ def load_runtime_module():
     return importlib.import_module(module_name)
 
 
+def load_tts_script_module():
+    module_name = "vox_cpm2.tts"
+    sys.modules.pop(module_name, None)
+    return importlib.import_module(module_name)
+
+
+def load_voice_clone_script_module():
+    module_name = "vox_cpm2.voice_clone"
+    sys.modules.pop(module_name, None)
+    return importlib.import_module(module_name)
+
+
 class VoxCpm2TrainingScriptResolutionTests(unittest.TestCase):
     def test_resolve_train_script_path_uses_localized_script_when_available(self):
         module = load_module()
@@ -226,6 +238,137 @@ class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
         self.assertEqual(runtime_target.load_kwargs["lora_config_dict"]["r"], 16)
         self.assertEqual(runtime_target.load_kwargs["lora_config_dict"]["alpha"], 32)
 
+
+class VoxCpm2GenerationScriptTests(unittest.TestCase):
+    def test_tts_script_passes_target_text_to_generate(self):
+        module = load_tts_script_module()
+        captured: dict[str, object] = {}
+
+        class FakeModel:
+            def __init__(self):
+                self.tts_model = SimpleNamespace(sample_rate=24000)
+
+            def generate(self, **kwargs):
+                captured["kwargs"] = kwargs
+                return [0.1, 0.2]
+
+        fake_write_calls: list[tuple[str, object, int]] = []
+        fake_model = FakeModel()
+        fake_deps = SimpleNamespace(
+            sf=SimpleNamespace(write=lambda path, wav, sample_rate: fake_write_calls.append((path, wav, sample_rate)))
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "tts.wav"
+            args = SimpleNamespace(
+                init_model_path="D:/models/vox",
+                device="cuda:0",
+                text="  hello vox  ",
+                cfg_value=2.0,
+                inference_timesteps=10,
+                output_path=str(output_path),
+            )
+
+            with patch.object(module, "load_model_and_dependencies", return_value=(fake_model, fake_deps)):
+                module.generate_audio(args)
+
+        self.assertEqual(captured["kwargs"]["target_text"], "hello vox")
+        self.assertNotIn("text", captured["kwargs"])
+        self.assertEqual(captured["kwargs"]["cfg_value"], 2.0)
+        self.assertEqual(captured["kwargs"]["inference_timesteps"], 10)
+        self.assertEqual(fake_write_calls[0][2], 24000)
+
+    def test_voice_clone_script_reference_mode_passes_target_text(self):
+        module = load_voice_clone_script_module()
+        captured: dict[str, object] = {}
+
+        class FakeModel:
+            def __init__(self):
+                self.tts_model = SimpleNamespace(sample_rate=24000)
+
+            def generate(self, **kwargs):
+                captured["kwargs"] = kwargs
+                return [0.1, 0.2]
+
+        fake_write_calls: list[tuple[str, object, int]] = []
+        fake_model = FakeModel()
+        fake_deps = SimpleNamespace(
+            sf=SimpleNamespace(write=lambda path, wav, sample_rate: fake_write_calls.append((path, wav, sample_rate)))
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ref_audio_path = Path(temp_dir) / "ref.wav"
+            ref_audio_path.write_bytes(b"fake")
+            output_path = Path(temp_dir) / "clone.wav"
+            args = SimpleNamespace(
+                init_model_path="D:/models/vox",
+                device="cuda:0",
+                mode="reference",
+                ref_audio_path=str(ref_audio_path),
+                ref_text="ignored in reference",
+                text="target line",
+                style_prompt="soft and calm",
+                cfg_value=2.0,
+                inference_timesteps=10,
+                language="zh",
+                output_path=str(output_path),
+            )
+
+            with patch.object(module, "load_model_and_dependencies", return_value=(fake_model, fake_deps)):
+                module.generate_voice_clone_audio(args)
+
+        self.assertEqual(captured["kwargs"]["target_text"], "(soft and calm)target line")
+        self.assertEqual(captured["kwargs"]["reference_wav_path"], str(ref_audio_path.resolve()))
+        self.assertNotIn("prompt_text", captured["kwargs"])
+        self.assertNotIn("text", captured["kwargs"])
+        self.assertEqual(fake_write_calls[0][2], 24000)
+
+    def test_voice_clone_script_ultimate_mode_passes_target_text(self):
+        module = load_voice_clone_script_module()
+        captured: dict[str, object] = {}
+
+        class FakeModel:
+            def __init__(self):
+                self.tts_model = SimpleNamespace(sample_rate=24000)
+
+            def generate(self, **kwargs):
+                captured["kwargs"] = kwargs
+                return [0.1, 0.2]
+
+        fake_write_calls: list[tuple[str, object, int]] = []
+        fake_model = FakeModel()
+        fake_deps = SimpleNamespace(
+            sf=SimpleNamespace(write=lambda path, wav, sample_rate: fake_write_calls.append((path, wav, sample_rate)))
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ref_audio_path = Path(temp_dir) / "ref.wav"
+            ref_audio_path.write_bytes(b"fake")
+            output_path = Path(temp_dir) / "clone.wav"
+            args = SimpleNamespace(
+                init_model_path="D:/models/vox",
+                device="cuda:0",
+                mode="ultimate",
+                ref_audio_path=str(ref_audio_path),
+                ref_text="reference text",
+                text="target line",
+                style_prompt="soft and calm",
+                cfg_value=2.0,
+                inference_timesteps=10,
+                language="zh",
+                output_path=str(output_path),
+            )
+
+            with patch.object(module, "load_model_and_dependencies", return_value=(fake_model, fake_deps)):
+                module.generate_voice_clone_audio(args)
+
+        self.assertEqual(captured["kwargs"]["target_text"], "(soft and calm)target line")
+        self.assertEqual(captured["kwargs"]["prompt_text"], "reference text")
+        self.assertEqual(captured["kwargs"]["prompt_wav_path"], str(ref_audio_path.resolve()))
+        self.assertEqual(captured["kwargs"]["reference_wav_path"], str(ref_audio_path.resolve()))
+        self.assertNotIn("text", captured["kwargs"])
+        self.assertEqual(fake_write_calls[0][2], 24000)
+
     def test_resolve_runtime_target_uses_relative_fallbacks_when_absolute_paths_move(self):
         module = load_runtime_module()
 
@@ -277,7 +420,7 @@ class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
 
         class FakeVoxCPM:
             @classmethod
-            def from_pretrained(cls, model_path, **kwargs):
+            def from_local(cls, model_path, **kwargs):
                 captured["model_path"] = model_path
                 captured["kwargs"] = kwargs
                 return "fake-model"
@@ -303,6 +446,7 @@ class VoxCpm2RuntimeMetadataResolutionTests(unittest.TestCase):
             captured["kwargs"]["lora_weights_path"],
             "D:/models/13_hare/checkpoints/lora/latest",
         )
+        self.assertEqual(captured["kwargs"]["device"], "cuda:0")
         self.assertEqual(captured["kwargs"]["lora_config"].kwargs["r"], 16)
         self.assertEqual(captured["kwargs"]["lora_config"].kwargs["alpha"], 32)
         self.assertNotIn("lora_config_dict", captured["kwargs"])

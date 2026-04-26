@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,19 +22,6 @@ def load_dependencies() -> SimpleNamespace:
     from voxcpm.model.voxcpm2 import LoRAConfig
 
     return SimpleNamespace(sf=sf, VoxCPM=VoxCPM, LoRAConfig=LoRAConfig)
-
-
-def is_cpu_device(device: str) -> bool:
-    return device.strip().lower().startswith("cpu")
-
-
-def prepare_runtime_environment(device: str) -> None:
-    if is_cpu_device(device):
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-
-def resolve_optimize_flag(device: str) -> bool:
-    return not is_cpu_device(device)
 
 
 def compose_generation_text(text: str, style_prompt: str) -> str:
@@ -212,7 +198,7 @@ def resolve_runtime_target(init_model_path: str) -> RuntimeTarget:
 
 
 def load_model_and_dependencies(init_model_path: str, device: str):
-    prepare_runtime_environment(device)
+    print(f"VoxCPM2 model judges the device automatically, so the provided device argument will be ignored: {device}")
     deps = load_dependencies()
     runtime_target = resolve_runtime_target(init_model_path)
     load_kwargs = dict(runtime_target.load_kwargs)
@@ -222,7 +208,6 @@ def load_model_and_dependencies(init_model_path: str, device: str):
     model = deps.VoxCPM.from_pretrained(
         runtime_target.model_path,
         load_denoiser=False,
-        optimize=resolve_optimize_flag(device),
         **load_kwargs,
     )
     return model, deps
