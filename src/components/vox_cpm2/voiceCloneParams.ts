@@ -1,7 +1,7 @@
 export const VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS = {
   mode: 'reference',
   stylePrompt: '',
-  cfgValue: 2.0,
+  cfgValue: '2.0',
   inferenceTimesteps: 10
 } as const;
 
@@ -14,7 +14,7 @@ export const normalizeVoxCpm2VoiceCloneParams = (modelParams: Record<string, unk
   ...modelParams,
   mode: String(modelParams.mode ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.mode),
   stylePrompt: String(modelParams.stylePrompt ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.stylePrompt),
-  cfgValue: Number(modelParams.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue),
+  cfgValue: String(modelParams.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue).trim() || VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue,
   inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.inferenceTimesteps)
 });
 

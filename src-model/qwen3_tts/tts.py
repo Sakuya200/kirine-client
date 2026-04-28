@@ -16,6 +16,8 @@ def ensure_src_root_on_path() -> None:
 
 ensure_src_root_on_path()
 
+from qwen3_tts.params import load_tts_params
+
 
 @dataclass
 class TtsRuntimeOptions:
@@ -25,27 +27,7 @@ class TtsRuntimeOptions:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--init_model_path",
-        "--init-model-path",
-        dest="init_model_path",
-        type=str,
-        default="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-    )
-    parser.add_argument("--text", type=str)
-    parser.add_argument("--language", type=str, default="Auto")
-    parser.add_argument("--speaker", type=str, default="")
-    parser.add_argument("--instruct", type=str, default="")
-    parser.add_argument("--output_path", "--output-path", dest="output_path", type=str)
-    parser.add_argument("--logging_dir", "--logging-dir", dest="logging_dir", type=str, default="")
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--attn_implementation",
-        "--attn-implementation",
-        dest="attn_implementation",
-        type=str,
-        default="flash_attention_2",
-    )
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
     return parser.parse_args(argv)
 
 
@@ -177,8 +159,9 @@ def generate_audio(args: argparse.Namespace, dependencies: SimpleNamespace | Non
 
 
 def main(argv: list[str] | None = None):
-    args = parse_args(argv)
-    generate_audio(args)
+    cli_args = parse_args(argv)
+    params = load_tts_params(cli_args.params_file)
+    generate_audio(params.to_namespace())
 
 
 if __name__ == "__main__":

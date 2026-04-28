@@ -11,7 +11,9 @@ use tracing::{error, info};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
-        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+        task_paths::{
+            ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir, tts_params_json_path,
+        },
     },
     config::{load_configs, BaseModel, HardwareType},
     service::{
@@ -20,17 +22,21 @@ use crate::{
             LocalService,
         },
         models::{
-            HistoryTaskType, MossTtsLocalTextToSpeechModelParams, TaskStatus,
-            TextToSpeechFormat, UpdateTaskStatusPayload,
+            HistoryTaskType, MossTtsLocalTextToSpeechModelParams, TaskStatus, TextToSpeechFormat,
+            UpdateTaskStatusPayload,
         },
         pipeline::{
-            model_paths::llm_model_display_name,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                TtsScriptArgs,
+            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
-            validate_and_download, validate_and_init, PipelineBootstrapPaths,
-            TtsPipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
+            validate_and_download, validate_and_init, PipelineBootstrapPaths, TtsPipelineRequest,
+            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
@@ -68,14 +74,6 @@ impl TtsRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -88,6 +86,7 @@ struct TtsPaths {
     download_models_script_path: PathBuf,
     tts_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -131,8 +130,15 @@ impl MossTtsLocalModelTaskPipeline {
 
         let result = async {
             self.mark_tts_running(service, request.task_id).await?;
-            let params = self.load_tts_task_execution(service, request.task_id).await?;
-            let paths = self.resolve_tts_paths(service, &params.base_model, &params.model_scale)?;
+            let params = self
+                .load_tts_task_execution(service, request.task_id)
+                .await?;
+            let paths = self.resolve_tts_paths(
+                service,
+                request.task_id,
+                &params.base_model,
+                &params.model_scale,
+            )?;
             let log_dir = resolve_local_log_dir()?;
             let runtime = TtsRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
 
@@ -197,16 +203,22 @@ impl MossTtsLocalModelTaskPipeline {
             .one(service.orm())
             .await
             .with_context(|| format!("failed to load moss tts params for task {}", task_id))?
-            .ok_or_else(|| anyhow::anyhow!("未找到 MOSS-TTS Local TTS 任务执行参数: {}", task_id))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("未找到 MOSS-TTS Local TTS 任务执行参数: {}", task_id)
+            })?;
 
         task_history_entity::Entity::find_by_id(task_id)
             .filter(task_history_entity::Column::Deleted.eq(0))
             .one(service.orm())
             .await
             .with_context(|| format!("failed to load moss tts task history for task {}", task_id))?
-            .ok_or_else(|| anyhow::anyhow!("未找到 MOSS-TTS Local TTS 历史任务记录: {}", task_id))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("未找到 MOSS-TTS Local TTS 历史任务记录: {}", task_id)
+            })?;
 
-        let params = serde_json::from_str::<MossTtsLocalTextToSpeechModelParams>(&task_detail.model_params_json)?;
+        let params = serde_json::from_str::<MossTtsLocalTextToSpeechModelParams>(
+            &task_detail.model_params_json,
+        )?;
         let src_model_root = resolve_src_model_root(service.app_dir())?;
 
         Ok(TtsTaskExecution {
@@ -238,6 +250,7 @@ impl MossTtsLocalModelTaskPipeline {
     fn resolve_tts_paths(
         &self,
         service: &LocalService,
+        task_id: i64,
         base_model: &str,
         model_scale: &str,
     ) -> Result<TtsPaths> {
@@ -252,6 +265,12 @@ impl MossTtsLocalModelTaskPipeline {
             src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            HistoryTaskType::TextToSpeech,
+            task_id,
+        );
+        let params_json_path = tts_params_json_path(&sample_root);
 
         Ok(TtsPaths {
             base_model: base_model.to_string(),
@@ -262,6 +281,7 @@ impl MossTtsLocalModelTaskPipeline {
             download_models_script_path,
             tts_python_script_path,
             ffmpeg_python_script_path,
+            params_json_path,
         })
     }
 
@@ -331,7 +351,10 @@ impl MossTtsLocalModelTaskPipeline {
         crate::service::pipeline::validate_downloaded_paths(
             &paths.base_model,
             &paths.model_scale,
-            &moss_tts_local_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?,
+            &moss_tts_local_prepared_model_download_paths(
+                &paths.src_model_root,
+                &paths.model_scale,
+            )?,
         )
     }
 
@@ -351,8 +374,14 @@ impl MossTtsLocalModelTaskPipeline {
                 "MOSS-TTS Local download-models script",
                 &paths.download_models_script_path,
             ),
-            ("MOSS-TTS Local tts python script", &paths.tts_python_script_path),
-            ("MOSS-TTS Local ffmpeg python script", &paths.ffmpeg_python_script_path),
+            (
+                "MOSS-TTS Local tts python script",
+                &paths.tts_python_script_path,
+            ),
+            (
+                "MOSS-TTS Local ffmpeg python script",
+                &paths.ffmpeg_python_script_path,
+            ),
         ] {
             if !path.exists() {
                 bail!("{} not found: {}", label, path.display());
@@ -360,7 +389,10 @@ impl MossTtsLocalModelTaskPipeline {
         }
 
         if !model_path.exists() {
-            bail!("MOSS-TTS Local model path not found: {}", model_path.display());
+            bail!(
+                "MOSS-TTS Local model path not found: {}",
+                model_path.display()
+            );
         }
 
         ensure_parent_dir(Path::new(output_file_path), "moss tts output")?;
@@ -382,13 +414,38 @@ impl MossTtsLocalModelTaskPipeline {
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
         info!(
-            tts_script = %paths.tts_python_script_path.display(),
-            model_path = %model_path.display(),
-            output_path = %temp_wav_path.display(),
-            device = runtime.device(),
-            mode = %runtime.mode_label(&params.base_model)?,
-            "starting local moss tts inference through direct python invocation"
+            script = %paths.tts_python_script_path.display(),
+            params_file = %paths.params_json_path.display(),
+            "starting local moss tts inference through params-file python invocation"
         );
+
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::TextToSpeech,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: Some(attn_implementation.as_str().to_string()),
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "tts.py".to_string(),
+                uses_shared_helpers: vec!["common.py".to_string()],
+            },
+            args: PythonScriptTaskArgs::TextToSpeech(TtsScriptArgs {
+                init_model_path: model_path.to_string_lossy().to_string(),
+                text: params.text.clone(),
+                language: params.language.clone(),
+                speaker: String::new(),
+                instruct: String::new(),
+                output_path: temp_wav_path.to_string_lossy().to_string(),
+                cfg_value: None,
+                inference_timesteps: None,
+                n_vq_for_inference: Some(params.n_vq_for_inference),
+            }),
+        };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -398,22 +455,8 @@ impl MossTtsLocalModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             vec![
-                "--init-model-path".to_string(),
-                model_path.to_string_lossy().to_string(),
-                "--text".to_string(),
-                params.text.clone(),
-                "--language".to_string(),
-                params.language.clone(),
-                "--n-vq-for-inference".to_string(),
-                params.n_vq_for_inference.to_string(),
-                "--output-path".to_string(),
-                temp_wav_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--device".to_string(),
-                runtime.device().to_string(),
-                "--attn-implementation".to_string(),
-                attn_implementation.as_str().to_string(),
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
             ],
         )
         .await?;

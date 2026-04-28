@@ -13,22 +13,12 @@ def ensure_src_root_on_path() -> None:
 ensure_src_root_on_path()
 
 from vox_cpm2 import compose_generation_text, load_model_and_dependencies
+from vox_cpm2.params import load_voice_clone_params
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--init-model-path", dest="init_model_path", type=str, required=True)
-    parser.add_argument("--mode", type=str, default="reference")
-    parser.add_argument("--ref-audio-path", dest="ref_audio_path", type=str, required=True)
-    parser.add_argument("--ref-text", dest="ref_text", type=str, default="")
-    parser.add_argument("--text", type=str, required=True)
-    parser.add_argument("--style-prompt", dest="style_prompt", type=str, default="")
-    parser.add_argument("--cfg-value", dest="cfg_value", type=float, default=2.0)
-    parser.add_argument("--inference-timesteps", dest="inference_timesteps", type=int, default=10)
-    parser.add_argument("--language", type=str, default="auto")
-    parser.add_argument("--output-path", dest="output_path", type=str, required=True)
-    parser.add_argument("--logging-dir", dest="logging_dir", type=str, default="")
-    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--params-file", dest="params_file", type=str, required=True)
     return parser.parse_args(argv)
 
 
@@ -77,8 +67,9 @@ def generate_voice_clone_audio(args: argparse.Namespace):
 
 
 def main(argv: list[str] | None = None):
-    args = parse_args(argv)
-    generate_voice_clone_audio(args)
+    cli_args = parse_args(argv)
+    params = load_voice_clone_params(cli_args.params_file)
+    generate_voice_clone_audio(params.to_namespace())
 
 
 if __name__ == "__main__":

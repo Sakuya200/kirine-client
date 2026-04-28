@@ -1,5 +1,5 @@
 export const VOX_CPM2_TTS_DEFAULT_PARAMS = {
-  cfgValue: 2.0,
+  cfgValue: '2.0',
   inferenceTimesteps: 10
 } as const;
 
@@ -10,7 +10,7 @@ export const createVoxCpm2TtsModelParams = (): Record<string, unknown> => ({
 export const normalizeVoxCpm2TtsModelParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
   ...VOX_CPM2_TTS_DEFAULT_PARAMS,
   ...modelParams,
-  cfgValue: Number(modelParams.cfgValue ?? VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue),
+  cfgValue: String(modelParams.cfgValue ?? VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue).trim() || VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue,
   inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? VOX_CPM2_TTS_DEFAULT_PARAMS.inferenceTimesteps)
 });
 

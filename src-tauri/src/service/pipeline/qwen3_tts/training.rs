@@ -16,7 +16,7 @@ use crate::{
         local_paths::resolve_local_log_dir,
         task_paths::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
-            training_index_jsonl_path, training_output_jsonl_path,
+            training_index_jsonl_path, training_output_jsonl_path, training_params_json_path,
         },
     },
     config::{load_configs, BaseModel, HardwareType},
@@ -30,19 +30,23 @@ use crate::{
             UpdateTaskStatusPayload,
         },
         pipeline::{
-            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                TrainingScriptArgs,
+            },
             model_paths::llm_model_display_name,
             qwen3_tts::{
                 qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
-                qwen3_tts_training_init_model_path,
-                qwen3_tts_training_tokenizer_model_path, Qwen3TTSModelTaskPipeline,
+                qwen3_tts_training_init_model_path, qwen3_tts_training_tokenizer_model_path,
+                Qwen3TTSModelTaskPipeline,
             },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
-            TrainingPipelineRequest,
+            TrainingPipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
@@ -73,6 +77,7 @@ struct TrainingParams {
     epoch_count: i64,
     gradient_accumulation_steps: i64,
     enable_gradient_checkpointing: bool,
+    learning_rate: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +136,7 @@ struct TrainingPaths {
     input_jsonl: PathBuf,
     train_jsonl: PathBuf,
     output_model_dir: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +284,7 @@ impl Qwen3TTSModelTaskPipeline {
             epoch_count: params.epoch_count,
             gradient_accumulation_steps: params.gradient_accumulation_steps,
             enable_gradient_checkpointing: params.enable_gradient_checkpointing,
+            learning_rate: params.learning_rate_value(),
         })
     }
 
@@ -314,6 +321,7 @@ impl Qwen3TTSModelTaskPipeline {
         );
         let input_jsonl = training_index_jsonl_path(&sample_root);
         let train_jsonl = training_output_jsonl_path(&sample_root);
+        let params_json_path = training_params_json_path(&sample_root);
         let output_model_dir = Path::new(service.model_dir()).join(&resource_name);
 
         for (label, path) in [
@@ -355,6 +363,7 @@ impl Qwen3TTSModelTaskPipeline {
             input_jsonl,
             train_jsonl,
             output_model_dir,
+            params_json_path,
         })
     }
 
@@ -587,7 +596,7 @@ impl Qwen3TTSModelTaskPipeline {
             script = %paths.encode_python_script_path.display(),
             training_mode = %runtime.mode_label(&paths.base_model)?,
             device = runtime.encode_device(),
-            "starting encode_audio.py through direct python invocation"
+            "starting encode_audio.py through params-file python invocation"
         );
 
         if !paths.venv_python_path.exists() {
@@ -653,14 +662,9 @@ impl Qwen3TTSModelTaskPipeline {
         let attn_implementation = training_config.attn_implementation();
 
         info!(
-            train_jsonl = %paths.train_jsonl.display(),
-            output_model_dir = %paths.output_model_dir.display(),
-            batch_size = params.batch_size,
-            epoch_count = params.epoch_count,
             script = %paths.train_python_script_path.display(),
-            training_mode = %runtime.mode_label(&paths.base_model)?,
-            device = runtime.training_device(),
-            "starting training.py through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting training.py through params-file python invocation"
         );
 
         if !paths.venv_python_path.exists() {
@@ -678,36 +682,58 @@ impl Qwen3TTSModelTaskPipeline {
 
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::ModelTraining, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::Training,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.training_device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: Some(attn_implementation.as_str().to_string()),
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "training.py".to_string(),
+                uses_shared_helpers: vec!["training_common.py".to_string()],
+            },
+            args: PythonScriptTaskArgs::Training(TrainingScriptArgs {
+                init_model_path: paths.init_model_path.to_string_lossy().to_string(),
+                codec_path: None,
+                tokenizer_model_path: Some(
+                    paths.tokenizer_model_path.to_string_lossy().to_string(),
+                ),
+                input_jsonl: paths.input_jsonl.to_string_lossy().to_string(),
+                output_jsonl: Some(paths.train_jsonl.to_string_lossy().to_string()),
+                output_model_path: paths.output_model_dir.to_string_lossy().to_string(),
+                batch_size: params.batch_size,
+                lr: params.learning_rate.clone(),
+                num_epochs: params.epoch_count,
+                speaker_name: Some(speaker_name.to_string()),
+                gradient_accumulation_steps: params.gradient_accumulation_steps,
+                enable_gradient_checkpointing: params.enable_gradient_checkpointing,
+                use_lora: false,
+                training_mode: None,
+                lora_rank: None,
+                lora_alpha: None,
+                lora_dropout: None,
+                weight_decay: None,
+                warmup_steps: None,
+                warmup_ratio: None,
+                max_grad_norm: None,
+                mixed_precision: None,
+                channelwise_loss_weight: None,
+                skip_reference_audio_codes: None,
+                prep_batch_size: None,
+                prep_n_vq: None,
+                lr_scheduler_type: None,
+            }),
+        };
 
-        let mut script_args = vec![
-            "--train-jsonl".to_string(),
-            paths.train_jsonl.to_string_lossy().to_string(),
-            "--output-model-path".to_string(),
-            paths.output_model_dir.to_string_lossy().to_string(),
-            "--init-model-path".to_string(),
-            paths.init_model_path.to_string_lossy().to_string(),
-            "--logging-dir".to_string(),
-            metrics_log_dir.to_string_lossy().to_string(),
-            "--batch-size".to_string(),
-            params.batch_size.to_string(),
-            "--num-epochs".to_string(),
-            params.epoch_count.to_string(),
-            "--speaker-name".to_string(),
-            speaker_name.to_string(),
-            "--device".to_string(),
-            runtime.training_device().to_string(),
-            "--attn-implementation".to_string(),
-            attn_implementation.as_str().to_string(),
-            "--gradient-accumulation-steps".to_string(),
-            params.gradient_accumulation_steps.to_string(),
-            "--no-use-lora".to_string(),
+        invocation.write_to_json_file(&paths.params_json_path)?;
+
+        let script_args = vec![
+            "--params-file".to_string(),
+            paths.params_json_path.to_string_lossy().to_string(),
         ];
-
-        script_args.push(if params.enable_gradient_checkpointing {
-            "--enable-gradient-checkpointing".to_string()
-        } else {
-            "--no-enable-gradient-checkpointing".to_string()
-        });
 
         run_logged_python_script_cancellable(
             &paths.venv_python_path,

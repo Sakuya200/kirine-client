@@ -11,7 +11,10 @@ use tracing::{error, info};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
-        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+        task_paths::{
+            ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
+            voice_clone_params_json_path,
+        },
     },
     config::{load_configs, BaseModel, HardwareType},
     service::{
@@ -23,7 +26,11 @@ use crate::{
         },
         models::{HistoryTaskType, TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload},
         pipeline::{
-            model_paths::llm_model_display_name,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                VoiceCloneScriptArgs,
+            },
             qwen3_tts::{
                 qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
                 qwen3_tts_voice_clone_init_model_path, Qwen3TTSModelTaskPipeline,
@@ -69,14 +76,6 @@ impl VoiceCloneRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -90,6 +89,7 @@ struct VoiceClonePaths {
     voice_clone_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
     base_model_path: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -98,7 +98,6 @@ struct VoiceCloneTaskExecution {
     model_scale: String,
     language: String,
     format: TextToSpeechFormat,
-    ref_audio_name: String,
     ref_audio_path: String,
     ref_text: String,
     text: String,
@@ -142,8 +141,12 @@ impl Qwen3TTSModelTaskPipeline {
                 .await?;
             let runtime =
                 VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
-            let paths =
-                self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
+            let paths = self.resolve_voice_clone_paths(
+                service,
+                request.task_id,
+                &params.base_model,
+                &params.model_scale,
+            )?;
             let log_dir = resolve_local_log_dir()?;
 
             self.prepare_voice_clone_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -214,7 +217,6 @@ impl Qwen3TTSModelTaskPipeline {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            ref_audio_name: row.ref_audio_name,
             ref_audio_path: resolve_task_path(Path::new(service.data_dir()), &row.ref_audio_path)
                 .to_string_lossy()
                 .to_string(),
@@ -235,6 +237,7 @@ impl Qwen3TTSModelTaskPipeline {
     fn resolve_voice_clone_paths(
         &self,
         service: &LocalService,
+        task_id: i64,
         base_model: &str,
         model_scale: &str,
     ) -> Result<VoiceClonePaths> {
@@ -250,6 +253,12 @@ impl Qwen3TTSModelTaskPipeline {
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let base_model_path = qwen3_tts_voice_clone_init_model_path(&src_model_root, model_scale)?;
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            HistoryTaskType::VoiceClone,
+            task_id,
+        );
+        let params_json_path = voice_clone_params_json_path(&sample_root);
 
         Ok(VoiceClonePaths {
             base_model: base_model.to_string(),
@@ -261,6 +270,7 @@ impl Qwen3TTSModelTaskPipeline {
             voice_clone_python_script_path,
             ffmpeg_python_script_path,
             base_model_path,
+            params_json_path,
         })
     }
 
@@ -406,17 +416,43 @@ impl Qwen3TTSModelTaskPipeline {
 
         info!(
             script = %paths.voice_clone_python_script_path.display(),
-            ref_audio_name = %params.ref_audio_name,
-            ref_audio_path = %ref_audio_path.display(),
-            output_path = %params.output_file_path,
-            mode = %runtime.mode_label(&params.base_model)?,
-            device = runtime.device(),
-            "starting local voice clone inference through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting local voice clone inference through params-file python invocation"
         );
 
         let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
+
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::VoiceClone,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: Some(attn_implementation.as_str().to_string()),
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "voice_clone.py".to_string(),
+                uses_shared_helpers: Vec::new(),
+            },
+            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneScriptArgs {
+                ref_audio_path: ref_audio_path.to_string_lossy().to_string(),
+                ref_text: params.ref_text.clone(),
+                init_model_path: paths.base_model_path.to_string_lossy().to_string(),
+                language: params.language.clone(),
+                output_path: temp_wav_path.to_string_lossy().to_string(),
+                text: params.text.clone(),
+                mode: None,
+                style_prompt: None,
+                cfg_value: None,
+                inference_timesteps: None,
+                n_vq_for_inference: None,
+            }),
+        };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -426,24 +462,8 @@ impl Qwen3TTSModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             vec![
-                "--init-model-path".to_string(),
-                paths.base_model_path.to_string_lossy().to_string(),
-                "--ref-audio-path".to_string(),
-                ref_audio_path.to_string_lossy().to_string(),
-                "--ref-text".to_string(),
-                params.ref_text.clone(),
-                "--text".to_string(),
-                params.text.clone(),
-                "--language".to_string(),
-                params.language.clone(),
-                "--output-path".to_string(),
-                temp_wav_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--device".to_string(),
-                runtime.device().to_string(),
-                "--attn-implementation".to_string(),
-                attn_implementation.as_str().to_string(),
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
             ],
         )
         .await?;

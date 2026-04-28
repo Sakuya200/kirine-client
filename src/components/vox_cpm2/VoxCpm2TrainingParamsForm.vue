@@ -67,6 +67,21 @@ const gradientAccumulationSteps = computed({
   set: value => updateValue('gradientAccumulationSteps', value)
 });
 
+const learningRate = computed({
+  get: () => String(normalizedModelValue.value.learningRate ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.learningRate),
+  set: value => updateValue('learningRate', value)
+});
+
+const weightDecay = computed({
+  get: () => String(normalizedModelValue.value.weightDecay ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.weightDecay),
+  set: value => updateValue('weightDecay', value)
+});
+
+const warmupSteps = computed({
+  get: () => (normalizedModelValue.value.warmupSteps == null ? '' : String(normalizedModelValue.value.warmupSteps)),
+  set: value => updateValue('warmupSteps', String(value).trim().length === 0 ? null : Number(value))
+});
+
 const enableGradientCheckpointing = computed({
   get: () => Boolean(normalizedModelValue.value.enableGradientCheckpointing ?? VOX_CPM2_TRAINING_DEFAULT_PARAMS.enableGradientCheckpointing),
   set: value => updateValue('enableGradientCheckpointing', value)
@@ -130,6 +145,37 @@ const enableGradientCheckpointing = computed({
         />
       </label>
       <label class="block">
+        <span class="mb-1 block text-xs text-stone-500">学习率</span>
+        <input
+          v-model="learningRate"
+          type="number"
+          min="0"
+          step="0.000001"
+          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+        />
+      </label>
+    </div>
+
+    <div class="grid gap-3 md:grid-cols-2">
+      <label class="block">
+        <span class="mb-1 block text-xs text-stone-500">权重衰减</span>
+        <input v-model="weightDecay" type="number" min="0" step="0.01" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" />
+      </label>
+      <label class="block">
+        <span class="mb-1 block text-xs text-stone-500">Warmup Steps</span>
+        <input
+          v-model="warmupSteps"
+          type="number"
+          min="0"
+          step="1"
+          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+          placeholder="留空则自动计算"
+        />
+      </label>
+    </div>
+
+    <div class="grid gap-3 md:grid-cols-2">
+      <label class="block">
         <span class="mb-1 block text-xs text-stone-500">梯度检查点</span>
         <span class="flex h-10 w-full items-center justify-between rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
           <span>启用梯度检查点</span>
@@ -143,8 +189,8 @@ const enableGradientCheckpointing = computed({
     </div>
 
     <div class="rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs leading-5 text-stone-500">
-      <p v-if="supportsLora && useLora">LoRA 模式仅训练适配器参数，默认更省显存；当前可直接在表单中调整 rank、alpha 和 dropout。</p>
-      <p v-else-if="supportsLora">全量微调会直接更新完整模型权重，显存需求明显更高，建议优先确认本机硬件资源充足。</p>
+      <p v-if="supportsLora && useLora">LoRA 模式仅训练适配器参数，默认更省显存；当前可直接在表单中调整 rank、alpha、dropout、学习率和权重衰减。</p>
+      <p v-else-if="supportsLora">全量微调会直接更新完整模型权重，显存需求明显更高；Warmup Steps 留空时会继续按训练步数自动计算。</p>
       <p v-else>当前模型未声明 LoRA 能力，本次训练将使用全量微调参数。</p>
     </div>
   </div>

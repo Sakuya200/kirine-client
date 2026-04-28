@@ -41,17 +41,17 @@ const enableGradientCheckpointing = computed({
 });
 
 const learningRate = computed({
-  get: () => Number(props.modelValue.learningRate ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.learningRate),
+  get: () => String(props.modelValue.learningRate ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.learningRate),
   set: value => updateValue('learningRate', value)
 });
 
 const weightDecay = computed({
-  get: () => Number(props.modelValue.weightDecay ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.weightDecay),
+  get: () => String(props.modelValue.weightDecay ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.weightDecay),
   set: value => updateValue('weightDecay', value)
 });
 
 const warmupRatio = computed({
-  get: () => Number(props.modelValue.warmupRatio ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.warmupRatio),
+  get: () => String(props.modelValue.warmupRatio ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.warmupRatio),
   set: value => updateValue('warmupRatio', value)
 });
 
@@ -61,7 +61,7 @@ const warmupSteps = computed({
 });
 
 const maxGradNorm = computed({
-  get: () => Number(props.modelValue.maxGradNorm ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.maxGradNorm),
+  get: () => String(props.modelValue.maxGradNorm ?? MOSS_TTS_LOCAL_TRAINING_DEFAULT_PARAMS.maxGradNorm),
   set: value => updateValue('maxGradNorm', value)
 });
 
@@ -124,7 +124,7 @@ const prepNVq = computed({
       <label class="block">
         <span class="mb-1 block text-xs text-stone-500">学习率</span>
         <input
-          v-model.number="learningRate"
+          v-model="learningRate"
           type="number"
           min="0"
           step="0.000001"
@@ -133,26 +133,14 @@ const prepNVq = computed({
       </label>
       <label class="block">
         <span class="mb-1 block text-xs text-stone-500">权重衰减</span>
-        <input
-          v-model.number="weightDecay"
-          type="number"
-          min="0"
-          step="0.01"
-          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-        />
+        <input v-model="weightDecay" type="number" min="0" step="0.01" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" />
       </label>
     </div>
 
     <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
       <label class="block lg:col-span-1">
         <span class="mb-1 block text-xs text-stone-500">Warmup Ratio</span>
-        <input
-          v-model.number="warmupRatio"
-          type="number"
-          min="0"
-          step="0.01"
-          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-        />
+        <input v-model="warmupRatio" type="number" min="0" step="0.01" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" />
       </label>
       <label class="block lg:col-span-1">
         <span class="mb-1 block text-xs text-stone-500">Warmup Steps</span>
@@ -166,13 +154,7 @@ const prepNVq = computed({
       </label>
       <label class="block lg:col-span-1">
         <span class="mb-1 block text-xs text-stone-500">Max Grad Norm</span>
-        <input
-          v-model.number="maxGradNorm"
-          type="number"
-          min="0"
-          step="0.1"
-          class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-        />
+        <input v-model="maxGradNorm" type="number" min="0" step="0.1" class="h-10 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" />
       </label>
       <label class="block lg:col-span-1">
         <span class="mb-1 block text-xs text-stone-500">预处理 nVQ</span>

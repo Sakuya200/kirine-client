@@ -15,7 +15,7 @@ use crate::{
         local_paths::resolve_local_log_dir,
         task_paths::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
-            training_index_jsonl_path,
+            training_index_jsonl_path, training_params_json_path,
         },
     },
     config::{load_configs, BaseModel, HardwareType},
@@ -29,7 +29,12 @@ use crate::{
             UpdateTaskStatusPayload,
         },
         pipeline::{
-            model_paths::{llm_model_display_name, speaker_model_dir},
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                TrainingScriptArgs,
+            },
+            model_paths::speaker_model_dir,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -63,11 +68,11 @@ struct TrainingParams {
     epoch_count: i64,
     gradient_accumulation_steps: i64,
     enable_gradient_checkpointing: bool,
-    learning_rate: f64,
-    weight_decay: f64,
-    warmup_ratio: f64,
+    learning_rate: Option<String>,
+    weight_decay: Option<String>,
+    warmup_ratio: Option<String>,
     warmup_steps: i64,
-    max_grad_norm: f64,
+    max_grad_norm: Option<String>,
     mixed_precision: String,
     channelwise_loss_weight: String,
     skip_reference_audio_codes: bool,
@@ -96,14 +101,6 @@ impl TrainingRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -121,6 +118,7 @@ struct TrainingPaths {
     sample_root: PathBuf,
     input_jsonl: PathBuf,
     output_model_dir: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,11 +259,11 @@ impl MossTtsLocalModelTaskPipeline {
             epoch_count: params.epoch_count.max(1),
             gradient_accumulation_steps: params.gradient_accumulation_steps.max(1),
             enable_gradient_checkpointing: params.enable_gradient_checkpointing,
-            learning_rate: params.learning_rate.unwrap_or(1e-5),
-            weight_decay: params.weight_decay.unwrap_or(0.1),
-            warmup_ratio: params.warmup_ratio.unwrap_or(0.03),
+            learning_rate: params.learning_rate,
+            weight_decay: params.weight_decay,
+            warmup_ratio: params.warmup_ratio,
             warmup_steps: params.warmup_steps.unwrap_or(0).max(0),
-            max_grad_norm: params.max_grad_norm.unwrap_or(1.0),
+            max_grad_norm: params.max_grad_norm,
             mixed_precision: params
                 .mixed_precision
                 .filter(|value| !value.trim().is_empty())
@@ -312,6 +310,7 @@ impl MossTtsLocalModelTaskPipeline {
             task_id,
         );
         let input_jsonl = training_index_jsonl_path(&sample_root);
+        let params_json_path = training_params_json_path(&sample_root);
         let output_model_dir = speaker_model_dir(
             Path::new(service.model_dir()),
             speaker_id,
@@ -352,6 +351,7 @@ impl MossTtsLocalModelTaskPipeline {
             sample_root,
             input_jsonl,
             output_model_dir,
+            params_json_path,
         })
     }
 
@@ -541,15 +541,9 @@ impl MossTtsLocalModelTaskPipeline {
         mut cancel_rx: watch::Receiver<bool>,
     ) -> Result<LoggedCommandResult> {
         info!(
-            train_jsonl = %paths.input_jsonl.display(),
-            output_model_dir = %paths.output_model_dir.display(),
-            batch_size = params.batch_size,
-            epoch_count = params.epoch_count,
-            learning_rate = params.learning_rate,
             script = %paths.train_python_script_path.display(),
-            runtime_mode = %runtime.mode_label(&paths.base_model)?,
-            device = runtime.training_device(),
-            "starting moss training.py through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting moss training.py through params-file python invocation"
         );
 
         if !paths.venv_python_path.exists() {
@@ -573,59 +567,51 @@ impl MossTtsLocalModelTaskPipeline {
 
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::ModelTraining, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
-        let skip_reference_audio_codes_flag = if params.skip_reference_audio_codes {
-            "--skip-reference-audio-codes"
-        } else {
-            "--no-skip-reference-audio-codes"
-        };
-        let gradient_checkpointing_flag = if params.enable_gradient_checkpointing {
-            "--enable-gradient-checkpointing"
-        } else {
-            "--no-enable-gradient-checkpointing"
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::Training,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.training_device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: None,
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "training.py".to_string(),
+                uses_shared_helpers: vec!["common.py".to_string()],
+            },
+            args: PythonScriptTaskArgs::Training(TrainingScriptArgs {
+                init_model_path: paths.init_model_path.to_string_lossy().to_string(),
+                codec_path: Some(paths.codec_path.to_string_lossy().to_string()),
+                tokenizer_model_path: None,
+                input_jsonl: paths.input_jsonl.to_string_lossy().to_string(),
+                output_jsonl: None,
+                output_model_path: paths.output_model_dir.to_string_lossy().to_string(),
+                batch_size: params.batch_size,
+                lr: params.learning_rate.clone(),
+                num_epochs: params.epoch_count,
+                speaker_name: None,
+                gradient_accumulation_steps: params.gradient_accumulation_steps,
+                enable_gradient_checkpointing: params.enable_gradient_checkpointing,
+                use_lora: false,
+                training_mode: None,
+                lora_rank: None,
+                lora_alpha: None,
+                lora_dropout: None,
+                weight_decay: params.weight_decay.clone(),
+                warmup_steps: Some(params.warmup_steps),
+                warmup_ratio: params.warmup_ratio.clone(),
+                max_grad_norm: params.max_grad_norm.clone(),
+                mixed_precision: Some(params.mixed_precision.clone()),
+                channelwise_loss_weight: Some(params.channelwise_loss_weight.clone()),
+                skip_reference_audio_codes: Some(params.skip_reference_audio_codes),
+                prep_batch_size: Some(params.prep_batch_size),
+                prep_n_vq: params.prep_n_vq,
+                lr_scheduler_type: Some("cosine".to_string()),
+            }),
         };
 
-        let mut script_args = vec![
-            "--train-jsonl".to_string(),
-            paths.input_jsonl.to_string_lossy().to_string(),
-            "--output-model-path".to_string(),
-            paths.output_model_dir.to_string_lossy().to_string(),
-            "--init-model-path".to_string(),
-            paths.init_model_path.to_string_lossy().to_string(),
-            "--codec-path".to_string(),
-            paths.codec_path.to_string_lossy().to_string(),
-            "--logging-dir".to_string(),
-            metrics_log_dir.to_string_lossy().to_string(),
-            "--batch-size".to_string(),
-            params.batch_size.to_string(),
-            "--num-epochs".to_string(),
-            params.epoch_count.to_string(),
-            "--device".to_string(),
-            runtime.training_device().to_string(),
-            "--gradient-accumulation-steps".to_string(),
-            params.gradient_accumulation_steps.to_string(),
-            "--learning-rate".to_string(),
-            params.learning_rate.to_string(),
-            "--weight-decay".to_string(),
-            params.weight_decay.to_string(),
-            "--warmup-ratio".to_string(),
-            params.warmup_ratio.to_string(),
-            "--warmup-steps".to_string(),
-            params.warmup_steps.to_string(),
-            "--max-grad-norm".to_string(),
-            params.max_grad_norm.to_string(),
-            "--mixed-precision".to_string(),
-            params.mixed_precision.clone(),
-            "--channelwise-loss-weight".to_string(),
-            params.channelwise_loss_weight.clone(),
-            "--prep-batch-size".to_string(),
-            params.prep_batch_size.to_string(),
-            gradient_checkpointing_flag.to_string(),
-            skip_reference_audio_codes_flag.to_string(),
-        ];
-        if let Some(prep_n_vq) = params.prep_n_vq {
-            script_args.push("--prep-n-vq".to_string());
-            script_args.push(prep_n_vq.to_string());
-        }
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script_cancellable(
             &paths.venv_python_path,
@@ -634,7 +620,10 @@ impl MossTtsLocalModelTaskPipeline {
             TrainingCommandLabel::RunTraining.as_str(),
             &task_log_path,
             "python command completed successfully",
-            script_args,
+            vec![
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
+            ],
             &mut cancel_rx,
         )
         .await

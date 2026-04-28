@@ -11,7 +11,10 @@ use tracing::{error, info};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
-        task_paths::{ensure_task_metrics_log_dir, task_log_file_path},
+        task_paths::{
+            ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir,
+            voice_clone_params_json_path,
+        },
     },
     config::{load_configs, BaseModel, HardwareType},
     service::{
@@ -25,20 +28,22 @@ use crate::{
             TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload, VoxCpm2VoiceCloneModelParams,
         },
         pipeline::{
-            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
-            model_paths::llm_model_display_name,
+            api::{
+                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
+                VoiceCloneScriptArgs,
+            },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
-            VoiceClonePipelineRequest,
+            VoiceClonePipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
         audio::{
-            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path,
-            resolve_temp_wav_path,
+            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
         },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
         process::{run_logged_command, run_logged_python_script},
@@ -73,14 +78,6 @@ impl VoiceCloneRuntimeOptions {
             "cuda:0"
         }
     }
-
-    fn mode_label(self, base_model: &str) -> Result<String> {
-        Ok(format!(
-            "{} / {}",
-            llm_model_display_name(base_model)?,
-            if self.is_cpu() { "CPU" } else { "CUDA" }
-        ))
-    }
 }
 
 #[derive(Debug)]
@@ -94,6 +91,7 @@ struct VoiceClonePaths {
     voice_clone_python_script_path: PathBuf,
     ffmpeg_python_script_path: PathBuf,
     base_model_path: PathBuf,
+    params_json_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -102,13 +100,12 @@ struct VoiceCloneTaskExecution {
     model_scale: String,
     language: String,
     format: TextToSpeechFormat,
-    ref_audio_name: String,
     ref_audio_path: String,
     ref_text: String,
     text: String,
     mode: String,
     style_prompt: String,
-    cfg_value: f64,
+    cfg_value: Option<String>,
     inference_timesteps: i64,
     output_file_path: String,
 }
@@ -150,8 +147,12 @@ impl VoxCpm2ModelTaskPipeline {
                 .await?;
             let runtime =
                 VoiceCloneRuntimeOptions::from_hardware_type(load_configs()?.hardware_type());
-            let paths =
-                self.resolve_voice_clone_paths(service, &params.base_model, &params.model_scale)?;
+            let paths = self.resolve_voice_clone_paths(
+                service,
+                request.task_id,
+                &params.base_model,
+                &params.model_scale,
+            )?;
             let log_dir = resolve_local_log_dir()?;
 
             self.prepare_voice_clone_env(service, &paths, request.task_id, &log_dir, runtime)
@@ -224,7 +225,6 @@ impl VoxCpm2ModelTaskPipeline {
                 .format
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
-            ref_audio_name: row.ref_audio_name,
             ref_audio_path: resolve_task_path(Path::new(service.data_dir()), &row.ref_audio_path)
                 .to_string_lossy()
                 .to_string(),
@@ -246,6 +246,7 @@ impl VoxCpm2ModelTaskPipeline {
     fn resolve_voice_clone_paths(
         &self,
         service: &LocalService,
+        task_id: i64,
         base_model: &str,
         model_scale: &str,
     ) -> Result<VoiceClonePaths> {
@@ -261,6 +262,12 @@ impl VoxCpm2ModelTaskPipeline {
         let ffmpeg_python_script_path =
             src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
         let base_model_path = vox_cpm2_base_model_path(&src_model_root, model_scale)?;
+        let sample_root = task_sample_dir(
+            Path::new(service.data_dir()),
+            crate::service::models::HistoryTaskType::VoiceClone,
+            task_id,
+        );
+        let params_json_path = voice_clone_params_json_path(&sample_root);
 
         Ok(VoiceClonePaths {
             base_model: base_model.to_string(),
@@ -272,6 +279,7 @@ impl VoxCpm2ModelTaskPipeline {
             voice_clone_python_script_path,
             ffmpeg_python_script_path,
             base_model_path,
+            params_json_path,
         })
     }
 
@@ -406,13 +414,39 @@ impl VoxCpm2ModelTaskPipeline {
 
         info!(
             script = %paths.voice_clone_python_script_path.display(),
-            ref_audio_name = %params.ref_audio_name,
-            ref_audio_path = %ref_audio_path.display(),
-            output_path = %params.output_file_path,
-            mode = %runtime.mode_label(&params.base_model)?,
-            device = runtime.device(),
-            "starting local voxcpm2 voice clone inference through direct python invocation"
+            params_file = %paths.params_json_path.display(),
+            "starting local voxcpm2 voice clone inference through params-file python invocation"
         );
+
+        let invocation = PythonScriptInvocationSpec {
+            version: 1,
+            base_model: paths.base_model.clone(),
+            kind: PythonScriptTaskKind::VoiceClone,
+            runtime: PythonScriptRuntimeOptions {
+                device: Some(runtime.device().to_string()),
+                logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
+                attn_implementation: None,
+            },
+            target: PythonScriptExecutionTarget {
+                model_script_name: "voice_clone.py".to_string(),
+                uses_shared_helpers: Vec::new(),
+            },
+            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneScriptArgs {
+                ref_audio_path: ref_audio_path.to_string_lossy().to_string(),
+                ref_text: params.ref_text.clone(),
+                init_model_path: paths.base_model_path.to_string_lossy().to_string(),
+                language: params.language.clone(),
+                output_path: temp_wav_path.to_string_lossy().to_string(),
+                text: params.text.clone(),
+                mode: Some(params.mode.clone()),
+                style_prompt: Some(params.style_prompt.clone()),
+                cfg_value: params.cfg_value.clone(),
+                inference_timesteps: Some(params.inference_timesteps),
+                n_vq_for_inference: None,
+            }),
+        };
+
+        invocation.write_to_json_file(&paths.params_json_path)?;
 
         run_logged_python_script(
             &paths.venv_python_path,
@@ -422,30 +456,8 @@ impl VoxCpm2ModelTaskPipeline {
             &task_log_path,
             "python command completed successfully",
             vec![
-                "--init-model-path".to_string(),
-                paths.base_model_path.to_string_lossy().to_string(),
-                "--mode".to_string(),
-                params.mode.clone(),
-                "--ref-audio-path".to_string(),
-                ref_audio_path.to_string_lossy().to_string(),
-                "--ref-text".to_string(),
-                params.ref_text.clone(),
-                "--text".to_string(),
-                params.text.clone(),
-                "--style-prompt".to_string(),
-                params.style_prompt.clone(),
-                "--cfg-value".to_string(),
-                params.cfg_value.to_string(),
-                "--inference-timesteps".to_string(),
-                params.inference_timesteps.to_string(),
-                "--language".to_string(),
-                params.language.clone(),
-                "--output-path".to_string(),
-                temp_wav_path.to_string_lossy().to_string(),
-                "--logging-dir".to_string(),
-                metrics_log_dir.to_string_lossy().to_string(),
-                "--device".to_string(),
-                runtime.device().to_string(),
+                "--params-file".to_string(),
+                paths.params_json_path.to_string_lossy().to_string(),
             ],
         )
         .await?;
