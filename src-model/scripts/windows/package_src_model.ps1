@@ -38,12 +38,80 @@ function Get-RelativeArchivePath {
     return $normalizedFullPath.Substring($normalizedRoot.Length).TrimStart([char[]]@([char]92, [char]47))
 }
 
-$excludeDirectoryNames = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'venv', '.venv')
+$excludeDirectoryNames = @('base-models', 'tests', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'venv', '.venv')
 $excludeExtensions = @('.pyc', '.pyo')
-$modelScriptExtensions = @('.py', '.ps1', '.sh')
-$modelRequirementFileNames = @('requirements.txt', 'requirements-dev.txt')
 $sourceDirectories = @('scripts')
 $modelDirectories = @('qwen3_tts', 'vox_cpm2', 'moss_tts_local')
+
+function Test-ShouldExcludeArchivePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath,
+
+        [AllowEmptyString()]
+        [string]$Extension
+    )
+
+    foreach ($directorySegment in ($RelativePath -split '[\\/]')) {
+        if ($excludeDirectoryNames -contains $directorySegment) {
+            return $true
+        }
+    }
+
+    if ($excludeExtensions -contains $Extension.ToLowerInvariant()) {
+        return $true
+    }
+
+    return $false
+}
+
+function Add-ArchiveFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchive]$Archive,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FullPath
+    )
+
+    $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $FullPath
+    $entryPath = $relativePath -replace '\\', '/'
+    $entry = $Archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+    $entryStream = $entry.Open()
+    try {
+        $fileStream = [System.IO.File]::OpenRead($FullPath)
+        try {
+            $fileStream.CopyTo($entryStream)
+        }
+        finally {
+            $fileStream.Dispose()
+        }
+    }
+    finally {
+        $entryStream.Dispose()
+    }
+}
+
+function Add-DirectoryFilesToArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.Compression.ZipArchive]$Archive,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DirectoryPath
+    )
+
+    Get-ChildItem -LiteralPath $DirectoryPath -Recurse -File | ForEach-Object {
+        $fullPath = $_.FullName
+        $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $fullPath
+
+        if (Test-ShouldExcludeArchivePath -RelativePath $relativePath -Extension $_.Extension) {
+            return
+        }
+
+        Add-ArchiveFile -Archive $Archive -FullPath $fullPath
+    }
+}
 
 if (Test-Path -LiteralPath $OutputFile) {
     Remove-Item -LiteralPath $OutputFile -Force
@@ -59,36 +127,7 @@ try {
                 throw "Source directory not found: $directoryPath"
             }
 
-            Get-ChildItem -LiteralPath $directoryPath -Recurse -File | ForEach-Object {
-                $fullPath = $_.FullName
-                $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $fullPath
-
-                foreach ($directorySegment in ($relativePath -split '[\\/]')) {
-                    if ($excludeDirectoryNames -contains $directorySegment) {
-                        return
-                    }
-                }
-
-                if ($excludeExtensions -contains $_.Extension.ToLowerInvariant()) {
-                    return
-                }
-
-                $entryPath = $relativePath -replace '\\', '/'
-                $entry = $archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
-                $entryStream = $entry.Open()
-                try {
-                    $fileStream = [System.IO.File]::OpenRead($fullPath)
-                    try {
-                        $fileStream.CopyTo($entryStream)
-                    }
-                    finally {
-                        $fileStream.Dispose()
-                    }
-                }
-                finally {
-                    $entryStream.Dispose()
-                }
-            }
+            Add-DirectoryFilesToArchive -Archive $archive -DirectoryPath $directoryPath
         }
 
         foreach ($directoryName in $modelDirectories) {
@@ -97,32 +136,7 @@ try {
                 throw "Source directory not found: $directoryPath"
             }
 
-            Get-ChildItem -LiteralPath $directoryPath -File | ForEach-Object {
-                $fullPath = $_.FullName
-                $fileName = $_.Name
-                $extension = $_.Extension.ToLowerInvariant()
-
-                if (($modelScriptExtensions -notcontains $extension) -and ($modelRequirementFileNames -notcontains $fileName)) {
-                    return
-                }
-
-                $relativePath = Get-RelativeArchivePath -RootPath $srcModelRoot -FullPath $fullPath
-                $entryPath = $relativePath -replace '\\', '/'
-                $entry = $archive.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
-                $entryStream = $entry.Open()
-                try {
-                    $fileStream = [System.IO.File]::OpenRead($fullPath)
-                    try {
-                        $fileStream.CopyTo($entryStream)
-                    }
-                    finally {
-                        $fileStream.Dispose()
-                    }
-                }
-                finally {
-                    $entryStream.Dispose()
-                }
-            }
+            Add-DirectoryFilesToArchive -Archive $archive -DirectoryPath $directoryPath
         }
     }
     finally {

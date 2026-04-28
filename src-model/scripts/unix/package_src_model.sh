@@ -24,12 +24,26 @@ from zipfile import ZIP_DEFLATED, ZipFile
 src_model_root = Path(os.environ["SRC_MODEL_ROOT"]).resolve()
 output_file = Path(os.environ["OUTPUT_FILE"]).resolve()
 
-exclude_directory_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "venv", ".venv"}
+exclude_directory_names = {"base-models", "tests", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "venv", ".venv"}
 exclude_suffixes = {".pyc", ".pyo"}
 source_directories = ("scripts",)
 model_directories = ("qwen3_tts", "vox_cpm2", "moss_tts_local")
-model_script_suffixes = {".py", ".ps1", ".sh"}
-model_requirement_names = {"requirements.txt", "requirements-dev.txt"}
+
+
+def should_exclude(relative_path: Path) -> bool:
+    return any(part in exclude_directory_names for part in relative_path.parts) or relative_path.suffix.lower() in exclude_suffixes
+
+
+def add_directory(archive: ZipFile, directory_path: Path) -> None:
+    for file_path in directory_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+
+        relative_path = file_path.relative_to(src_model_root)
+        if should_exclude(relative_path):
+            continue
+
+        archive.write(file_path, relative_path.as_posix())
 
 output_file.parent.mkdir(parents=True, exist_ok=True)
 if output_file.exists():
@@ -41,30 +55,13 @@ with ZipFile(output_file, "w", compression=ZIP_DEFLATED) as archive:
         if not directory_path.exists():
             raise SystemExit(f"Source directory not found: {directory_path}")
 
-        for file_path in directory_path.rglob("*"):
-            if not file_path.is_file():
-                continue
-
-            relative_path = file_path.relative_to(src_model_root)
-            if any(part in exclude_directory_names for part in relative_path.parts):
-                continue
-            if file_path.suffix.lower() in exclude_suffixes:
-                continue
-
-            archive.write(file_path, relative_path.as_posix())
+        add_directory(archive, directory_path)
 
     for directory_name in model_directories:
         directory_path = src_model_root / directory_name
         if not directory_path.exists():
             raise SystemExit(f"Source directory not found: {directory_path}")
 
-        for file_path in directory_path.iterdir():
-            if not file_path.is_file():
-                continue
-            if file_path.suffix.lower() not in model_script_suffixes and file_path.name not in model_requirement_names:
-                continue
-
-            relative_path = file_path.relative_to(src_model_root)
-            archive.write(file_path, relative_path.as_posix())
+        add_directory(archive, directory_path)
 print(f"Created model runtime archive: {output_file}")
 PY

@@ -16,7 +16,7 @@
 
 - `qwen3_tts/` 主要脚本：
   - `encode_audio.py`: 训练前音频编码预处理。
-  - `training.py`: 训练入口；内部再分发到 `training_full.py`、`training_lora.py` 与 `training_common.py`。
+  - `training.py`: 训练入口；直接走全量微调实现，并复用 `training_full.py`、`training_common.py`。
   - `tts.py`: 文本转语音推理。
   - `voice_clone.py`: 声音克隆推理。
   - `ffmpeg.py`: 基于 `ffmpy` 的音频转码封装。

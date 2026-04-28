@@ -28,7 +28,6 @@ class Qwen3TrainingParams:
     speaker_name: str
     gradient_accumulation_steps: int
     enable_gradient_checkpointing: bool
-    use_lora: bool
     runtime: Qwen3TrainingRuntimeOptions
 
     def to_namespace(self) -> Namespace:
@@ -45,7 +44,6 @@ class Qwen3TrainingParams:
             enable_gradient_checkpointing=self.enable_gradient_checkpointing,
             device=self.runtime.device,
             attn_implementation=self.runtime.attn_implementation,
-            use_lora=self.use_lora,
         )
 
 
@@ -99,7 +97,6 @@ def load_training_params(path: str | Path) -> Qwen3TrainingParams:
         speaker_name=str(args["speaker_name"]),
         gradient_accumulation_steps=int(args["gradient_accumulation_steps"]),
         enable_gradient_checkpointing=bool(args["enable_gradient_checkpointing"]),
-        use_lora=bool(args.get("use_lora", False)),
         runtime=Qwen3TrainingRuntimeOptions(
             device=str(runtime.get("device") or "cuda:0"),
             logging_dir=str(runtime.get("logging_dir") or ""),
