@@ -1,0 +1,102 @@
+{
+  "models": [
+    {
+      "baseModel": "qwen3_tts",
+      "modelName": "Qwen3-TTS",
+      "modelScale": "1.7B",
+      "requiredModelNameList": ["Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-1.7B-CustomVoice"],
+      "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
+      "downloaded": true
+    },
+    {
+      "baseModel": "qwen3_tts",
+      "modelName": "Qwen3-TTS",
+      "modelScale": "0.6B",
+      "requiredModelNameList": ["Qwen3-TTS-12Hz-0.6B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-0.6B-CustomVoice"],
+      "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-0.6B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
+      "downloaded": true
+    },
+    {
+      "baseModel": "vox_cpm2",
+      "modelName": "VoxCPM2",
+      "modelScale": "2B",
+      "requiredModelNameList": ["VoxCPM2"],
+      "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "lora"],
+      "downloaded": true
+    },
+    {
+      "baseModel": "moss_tts_local",
+      "modelName": "MOSS-TTS Local",
+      "modelScale": "1.7B",
+      "requiredModelNameList": ["MOSS-TTS-Local-Transformer", "MOSS-Audio-Tokenizer"],
+      "requiredModelRepoIdList": ["OpenMOSS-Team/MOSS-TTS-Local-Transformer", "OpenMOSS-Team/MOSS-Audio-Tokenizer"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
+      "downloaded": false
+    }
+  ],
+  "speakers": [
+    {
+      "name": "Vivian",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Bright, slightly edgy young female voice. Native language: Chinese."
+    },
+    {
+      "name": "Serena",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Warm, gentle young female voice. Native language: Chinese."
+    },
+    {
+      "name": "Uncle_Fu",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Seasoned male voice with a low, mellow timbre. Native language: Chinese."
+    },
+    {
+      "name": "Dylan",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Youthful Beijing male voice with a clear, natural timbre. Native language: Chinese (Beijing Dialect)."
+    },
+    {
+      "name": "Eric",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Lively Chengdu male voice with a slightly husky brightness. Native language: Chinese (Sichuan Dialect)."
+    },
+    {
+      "name": "Ryan",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Dynamic male voice with strong rhythmic drive. Native language: English."
+    },
+    {
+      "name": "Aiden",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Sunny American male voice with a clear midrange. Native language: English."
+    },
+    {
+      "name": "Ono_Anna",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Playful Japanese female voice with a light, nimble timbre. Native language: Japanese."
+    },
+    {
+      "name": "Sohee",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "qwen3_tts",
+      "description": "Warm Korean female voice with rich emotion. Native language: Korean."
+    },
+    {
+      "name": "VoxCPM2_Speaker",
+      "languages": ["chinese", "english", "japanese"],
+      "baseModel": "vox_cpm2",
+      "description": "VoxCPM2 内置说话人，可直接用于语音合成或作为微调起点。"
+    }
+  ]
+}

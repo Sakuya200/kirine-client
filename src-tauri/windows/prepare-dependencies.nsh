@@ -5,32 +5,49 @@
 !include "${PREPARE_DEPENDENCIES_DIR}\ffmpeg.nsh"
 !include "${PREPARE_DEPENDENCIES_DIR}\src-model.nsh"
 
-Function RelocateBundledConfigAndCleanupResources
-	StrCpy $0 "$INSTDIR\resources\config.toml"
-	StrCpy $1 "$INSTDIR\config.toml"
-	StrCpy $2 "$INSTDIR\resources"
+Function RelocateBundledAppFile
+	Exch $1
+	Exch
+	Exch $0
+	Push $2
 
-	IfFileExists "$0" 0 cleanup_resources
-	IfFileExists "$1" config_exists move_config
+	IfFileExists "$0" 0 relocate_done
+	IfFileExists "$1" app_file_exists move_app_file
 
-move_config:
-	DetailPrint "Moving bundled config.toml to $1"
+move_app_file:
+	DetailPrint "Moving bundled file to $1"
 	ClearErrors
 	Rename "$0" "$1"
-	IfErrors move_failed cleanup_resources
+	IfErrors move_app_file_failed relocate_done
 
-config_exists:
-	DetailPrint "config.toml already exists at $1, keeping the existing file."
+app_file_exists:
+	DetailPrint "$1 already exists, keeping the existing file."
 	Delete "$0"
-	Goto cleanup_resources
+	Goto relocate_done
 
-move_failed:
-	MessageBox MB_ICONEXCLAMATION "Failed to move bundled config.toml to $1. The bundled resources directory will still be cleaned up."
+move_app_file_failed:
+	MessageBox MB_ICONEXCLAMATION "Failed to move bundled file to $1. The bundled resources directory will still be cleaned up."
 
-cleanup_resources:
-	IfFileExists "$2" 0 cleanup_done
-	DetailPrint "Removing bundled resources directory: $2"
-	RMDir /r "$2"
+relocate_done:
+	Pop $2
+	Pop $0
+	Pop $1
+FunctionEnd
+
+Function RelocateBundledAppFilesAndCleanupResources
+	StrCpy $0 "$INSTDIR\resources"
+
+	Push "$INSTDIR\resources\config.toml"
+	Push "$INSTDIR\config.toml"
+	Call RelocateBundledAppFile
+
+	Push "$INSTDIR\resources\supported_models.json"
+	Push "$INSTDIR\supported_models.json"
+	Call RelocateBundledAppFile
+
+	IfFileExists "$0" 0 cleanup_done
+	DetailPrint "Removing bundled resources directory: $0"
+	RMDir /r "$0"
 
 cleanup_done:
 FunctionEnd
@@ -40,7 +57,7 @@ FunctionEnd
 	Call InstallBundledSox
 	Call InstallBundledFfmpeg
 	Call InstallBundledSrcModelRuntime
-	Call RelocateBundledConfigAndCleanupResources
+	Call RelocateBundledAppFilesAndCleanupResources
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

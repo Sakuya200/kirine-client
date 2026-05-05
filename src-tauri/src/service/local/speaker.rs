@@ -191,7 +191,7 @@ impl LocalService {
 }
 
 impl LocalService {
-    async fn find_supported_model_variant(&self, base_model: &str, model_scale: &str) -> Result<ModelInfo> {
+    pub(crate) async fn find_supported_model_variant(&self, base_model: &str, model_scale: &str) -> Result<ModelInfo> {
         use crate::service::local::entity::model_info as model_info_entity;
 
         let row = model_info_entity::Entity::find()

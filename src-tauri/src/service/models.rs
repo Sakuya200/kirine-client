@@ -214,6 +214,7 @@ impl FromStr for HistoryTaskType {
 #[serde(rename_all = "lowercase")]
 pub enum SpeakerSource {
     Local,
+    Preset,
     Remote,
 }
 
@@ -221,6 +222,7 @@ impl SpeakerSource {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Local => "local",
+            Self::Preset => "preset",
             Self::Remote => "remote",
         }
     }
@@ -238,6 +240,7 @@ impl FromStr for SpeakerSource {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim() {
             "local" => Ok(Self::Local),
+            "preset" => Ok(Self::Preset),
             "remote" => Ok(Self::Remote),
             other => Err(format!("不支持的说话人来源: {}", other)),
         }

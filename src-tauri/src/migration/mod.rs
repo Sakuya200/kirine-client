@@ -9,9 +9,6 @@ mod add_model_info_downloaded_flag;
 mod add_model_training_description;
 mod add_vox_cpm2_lora_feature_flag;
 mod create_local_schema;
-mod seed_moss_tts_local_model_info;
-mod seed_qwen3_tts_preset_speakers;
-mod seed_vox_cpm2_model_info;
 
 const LOCAL_SCHEMA_VERSION: &str = "19";
 
@@ -22,11 +19,8 @@ impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(create_local_schema::Migration),
-            Box::new(seed_qwen3_tts_preset_speakers::Migration),
-            Box::new(seed_vox_cpm2_model_info::Migration),
             Box::new(add_vox_cpm2_lora_feature_flag::Migration),
             Box::new(add_model_info_downloaded_flag::Migration),
-            Box::new(seed_moss_tts_local_model_info::Migration),
             Box::new(add_model_training_description::Migration),
         ]
     }
@@ -50,6 +44,7 @@ pub(crate) async fn run_local_migrations(db: &DatabaseConnection) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use crate::test_support::LocalServiceHarness;
+    use crate::service::models::SpeakerSource;
 
     #[tokio::test]
     async fn fresh_database_matches_current_runtime_schema() {
@@ -111,14 +106,15 @@ mod tests {
             .any(|feature| feature == "lora"));
 
         let speakers = harness.list_speakers().await.expect("list speakers");
-        let speaker_names = speakers
+        let vox_speaker = speakers
             .iter()
-            .map(|speaker| speaker.name.as_str())
-            .collect::<Vec<_>>();
-        assert!(speaker_names.contains(&"VoxCPM2_Speaker"));
+            .find(|speaker| {
+                speaker.base_model == "vox_cpm2" && speaker.source == SpeakerSource::Preset
+            })
+            .expect("vox preset speaker should exist");
 
         let model_path = harness
-            .speaker_model_path_by_name("VoxCPM2_Speaker")
+            .speaker_model_path_by_name(&vox_speaker.name)
             .await
             .expect("query vox preset speaker model path")
             .expect("vox preset speaker model path should exist");

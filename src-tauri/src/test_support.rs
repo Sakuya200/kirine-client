@@ -121,7 +121,9 @@ impl LocalServiceHarness {
             .list_speakers()
             .await?
             .into_iter()
-            .find(|speaker| speaker.name == "VoxCPM2_Speaker")
+            .find(|speaker| {
+                speaker.base_model == "vox_cpm2" && speaker.source == SpeakerSource::Preset
+            })
             .expect("expected built-in VoxCPM2 speaker to exist");
 
         self.service

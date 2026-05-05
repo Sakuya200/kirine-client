@@ -37,7 +37,7 @@ use crate::{
             SpeakerSource, SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
         },
         pipeline::{
-            model_paths::{llm_model_display_name, speaker_model_dir},
+            model_paths::speaker_model_dir,
             moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
         },
         LocalService,
@@ -157,9 +157,12 @@ impl LocalService {
                 payload.model_params.clone(),
             )?)?
         };
+        let selected_model_info = self
+            .find_supported_model_variant(&base_model, &model_scale)
+            .await?;
         let selected_training_mode_text = format!(
             "{} / {}",
-            llm_model_display_name(&base_model)?,
+            selected_model_info.model_name,
             match selected_training_hardware {
                 HardwareType::Cuda => "CUDA",
                 HardwareType::Cpu => "CPU",

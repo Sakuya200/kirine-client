@@ -3,6 +3,7 @@ pub(crate) mod entity;
 mod history;
 mod model_info;
 mod speaker;
+mod supported_models;
 mod training;
 mod tts;
 mod voice_clone;
@@ -341,6 +342,15 @@ impl LocalService {
             .with_context(|| {
                 format!(
                     "failed to run SeaORM local migrations in {}",
+                    data_dir.display()
+                )
+            })?;
+
+        supported_models::sync_supported_models(orm)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to sync supported_models.json into local database in {}",
                     data_dir.display()
                 )
             })?;

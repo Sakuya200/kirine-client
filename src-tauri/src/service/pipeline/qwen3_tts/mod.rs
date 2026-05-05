@@ -1,4 +1,3 @@
-mod preset_speakers;
 mod training;
 mod tts;
 mod voice_clone;
@@ -9,7 +8,6 @@ use std::{
     sync::LazyLock,
 };
 
-pub(crate) use preset_speakers::qwen3_tts_preset_speakers;
 pub(crate) use tts::resolve_inference_model_path;
 
 use async_trait::async_trait;
@@ -61,9 +59,6 @@ const QWEN3_TTS_06B_VARIANT: Qwen3TtsVariantDefinition = Qwen3TtsVariantDefiniti
 
 const QWEN3_TTS_VARIANTS: &[Qwen3TtsVariantDefinition] =
     &[QWEN3_TTS_17B_VARIANT, QWEN3_TTS_06B_VARIANT];
-
-pub(crate) const QWEN3_TTS_DEFAULT_CUSTOM_VOICE_MODEL_NAME: &str =
-    QWEN3_TTS_17B_VARIANT.custom_voice_model_name;
 
 pub(crate) static QWEN3_TTS_MODEL_DEFINITION: LazyLock<LlmModelDefinition> =
     LazyLock::new(|| LlmModelDefinition {

@@ -6,7 +6,7 @@ import type { HistoryTaskType } from '@/enums/task';
 
 export type BaseModel = string;
 
-export type SpeakerSource = 'local' | 'remote';
+export type SpeakerSource = 'local' | 'preset' | 'remote';
 
 export interface SpeakerProfile {
   id: number;

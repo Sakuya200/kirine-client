@@ -29,7 +29,8 @@
       "resources/sox-14.4.2-win32.exe",
       "resources/ffmpeg-8.0.1-essentials_build.zip",
       "resources/src-model-runtime.zip",
-      "resources/config.toml"
+      "resources/config.toml",
+      "resources/supported_models.json"
     ],
     "windows": {
       "webviewInstallMode": {
