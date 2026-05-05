@@ -1,6 +1,6 @@
 {
-  "include": ["qwen3_tts", "vox_cpm2"],
-  "exclude": ["venv", "qwen3_tts/venv", "vox_cpm2/venv", "**/__pycache__", "**/node_modules", "**/.*"],
+  "include": ["qwen3_tts", "vox_cpm2", "moss_tts_local"],
+  "exclude": ["venv", "qwen3_tts/venv", "vox_cpm2/venv", "moss_tts_local/venv", "**/__pycache__", "**/node_modules", "**/.*"],
   "extraPaths": ["."],
   "typeCheckingMode": "basic",
   "executionEnvironments": [
@@ -10,6 +10,10 @@
     },
     {
       "root": "vox_cpm2",
+      "extraPaths": ["."]
+    },
+    {
+      "root": "moss_tts_local",
       "extraPaths": ["."]
     }
   ]

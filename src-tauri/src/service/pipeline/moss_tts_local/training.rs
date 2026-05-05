@@ -37,16 +37,17 @@ use crate::{
             model_paths::speaker_model_dir,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
-                src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
+                src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
             TrainingPipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
-        audio::{build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path},
+        audio::{build_ffmpeg_transcode_script_args, resolve_normalized_wav_sidecar_path},
         process::{
-            run_logged_command, run_logged_python_script, run_logged_python_script_cancellable,
+            run_logged_command, run_logged_python_script_cancellable,
+            run_logged_shell_script,
             LoggedCommandResult,
         },
         time::now_string,
@@ -111,7 +112,7 @@ struct TrainingPaths {
     venv_python_path: PathBuf,
     init_task_runtime_script_path: PathBuf,
     download_models_script_path: PathBuf,
-    ffmpeg_python_script_path: PathBuf,
+    transcode_script_path: PathBuf,
     train_python_script_path: PathBuf,
     init_model_path: PathBuf,
     codec_path: PathBuf,
@@ -294,8 +295,7 @@ impl MossTtsLocalModelTaskPipeline {
             src_model_root.join(platform.init_task_runtime_relative_path());
         let download_models_script_path =
             src_model_root.join(platform.download_models_relative_path());
-        let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let transcode_script_path = src_model_transcode_script_path(&src_model_root);
         let train_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
         let init_model_path = src_model_root
@@ -320,7 +320,7 @@ impl MossTtsLocalModelTaskPipeline {
         for (label, path) in [
             ("init-task-runtime script", &init_task_runtime_script_path),
             ("download-models script", &download_models_script_path),
-            ("ffmpeg python script", &ffmpeg_python_script_path),
+            ("transcode script", &transcode_script_path),
             ("train python script", &train_python_script_path),
         ] {
             if !path.exists() {
@@ -344,7 +344,7 @@ impl MossTtsLocalModelTaskPipeline {
             venv_python_path,
             init_task_runtime_script_path,
             download_models_script_path,
-            ffmpeg_python_script_path,
+            transcode_script_path,
             train_python_script_path,
             init_model_path,
             codec_path,
@@ -509,19 +509,22 @@ impl MossTtsLocalModelTaskPipeline {
 
         let output_path = resolve_normalized_wav_sidecar_path(input_path);
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::ModelTraining, task_id);
+        let platform = ScriptPlatform::current();
 
-        run_logged_python_script(
-            &paths.venv_python_path,
-            &paths.ffmpeg_python_script_path,
+        run_logged_shell_script(
+            Path::new(platform.shell_program()),
+            &paths.transcode_script_path,
             &paths.src_model_root,
             TrainingCommandLabel::NormalizeAudio.as_str(),
             &task_log_path,
-            "python command completed successfully",
-            build_ffmpeg_transcode_args(
+            "shell script completed successfully",
+            platform.shell_base_args(),
+            build_ffmpeg_transcode_script_args(
                 input_path,
                 &output_path,
                 "wav",
                 Some(MOSS_TTS_LOCAL_RECOMMENDED_AUDIO_SAMPLE_RATE),
+                &task_log_path,
             ),
         )
         .await?;

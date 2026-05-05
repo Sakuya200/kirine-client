@@ -35,7 +35,7 @@ use crate::{
             },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
-                src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
+                src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
             VoiceClonePipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
@@ -43,10 +43,10 @@ use crate::{
     },
     utils::{
         audio::{
-            build_ffmpeg_transcode_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
+            build_ffmpeg_transcode_script_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
         },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
-        process::{run_logged_command, run_logged_python_script},
+        process::{run_logged_command, run_logged_python_script, run_logged_shell_script},
     },
     Result,
 };
@@ -89,7 +89,7 @@ struct VoiceClonePaths {
     init_task_runtime_script_path: PathBuf,
     download_models_script_path: PathBuf,
     voice_clone_python_script_path: PathBuf,
-    ffmpeg_python_script_path: PathBuf,
+    transcode_script_path: PathBuf,
     base_model_path: PathBuf,
     params_json_path: PathBuf,
 }
@@ -259,8 +259,7 @@ impl VoxCpm2ModelTaskPipeline {
             src_model_root.join(platform.download_models_relative_path());
         let voice_clone_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "voice_clone.py")?;
-        let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let transcode_script_path = src_model_transcode_script_path(&src_model_root);
         let base_model_path = vox_cpm2_base_model_path(&src_model_root, model_scale)?;
         let sample_root = task_sample_dir(
             Path::new(service.data_dir()),
@@ -277,7 +276,7 @@ impl VoxCpm2ModelTaskPipeline {
             init_task_runtime_script_path,
             download_models_script_path,
             voice_clone_python_script_path,
-            ffmpeg_python_script_path,
+            transcode_script_path,
             base_model_path,
             params_json_path,
         })
@@ -373,8 +372,8 @@ impl VoxCpm2ModelTaskPipeline {
                 &paths.voice_clone_python_script_path,
             ),
             (
-                "VoxCPM2 ffmpeg python script",
-                &paths.ffmpeg_python_script_path,
+                "VoxCPM2 transcode script",
+                &paths.transcode_script_path,
             ),
             ("VoxCPM2 base model path", &paths.base_model_path),
         ] {
@@ -495,19 +494,22 @@ impl VoxCpm2ModelTaskPipeline {
             crate::service::models::HistoryTaskType::VoiceClone,
             task_id,
         );
+        let platform = ScriptPlatform::current();
 
-        run_logged_python_script(
-            &paths.venv_python_path,
-            &paths.ffmpeg_python_script_path,
+        run_logged_shell_script(
+            Path::new(platform.shell_program()),
+            &paths.transcode_script_path,
             &paths.src_model_root,
             VoiceCloneCommandLabel::NormalizeReferenceAudio.as_str(),
             &task_log_path,
-            "python command completed successfully",
-            build_ffmpeg_transcode_args(
+            "shell script completed successfully",
+            platform.shell_base_args(),
+            build_ffmpeg_transcode_script_args(
                 input_path,
                 &output_path,
                 "wav",
                 Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+                &task_log_path,
             ),
         )
         .await?;
@@ -539,18 +541,21 @@ impl VoxCpm2ModelTaskPipeline {
             crate::service::models::HistoryTaskType::VoiceClone,
             task_id,
         );
-        run_logged_python_script(
-            &paths.venv_python_path,
-            &paths.ffmpeg_python_script_path,
+        let platform = ScriptPlatform::current();
+        run_logged_shell_script(
+            Path::new(platform.shell_program()),
+            &paths.transcode_script_path,
             &paths.src_model_root,
             VoiceCloneCommandLabel::ConvertAudio.as_str(),
             &task_log_path,
-            "python command completed successfully",
-            build_ffmpeg_transcode_args(
+            "shell script completed successfully",
+            platform.shell_base_args(),
+            build_ffmpeg_transcode_script_args(
                 temp_wav_path,
                 final_output_path,
                 format.as_str(),
                 Some(VOX_CPM2_RECOMMENDED_AUDIO_SAMPLE_RATE),
+                &task_log_path,
             ),
         )
         .await?;

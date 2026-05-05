@@ -19,13 +19,11 @@
   - `training.py`: 训练入口；直接走全量微调实现，并复用 `training_full.py`、`training_common.py`。
   - `tts.py`: 文本转语音推理。
   - `voice_clone.py`: 声音克隆推理。
-  - `ffmpeg.py`: 基于 `ffmpy` 的音频转码封装。
 - `vox_cpm2/` 主要脚本：
   - `training.py`: 训练外层入口；负责参数解析、训练配置生成与 checkpoint/runtime metadata 收尾。
   - `train_voxcpm_finetune.py`: 本地化维护的 VoxCPM 官方训练入口副本。运行时优先使用该脚本，不再通过 git clone 或 GitHub 压缩包动态拉取上游源码。
   - `tts.py`: 文本转语音推理。
   - `voice_clone.py`: 声音克隆推理。
-  - `ffmpeg.py`: 音频转码辅助脚本。
 - 当前 VoxCPM2 的离线前提是运行环境中已安装 `voxcpm` 及其训练依赖；训练脚本本身已随仓库分发。
 
 ## Rust 与脚本职责边界
@@ -33,7 +31,8 @@
 - Rust 负责训练任务状态流转、路径解析、参数组织、错误包装。
 - Rust 直接调用平台脚本，以及模型目录下的 Python 业务脚本。
 - 平台脚本负责运行时准备、依赖安装、基础模型下载与打包辅助。
-- Python 脚本负责编码、训练、文本转语音、声音克隆与转码等业务逻辑。
+- Python 脚本负责编码、训练、文本转语音与声音克隆等业务逻辑。
+- 音频转码由平台脚本统一处理，并直接调用系统中的 `ffmpeg`。
 
 ## 脚本动作
 
@@ -47,7 +46,7 @@
 - `train`: Rust 直接调用模型目录下的 `training.py`。Qwen3-TTS 与 VoxCPM2 训练入口相同命名，但内部实现不同。
 - `tts`: Rust 直接调用模型目录下的 `tts.py`。
 - `voice-clone`: Rust 直接调用模型目录下的 `voice_clone.py`。
-- `transcode`: Rust 直接调用模型目录下的 `ffmpeg.py`，由 `ffmpy` 驱动 `ffmpeg` 完成格式转换。
+- `transcode`: Rust 直接调用 `scripts/windows/transcode_audio.ps1` 或 `scripts/unix/transcode_audio.sh`，由平台脚本直接驱动 `ffmpeg` 完成格式转换。
 
 ## 模型运行配置
 

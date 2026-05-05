@@ -67,6 +67,19 @@ pub fn build_ffmpeg_transcode_args(
     args
 }
 
+pub fn build_ffmpeg_transcode_script_args(
+    input_path: &Path,
+    output_path: &Path,
+    output_format: &str,
+    sample_rate: Option<u32>,
+    task_log_path: &Path,
+) -> Vec<String> {
+    let mut args = build_ffmpeg_transcode_args(input_path, output_path, output_format, sample_rate);
+    args.push("--task-log-file".to_string());
+    args.push(task_log_path.to_string_lossy().to_string());
+    args
+}
+
 pub fn resolve_normalized_wav_sidecar_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.normalized.wav", path.to_string_lossy()))
 }

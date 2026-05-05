@@ -33,6 +33,13 @@ impl ScriptPlatform {
         }
     }
 
+    pub(crate) const fn transcode_audio_relative_path(self) -> &'static str {
+        match self {
+            Self::Windows => "scripts/windows/transcode_audio.ps1",
+            Self::Unix => "scripts/unix/transcode_audio.sh",
+        }
+    }
+
     pub(crate) const fn venv_python_relative_path(self) -> &'static str {
         match self {
             Self::Windows => "venv/Scripts/python.exe",
@@ -47,26 +54,27 @@ impl ScriptPlatform {
         }
     }
 
-    pub(crate) fn shell_args(self, script_path: &Path) -> Vec<String> {
+    pub(crate) fn shell_base_args(self) -> Vec<String> {
         match self {
             Self::Windows => vec![
                 "-NoProfile".to_string(),
                 "-ExecutionPolicy".to_string(),
                 "Bypass".to_string(),
                 "-File".to_string(),
-                script_path.to_string_lossy().to_string(),
             ],
-            Self::Unix => vec![script_path.to_string_lossy().to_string()],
+            Self::Unix => vec![],
         }
+    }
+
+    pub(crate) fn shell_args(self, script_path: &Path) -> Vec<String> {
+        let mut args = self.shell_base_args();
+        args.push(script_path.to_string_lossy().to_string());
+        args
     }
 }
 
-pub(crate) fn src_model_shared_python_script_path(
-    src_model_root: &Path,
-    base_model: &str,
-    script_name: &str,
-) -> PathBuf {
-    src_model_root.join(base_model).join(script_name)
+pub(crate) fn src_model_transcode_script_path(src_model_root: &Path) -> PathBuf {
+    src_model_root.join(ScriptPlatform::current().transcode_audio_relative_path())
 }
 
 pub(crate) fn src_model_model_python_script_path(

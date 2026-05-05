@@ -38,16 +38,16 @@ use crate::{
             },
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
-                src_model_shared_python_script_path, src_model_venv_python_path, ScriptPlatform,
+                src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
             },
             validate_and_download, validate_and_init, PipelineBootstrapPaths, TtsPipelineRequest,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
-        audio::{build_ffmpeg_transcode_args, resolve_temp_wav_path},
+        audio::{build_ffmpeg_transcode_script_args, resolve_temp_wav_path},
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
-        process::{run_logged_command, run_logged_python_script},
+        process::{run_logged_command, run_logged_python_script, run_logged_shell_script},
     },
     Result,
 };
@@ -86,7 +86,7 @@ struct TtsPaths {
     init_task_runtime_script_path: PathBuf,
     download_models_script_path: PathBuf,
     tts_python_script_path: PathBuf,
-    ffmpeg_python_script_path: PathBuf,
+    transcode_script_path: PathBuf,
     params_json_path: PathBuf,
 }
 
@@ -271,8 +271,7 @@ impl Qwen3TTSModelTaskPipeline {
             src_model_root.join(platform.download_models_relative_path());
         let tts_python_script_path =
             src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
-        let ffmpeg_python_script_path =
-            src_model_shared_python_script_path(&src_model_root, base_model, "ffmpeg.py");
+        let transcode_script_path = src_model_transcode_script_path(&src_model_root);
         let sample_root = task_sample_dir(
             Path::new(service.data_dir()),
             HistoryTaskType::TextToSpeech,
@@ -288,7 +287,7 @@ impl Qwen3TTSModelTaskPipeline {
             init_task_runtime_script_path,
             download_models_script_path,
             tts_python_script_path,
-            ffmpeg_python_script_path,
+            transcode_script_path,
             params_json_path,
         })
     }
@@ -388,10 +387,10 @@ impl Qwen3TTSModelTaskPipeline {
                 paths.tts_python_script_path.display()
             );
         }
-        if !paths.ffmpeg_python_script_path.exists() {
+        if !paths.transcode_script_path.exists() {
             bail!(
-                "TTS ffmpeg python script not found: {}",
-                paths.ffmpeg_python_script_path.display()
+                "TTS transcode script not found: {}",
+                paths.transcode_script_path.display()
             );
         }
 
@@ -513,22 +512,24 @@ impl Qwen3TTSModelTaskPipeline {
         final_output_path: &Path,
         format: TextToSpeechFormat,
     ) -> Result<()> {
-        let script_args = build_ffmpeg_transcode_args(
+        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
+        let platform = ScriptPlatform::current();
+        let script_args = build_ffmpeg_transcode_script_args(
             input_wav_path,
             final_output_path,
             format.as_str(),
             Some(QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE),
+            &task_log_path,
         );
 
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
-
-        run_logged_python_script(
-            &paths.venv_python_path,
-            &paths.ffmpeg_python_script_path,
+        run_logged_shell_script(
+            Path::new(platform.shell_program()),
+            &paths.transcode_script_path,
             &paths.src_model_root,
             TtsCommandLabel::ConvertAudio.as_str(),
             &task_log_path,
-            "python command completed successfully",
+            "shell script completed successfully",
+            platform.shell_base_args(),
             script_args,
         )
         .await?;

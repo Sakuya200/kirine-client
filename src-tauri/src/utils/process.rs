@@ -1,7 +1,11 @@
 use std::{fs::OpenOptions, io::Write, path::Path, process::Stdio};
 
 use anyhow::{bail, Context};
-use tokio::{process::Command, sync::watch, time::{timeout, Duration}};
+use tokio::{
+    process::Command,
+    sync::watch,
+    time::{timeout, Duration},
+};
 use tracing::{error, info};
 
 use crate::utils::file_ops::ensure_parent_dir;
@@ -370,14 +374,16 @@ pub async fn run_logged_command_cancellable(
     let output = loop {
         if cancellation_requested {
             match timeout(GRACEFUL_TERMINATION_TIMEOUT, &mut wait_with_output).await {
-                Ok(output) => break output.with_context(|| {
-                    format!(
-                        "failed while waiting for cancelled `{}` with program {} in {}",
-                        label,
-                        program.display(),
-                        current_dir.display()
-                    )
-                })?,
+                Ok(output) => {
+                    break output.with_context(|| {
+                        format!(
+                            "failed while waiting for cancelled `{}` with program {} in {}",
+                            label,
+                            program.display(),
+                            current_dir.display()
+                        )
+                    })?
+                }
                 Err(_) => {
                     if let Some(process_id) = process_id {
                         if let Err(err) = force_terminate_process(process_id) {
@@ -423,13 +429,21 @@ pub async fn run_logged_command_cancellable(
     append_process_output(task_log_path, &output.stdout, &output.stderr)?;
 
     if cancellation_requested {
-        info!(command = label, message = "command cancelled", "command completed");
+        info!(
+            command = label,
+            message = "command cancelled",
+            "command completed"
+        );
         return Ok(LoggedCommandResult::Cancelled);
     }
 
     let status = output.status;
     if status.success() {
-        info!(command = label, message = success_message, "command completed");
+        info!(
+            command = label,
+            message = success_message,
+            "command completed"
+        );
         return Ok(LoggedCommandResult::Completed);
     }
 
@@ -466,6 +480,30 @@ pub async fn run_logged_python_script(
     run_logged_command(
         python_path,
         &args,
+        current_dir,
+        label,
+        task_log_path,
+        success_message,
+    )
+    .await
+}
+
+pub async fn run_logged_shell_script(
+    shell_program: &Path,
+    script_path: &Path,
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    success_message: &str,
+    mut shell_args: Vec<String>,
+    script_args: Vec<String>,
+) -> Result<()> {
+    shell_args.push(script_path.to_string_lossy().to_string());
+    shell_args.extend(script_args);
+
+    run_logged_command(
+        shell_program,
+        &shell_args,
         current_dir,
         label,
         task_log_path,
