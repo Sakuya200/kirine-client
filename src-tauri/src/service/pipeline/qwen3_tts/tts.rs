@@ -28,14 +28,15 @@ use crate::{
         },
         pipeline::{
             api::{
-                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
-                PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
-                TtsScriptArgs,
+                split_model_locator, PythonScriptInvocationSpec, PythonScriptRuntimeOptions,
+                PythonScriptTaskArgs, PythonScriptTaskKind, TTSArgs,
             },
-            qwen3_tts::{
-                qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths,
-                Qwen3TTSModelTaskPipeline,
+            model_artifacts::{
+                build_model_download_script_args, resolve_model_download_paths,
+                validate_model_artifact_paths,
             },
+            qwen3_tts::Qwen3TTSModelTaskPipeline,
+            run_pipeline_stage_shell_script, run_python_params_file_invocation,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -47,12 +48,10 @@ use crate::{
     utils::{
         audio::{build_ffmpeg_transcode_script_args, resolve_temp_wav_path},
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
-        process::{run_logged_command, run_logged_python_script, run_logged_shell_script},
+        process::run_logged_shell_script,
     },
     Result,
 };
-
-use super::QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE;
 
 #[derive(Debug, Clone, Copy)]
 struct TtsRuntimeOptions {
@@ -308,6 +307,10 @@ impl Qwen3TTSModelTaskPipeline {
             init_task_runtime_script_path: &paths.init_task_runtime_script_path,
             download_models_script_path: &paths.download_models_script_path,
         };
+        let model_info = service
+            .get_model_info_by_base_and_scale_impl(&paths.base_model, &paths.model_scale)
+            .await?;
+        let download_paths = resolve_model_download_paths(&paths.src_model_root, &model_info);
 
         validate_and_init(
             bootstrap_paths,
@@ -334,7 +337,7 @@ impl Qwen3TTSModelTaskPipeline {
             bootstrap_paths,
             task_id,
             log_dir,
-            qwen3_tts_download_script_args(&paths.src_model_root, &paths.model_scale)?,
+            build_model_download_script_args(&paths.src_model_root, &model_info)?,
             TtsCommandLabel::DownloadModels,
             |script_path, working_dir, task_id, log_dir, script_args, label| async move {
                 self.run_tts_stage_script(
@@ -347,19 +350,17 @@ impl Qwen3TTSModelTaskPipeline {
                 )
                 .await
             },
-            || self.validate_prepared_tts_downloads(paths),
+            || {
+                validate_model_artifact_paths(
+                    &paths.base_model,
+                    &paths.model_scale,
+                    &download_paths,
+                )
+            },
         )
         .await?;
 
         Ok(())
-    }
-
-    fn validate_prepared_tts_downloads(&self, paths: &TtsPaths) -> Result<()> {
-        crate::service::pipeline::validate_downloaded_paths(
-            &paths.base_model,
-            &paths.model_scale,
-            &qwen3_tts_prepared_model_download_paths(&paths.src_model_root, &paths.model_scale)?,
-        )
     }
 
     fn validate_tts_environment(&self, paths: &TtsPaths, params: &TtsTaskExecution) -> Result<()> {
@@ -425,6 +426,8 @@ impl Qwen3TTSModelTaskPipeline {
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
+        let (model_root_path, speaker_dir_name) =
+            split_model_locator(Path::new(&params.model_path));
         let invocation = PythonScriptInvocationSpec {
             version: 1,
             base_model: paths.base_model.clone(),
@@ -434,36 +437,28 @@ impl Qwen3TTSModelTaskPipeline {
                 logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
                 attn_implementation: Some(attn_implementation.as_str().to_string()),
             },
-            target: PythonScriptExecutionTarget {
-                model_script_name: "tts.py".to_string(),
-                uses_shared_helpers: Vec::new(),
-            },
-            args: PythonScriptTaskArgs::TextToSpeech(TtsScriptArgs {
-                init_model_path: params.model_path.clone(),
+            args: PythonScriptTaskArgs::TextToSpeech(TTSArgs {
+                model_root_path,
+                speaker_dir_name,
+                model_params_json: serde_json::json!({
+                    "modelScale": params.model_scale,
+                    "voicePrompt": params.voice_prompt,
+                }),
                 text: params.text.clone(),
                 language: params.language.clone(),
                 speaker: params.speaker_name.clone(),
-                instruct: params.voice_prompt.clone(),
                 output_path: temp_wav_path.to_string_lossy().to_string(),
-                cfg_value: None,
-                inference_timesteps: None,
-                n_vq_for_inference: None,
             }),
         };
 
-        invocation.write_to_json_file(&paths.params_json_path)?;
-
-        run_logged_python_script(
+        run_python_params_file_invocation(
             &paths.venv_python_path,
             &paths.tts_python_script_path,
             &paths.src_model_root,
             TtsCommandLabel::RunInference.as_str(),
             &task_log_path,
-            "python command completed successfully",
-            vec![
-                "--params-file".to_string(),
-                paths.params_json_path.to_string_lossy().to_string(),
-            ],
+            &paths.params_json_path,
+            &invocation,
         )
         .await?;
 
@@ -518,7 +513,6 @@ impl Qwen3TTSModelTaskPipeline {
             input_wav_path,
             final_output_path,
             format.as_str(),
-            Some(QWEN3_TTS_RECOMMENDED_AUDIO_SAMPLE_RATE),
             &task_log_path,
         );
 
@@ -548,22 +542,15 @@ impl Qwen3TTSModelTaskPipeline {
         script_args: Vec<String>,
         label: TtsCommandLabel,
     ) -> Result<()> {
-        let platform = ScriptPlatform::current();
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
-        let mut args = platform.shell_args(script_path);
-        args.push("--log-path".to_string());
-        args.push(log_dir.to_string_lossy().to_string());
-        args.push("--task-log-file".to_string());
-        args.push(task_log_path.to_string_lossy().to_string());
-        args.extend(script_args);
-
-        run_logged_command(
-            Path::new(platform.shell_program()),
-            &args,
+        run_pipeline_stage_shell_script(
+            script_path,
             current_dir,
+            HistoryTaskType::TextToSpeech,
+            task_id,
+            log_dir,
             label.as_str(),
-            &task_log_path,
             "tts command completed successfully",
+            script_args,
         )
         .await
     }

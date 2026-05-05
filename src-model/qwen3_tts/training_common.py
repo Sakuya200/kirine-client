@@ -41,7 +41,15 @@ def add_common_training_args(parser: argparse.ArgumentParser) -> argparse.Argume
         type=str,
         default="output",
     )
-    parser.add_argument("--train_jsonl", "--train-jsonl", dest="train_jsonl", type=str, required=True)
+    parser.add_argument(
+        "--output_jsonl",
+        "--output-jsonl",
+        "--train_jsonl",
+        "--train-jsonl",
+        dest="output_jsonl",
+        type=str,
+        required=True,
+    )
     parser.add_argument("--logging_dir", "--logging-dir", dest="logging_dir", type=str, default="")
     parser.add_argument("--batch_size", "--batch-size", dest="batch_size", type=int, default=2)
     parser.add_argument("--lr", type=float, default=2e-5)
@@ -107,8 +115,8 @@ def load_training_dependencies() -> SimpleNamespace:
     )
 
 
-def load_training_rows(train_jsonl: str) -> list[dict[str, object]]:
-    with open(train_jsonl, "r", encoding="utf-8") as file:
+def load_training_rows(output_jsonl: str) -> list[dict[str, object]]:
+    with open(output_jsonl, "r", encoding="utf-8") as file:
         train_data = file.readlines()
     return [json.loads(line) for line in train_data if line.strip()]
 
@@ -134,7 +142,7 @@ def enable_gradient_checkpointing(model, require_input_grads: bool = False) -> N
 
 def build_train_dataloader(args: argparse.Namespace, deps, qwen3tts):
     config = deps.AutoConfig.from_pretrained(args.init_model_path)
-    train_data = load_training_rows(args.train_jsonl)
+    train_data = load_training_rows(args.output_jsonl)
     dataset = deps.TTSDataset(train_data, qwen3tts.processor, config)
     train_dataloader = deps.DataLoader(
         dataset,

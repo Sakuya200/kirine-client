@@ -7,6 +7,26 @@ from pathlib import Path
 
 
 @dataclass
+class CommonTaskArgs:
+    model_root_path: str | None
+    speaker_dir_name: str | None
+    model_params_json: dict[str, object]
+
+
+QWEN3_TOKENIZER_NAME = "Qwen3-TTS-Tokenizer-12Hz"
+QWEN3_VARIANT_MODEL_NAMES = {
+    "1.7B": {
+        "base": "Qwen3-TTS-12Hz-1.7B-Base",
+        "custom": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    },
+    "0.6B": {
+        "base": "Qwen3-TTS-12Hz-0.6B-Base",
+        "custom": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    },
+}
+
+
+@dataclass
 class Qwen3TrainingRuntimeOptions:
     device: str
     logging_dir: str
@@ -17,6 +37,7 @@ class Qwen3TrainingRuntimeOptions:
 class Qwen3TrainingParams:
     base_model: str
     version: int
+    common: CommonTaskArgs
     init_model_path: str
     tokenizer_model_path: str
     input_jsonl: str
@@ -34,7 +55,7 @@ class Qwen3TrainingParams:
         return Namespace(
             init_model_path=self.init_model_path,
             output_model_path=self.output_model_path,
-            train_jsonl=self.output_jsonl,
+            output_jsonl=self.output_jsonl,
             logging_dir=self.runtime.logging_dir,
             batch_size=self.batch_size,
             lr=self.lr,
@@ -67,10 +88,103 @@ def _extract_task_args(payload: dict[str, object], task_name: str) -> dict[str, 
     return nested_args
 
 
+def _parse_common_task_args(args: dict[str, object]) -> CommonTaskArgs:
+    raw_model_params = args.get("model_params_json")
+    if raw_model_params is None:
+        model_params_json: dict[str, object] = {}
+    elif isinstance(raw_model_params, dict):
+        model_params_json = raw_model_params
+    else:
+        raise TypeError("Malformed Qwen3 params payload: model_params_json must be an object")
+
+    return CommonTaskArgs(
+        model_root_path=str(args["model_root_path"]) if args.get("model_root_path") is not None else None,
+        speaker_dir_name=str(args["speaker_dir_name"]) if args.get("speaker_dir_name") is not None else None,
+        model_params_json=model_params_json,
+    )
+
+
+def _resolve_path_value(path: str | None) -> str | None:
+    if path is None:
+        return None
+    return str(Path(path).expanduser().resolve())
+
+
+def _resolve_locator_candidate(
+    common: CommonTaskArgs,
+    default_leaf_name: str | None,
+    *,
+    prefer_speaker_dir_name: bool,
+) -> str | None:
+    if common.model_root_path is None:
+        return None
+
+    root_path = Path(common.model_root_path).expanduser().resolve()
+    leaf_name = default_leaf_name
+    if prefer_speaker_dir_name and common.speaker_dir_name:
+        leaf_name = common.speaker_dir_name
+    if leaf_name is None:
+        return None
+
+    return str((root_path / leaf_name).resolve())
+
+
+def _require_resolved_path(path: str | None, label: str) -> str:
+    if path is None:
+        raise ValueError(f"Qwen3 params payload is missing a resolvable {label}")
+    return path
+
+
+def _infer_qwen3_model_scale(common: CommonTaskArgs) -> str:
+    raw_model_scale = common.model_params_json.get("modelScale")
+    if raw_model_scale is not None:
+        model_scale = str(raw_model_scale).strip()
+        if model_scale in QWEN3_VARIANT_MODEL_NAMES:
+            return model_scale
+
+    raise ValueError("Qwen3 params payload is missing a supported modelScale value")
+
+
+def _resolve_qwen3_inference_model_path(common: CommonTaskArgs) -> str:
+    model_scale = _infer_qwen3_model_scale(common)
+    candidate = _resolve_locator_candidate(
+        common,
+        QWEN3_VARIANT_MODEL_NAMES[model_scale]["custom"],
+        prefer_speaker_dir_name=True,
+    )
+    return _require_resolved_path(candidate, "inference model path")
+
+
+def _resolve_qwen3_training_model_path(common: CommonTaskArgs) -> str:
+    model_scale = _infer_qwen3_model_scale(common)
+    candidate = _resolve_locator_candidate(
+        common,
+        QWEN3_VARIANT_MODEL_NAMES[model_scale]["base"],
+        prefer_speaker_dir_name=False,
+    )
+    return _require_resolved_path(candidate, "training model path")
+
+
+def _resolve_qwen3_tokenizer_model_path(common: CommonTaskArgs) -> str:
+    candidate = _resolve_locator_candidate(
+        common,
+        QWEN3_TOKENIZER_NAME,
+        prefer_speaker_dir_name=False,
+    )
+    return _require_resolved_path(candidate, "tokenizer model path")
+
+
 def _parse_learning_rate(value: str | None, default: float = 2e-5) -> float:
     if value is None:
         return default
     return float(value)
+
+
+def _model_param_str(common: CommonTaskArgs, key: str, fallback: str = "") -> str:
+    value = common.model_params_json.get(key)
+    if value is None:
+        return fallback
+    return str(value)
 
 
 def load_training_params(path: str | Path) -> Qwen3TrainingParams:
@@ -83,16 +197,20 @@ def load_training_params(path: str | Path) -> Qwen3TrainingParams:
     if not isinstance(runtime, dict) or not isinstance(args, dict):
         raise TypeError("Malformed Qwen3 training params payload")
 
+    common = _parse_common_task_args(args)
+    learning_rate = _model_param_str(common, "learningRate", str(args.get("lr") or "")) or None
+
     return Qwen3TrainingParams(
         base_model=str(payload.get("base_model") or "qwen3_tts"),
         version=int(payload.get("version") or 1),
-        init_model_path=str(args["init_model_path"]),
-        tokenizer_model_path=str(args["tokenizer_model_path"]),
+        common=common,
+        init_model_path=_resolve_qwen3_training_model_path(common),
+        tokenizer_model_path=_resolve_qwen3_tokenizer_model_path(common),
         input_jsonl=str(args["input_jsonl"]),
         output_jsonl=str(args["output_jsonl"]),
         output_model_path=str(args["output_model_path"]),
         batch_size=int(args["batch_size"]),
-        lr=_parse_learning_rate(args.get("lr")),
+        lr=_parse_learning_rate(learning_rate),
         num_epochs=int(args["num_epochs"]),
         speaker_name=str(args["speaker_name"]),
         gradient_accumulation_steps=int(args["gradient_accumulation_steps"]),
@@ -114,6 +232,7 @@ class Qwen3GenerationRuntimeOptions:
 
 @dataclass
 class Qwen3TtsParams:
+    common: CommonTaskArgs
     init_model_path: str
     text: str
     language: str
@@ -138,6 +257,7 @@ class Qwen3TtsParams:
 
 @dataclass
 class Qwen3VoiceCloneParams:
+    common: CommonTaskArgs
     ref_audio_path: str
     ref_text: str
     init_model_path: str
@@ -170,12 +290,15 @@ def load_tts_params(path: str | Path) -> Qwen3TtsParams:
     if not isinstance(runtime, dict) or not isinstance(args, dict):
         raise TypeError("Malformed Qwen3 tts params payload")
 
+    common = _parse_common_task_args(args)
+
     return Qwen3TtsParams(
-        init_model_path=str(args["init_model_path"]),
+        common=common,
+        init_model_path=_resolve_qwen3_inference_model_path(common),
         text=str(args["text"]),
         language=str(args.get("language") or "Auto"),
         speaker=str(args.get("speaker") or ""),
-        instruct=str(args.get("instruct") or ""),
+        instruct=_model_param_str(common, "voicePrompt", ""),
         output_path=str(args["output_path"]),
         runtime=Qwen3GenerationRuntimeOptions(
             device=str(runtime.get("device") or "cuda:0"),
@@ -195,10 +318,13 @@ def load_voice_clone_params(path: str | Path) -> Qwen3VoiceCloneParams:
     if not isinstance(runtime, dict) or not isinstance(args, dict):
         raise TypeError("Malformed Qwen3 voice clone params payload")
 
+    common = _parse_common_task_args(args)
+
     return Qwen3VoiceCloneParams(
+        common=common,
         ref_audio_path=str(args["ref_audio_path"]),
         ref_text=str(args.get("ref_text") or ""),
-        init_model_path=str(args["init_model_path"]),
+        init_model_path=_resolve_qwen3_training_model_path(common),
         language=str(args.get("language") or "Auto"),
         output_path=str(args["output_path"]),
         text=str(args["text"]),

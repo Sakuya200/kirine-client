@@ -408,52 +408,6 @@ pub struct MossTtsLocalTextToSpeechModelParams {
     pub n_vq_for_inference: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Qwen3TtsTrainingModelParams {
-    pub epoch_count: i64,
-    pub batch_size: i64,
-    pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
-    #[serde(default)]
-    pub learning_rate: Option<String>,
-}
-
-impl Qwen3TtsTrainingModelParams {
-    pub fn learning_rate_value(&self) -> Option<String> {
-        normalized_optional_string(self.learning_rate.as_deref())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct MossTtsLocalTrainingModelParams {
-    pub epoch_count: i64,
-    pub batch_size: i64,
-    pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
-    #[serde(default)]
-    pub learning_rate: Option<String>,
-    #[serde(default)]
-    pub weight_decay: Option<String>,
-    #[serde(default)]
-    pub warmup_ratio: Option<String>,
-    #[serde(default)]
-    pub warmup_steps: Option<i64>,
-    #[serde(default)]
-    pub max_grad_norm: Option<String>,
-    #[serde(default)]
-    pub mixed_precision: Option<String>,
-    #[serde(default)]
-    pub channelwise_loss_weight: Option<String>,
-    #[serde(default)]
-    pub skip_reference_audio_codes: Option<bool>,
-    #[serde(default)]
-    pub prep_batch_size: Option<i64>,
-    #[serde(default)]
-    pub prep_n_vq: Option<i64>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum VoxCpm2VoiceCloneMode {
@@ -488,51 +442,6 @@ impl FromStr for VoxCpm2VoiceCloneMode {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum VoxCpm2TrainingMode {
-    Full,
-    Lora,
-}
-
-impl VoxCpm2TrainingMode {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::Lora => "lora",
-        }
-    }
-}
-
-impl fmt::Display for VoxCpm2TrainingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for VoxCpm2TrainingMode {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim() {
-            "full" => Ok(Self::Full),
-            "lora" => Ok(Self::Lora),
-            other => Err(format!("不支持的 VoxCPM2 训练模式: {}", other)),
-        }
-    }
-}
-
-const VOX_CPM2_DEFAULT_LORA_RANK: i64 = 32;
-const VOX_CPM2_DEFAULT_LORA_ALPHA: i64 = 32;
-const VOX_CPM2_DEFAULT_LORA_DROPOUT: &str = "0.0";
-
-fn normalized_optional_string(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct VoxCpm2TextToSpeechModelParams {
@@ -555,93 +464,6 @@ pub struct VoxCpm2VoiceCloneModelParams {
 #[serde(rename_all = "camelCase")]
 pub struct MossTtsLocalVoiceCloneModelParams {
     pub n_vq_for_inference: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct VoxCpm2TrainingModelParams {
-    #[serde(default)]
-    pub training_mode: Option<VoxCpm2TrainingMode>,
-    #[serde(default)]
-    pub use_lora: Option<bool>,
-    #[serde(default)]
-    pub lora_rank: Option<i64>,
-    #[serde(default)]
-    pub lora_alpha: Option<i64>,
-    #[serde(default)]
-    pub lora_dropout: Option<String>,
-    #[serde(default)]
-    pub learning_rate: Option<String>,
-    #[serde(default)]
-    pub weight_decay: Option<String>,
-    #[serde(default)]
-    pub warmup_steps: Option<i64>,
-    pub epoch_count: i64,
-    pub batch_size: i64,
-    pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
-}
-
-impl VoxCpm2TrainingModelParams {
-    pub fn normalized(mut self) -> Self {
-        let use_lora = self.use_lora();
-        self.use_lora = Some(use_lora);
-        self.training_mode = Some(if use_lora {
-            VoxCpm2TrainingMode::Lora
-        } else {
-            VoxCpm2TrainingMode::Full
-        });
-        self.lora_rank = Some(self.lora_rank());
-        self.lora_alpha = Some(self.lora_alpha());
-        self.lora_dropout = Some(self.lora_dropout());
-        self
-    }
-
-    pub fn use_lora(&self) -> bool {
-        self.use_lora.unwrap_or(matches!(
-            self.training_mode,
-            Some(VoxCpm2TrainingMode::Lora)
-        ))
-    }
-
-    pub fn training_mode_value(&self) -> VoxCpm2TrainingMode {
-        if self.use_lora() {
-            VoxCpm2TrainingMode::Lora
-        } else {
-            VoxCpm2TrainingMode::Full
-        }
-    }
-
-    pub fn lora_rank(&self) -> i64 {
-        self.lora_rank.unwrap_or(VOX_CPM2_DEFAULT_LORA_RANK).max(1)
-    }
-
-    pub fn lora_alpha(&self) -> i64 {
-        self.lora_alpha
-            .unwrap_or(VOX_CPM2_DEFAULT_LORA_ALPHA)
-            .max(1)
-    }
-
-    pub fn lora_dropout(&self) -> String {
-        self.lora_dropout
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(VOX_CPM2_DEFAULT_LORA_DROPOUT)
-            .to_string()
-    }
-
-    pub fn learning_rate(&self) -> Option<String> {
-        normalized_optional_string(self.learning_rate.as_deref())
-    }
-
-    pub fn weight_decay(&self) -> Option<String> {
-        normalized_optional_string(self.weight_decay.as_deref())
-    }
-
-    pub fn warmup_steps(&self) -> Option<i64> {
-        self.warmup_steps.map(|value| value.max(0))
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

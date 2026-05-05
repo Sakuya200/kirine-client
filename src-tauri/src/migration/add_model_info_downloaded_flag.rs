@@ -6,6 +6,8 @@ use crate::{
     config::application_dir,
     service::{
         pipeline::{
+            model_artifacts::all_model_artifact_dirs_ready,
+            moss_tts_local::moss_tts_local_prepared_model_download_paths,
             qwen3_tts::qwen3_tts_prepared_model_download_paths,
             script_paths::resolve_src_model_root,
             vox_cpm2::vox_cpm2_prepared_model_download_paths,
@@ -78,7 +80,7 @@ where
         (
             "qwen3_tts",
             "1.7B",
-            all_paths_exist(&qwen3_tts_prepared_model_download_paths(
+            all_model_artifact_dirs_ready(&qwen3_tts_prepared_model_download_paths(
                 &src_model_root,
                 "1.7B",
             )?),
@@ -86,15 +88,26 @@ where
         (
             "qwen3_tts",
             "0.6B",
-            all_paths_exist(&qwen3_tts_prepared_model_download_paths(
+            all_model_artifact_dirs_ready(&qwen3_tts_prepared_model_download_paths(
                 &src_model_root,
                 "0.6B",
             )?),
         ),
         (
+            "moss_tts_local",
+            "1.7B",
+            all_model_artifact_dirs_ready(&moss_tts_local_prepared_model_download_paths(
+                &src_model_root,
+                "1.7B",
+            )?),
+        ),
+        (
             "vox_cpm2",
             "2B",
-            all_paths_exist(&vox_cpm2_prepared_model_download_paths(&src_model_root, "2B")?),
+            all_model_artifact_dirs_ready(&vox_cpm2_prepared_model_download_paths(
+                &src_model_root,
+                "2B",
+            )?),
         ),
     ] {
         db.execute(Statement::from_sql_and_values(
@@ -109,10 +122,6 @@ where
     ensure_seed_directories_exist(&src_model_root)?;
 
     Ok(())
-}
-
-fn all_paths_exist(paths: &[std::path::PathBuf]) -> bool {
-    paths.iter().all(|path| path.exists())
 }
 
 fn ensure_seed_directories_exist(src_model_root: &std::path::Path) -> Result<()> {

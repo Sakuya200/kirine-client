@@ -30,33 +30,36 @@ use crate::{
         },
         pipeline::{
             api::{
-                PythonScriptExecutionTarget, PythonScriptInvocationSpec,
+                split_model_locator, PythonScriptInvocationSpec,
                 PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind,
-                VoiceCloneScriptArgs,
+                VoiceCloneArgs,
             },
+            model_artifacts::{
+                build_model_download_script_args, resolve_model_download_paths,
+                validate_model_artifact_paths,
+            },
+            run_pipeline_stage_shell_script,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
             },
-            validate_and_download, validate_and_init, PipelineBootstrapPaths,
+            run_python_params_file_invocation, validate_and_download, validate_and_init,
+            PipelineBootstrapPaths,
             VoiceClonePipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
     },
     utils::{
         audio::{
-            build_ffmpeg_transcode_script_args, resolve_normalized_wav_sidecar_path, resolve_temp_wav_path,
+            build_ffmpeg_transcode_script_args, resolve_normalized_wav_sidecar_path,
+            resolve_temp_wav_path,
         },
         file_ops::{ensure_parent_dir, remove_file_if_exists, replace_output_file},
-        process::{run_logged_command, run_logged_python_script, run_logged_shell_script},
+        process::run_logged_shell_script,
     },
     Result,
 };
 
-use super::{
-    moss_tts_local_download_script_args, moss_tts_local_prepared_model_download_paths,
-    MossTtsLocalModelTaskPipeline, MOSS_TTS_LOCAL_MODEL_NAME,
-    MOSS_TTS_LOCAL_RECOMMENDED_AUDIO_SAMPLE_RATE,
-};
+use super::{MossTtsLocalModelTaskPipeline, MOSS_TTS_LOCAL_MODEL_NAME};
 
 #[derive(Debug, Clone, Copy)]
 struct VoiceCloneRuntimeOptions {
@@ -300,6 +303,10 @@ impl MossTtsLocalModelTaskPipeline {
             init_task_runtime_script_path: &paths.init_task_runtime_script_path,
             download_models_script_path: &paths.download_models_script_path,
         };
+        let model_info = service
+            .get_model_info_by_base_and_scale_impl(&paths.base_model, &paths.model_scale)
+            .await?;
+        let download_paths = resolve_model_download_paths(&paths.src_model_root, &model_info);
 
         validate_and_init(
             bootstrap_paths,
@@ -326,7 +333,7 @@ impl MossTtsLocalModelTaskPipeline {
             bootstrap_paths,
             task_id,
             log_dir,
-            moss_tts_local_download_script_args(&paths.src_model_root, &paths.model_scale)?,
+            build_model_download_script_args(&paths.src_model_root, &model_info)?,
             VoiceCloneCommandLabel::DownloadModels,
             |script_path, working_dir, task_id, log_dir, script_args, label| async move {
                 self.run_voice_clone_stage_script(
@@ -339,22 +346,17 @@ impl MossTtsLocalModelTaskPipeline {
                 )
                 .await
             },
-            || self.validate_prepared_voice_clone_downloads(paths),
+            || {
+                validate_model_artifact_paths(
+                    &paths.base_model,
+                    &paths.model_scale,
+                    &download_paths,
+                )
+            },
         )
         .await?;
 
         Ok(())
-    }
-
-    fn validate_prepared_voice_clone_downloads(&self, paths: &VoiceClonePaths) -> Result<()> {
-        crate::service::pipeline::validate_downloaded_paths(
-            &paths.base_model,
-            &paths.model_scale,
-            &moss_tts_local_prepared_model_download_paths(
-                &paths.src_model_root,
-                &paths.model_scale,
-            )?,
-        )
     }
 
     fn validate_voice_clone_environment(
@@ -429,6 +431,7 @@ impl MossTtsLocalModelTaskPipeline {
         let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
         let metrics_log_dir = ensure_task_metrics_log_dir(log_dir)?;
 
+        let (model_root_path, speaker_dir_name) = split_model_locator(&paths.base_model_path);
         let invocation = PythonScriptInvocationSpec {
             version: 1,
             base_model: paths.base_model.clone(),
@@ -438,38 +441,28 @@ impl MossTtsLocalModelTaskPipeline {
                 logging_dir: Some(metrics_log_dir.to_string_lossy().to_string()),
                 attn_implementation: Some(attn_implementation.as_str().to_string()),
             },
-            target: PythonScriptExecutionTarget {
-                model_script_name: "voice_clone.py".to_string(),
-                uses_shared_helpers: vec!["common.py".to_string()],
-            },
-            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneScriptArgs {
+            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneArgs {
+                model_root_path,
+                speaker_dir_name,
+                model_params_json: serde_json::json!({
+                    "nVqForInference": params.n_vq_for_inference,
+                }),
                 ref_audio_path: ref_audio_path.to_string_lossy().to_string(),
                 ref_text: params.ref_text.clone(),
-                init_model_path: paths.base_model_path.to_string_lossy().to_string(),
                 language: params.language.clone(),
                 output_path: temp_wav_path.to_string_lossy().to_string(),
                 text: params.text.clone(),
-                mode: None,
-                style_prompt: None,
-                cfg_value: None,
-                inference_timesteps: None,
-                n_vq_for_inference: Some(params.n_vq_for_inference),
             }),
         };
 
-        invocation.write_to_json_file(&paths.params_json_path)?;
-
-        run_logged_python_script(
+        run_python_params_file_invocation(
             &paths.venv_python_path,
             &paths.voice_clone_python_script_path,
             &paths.src_model_root,
             VoiceCloneCommandLabel::RunInference.as_str(),
             &task_log_path,
-            "python command completed successfully",
-            vec![
-                "--params-file".to_string(),
-                paths.params_json_path.to_string_lossy().to_string(),
-            ],
+            &paths.params_json_path,
+            &invocation,
         )
         .await?;
 
@@ -512,13 +505,7 @@ impl MossTtsLocalModelTaskPipeline {
             &task_log_path,
             "shell script completed successfully",
             platform.shell_base_args(),
-            build_ffmpeg_transcode_script_args(
-                input_path,
-                &output_path,
-                "wav",
-                Some(MOSS_TTS_LOCAL_RECOMMENDED_AUDIO_SAMPLE_RATE),
-                &task_log_path,
-            ),
+            build_ffmpeg_transcode_script_args(input_path, &output_path, "wav", &task_log_path),
         )
         .await?;
 
@@ -561,7 +548,6 @@ impl MossTtsLocalModelTaskPipeline {
                 temp_wav_path,
                 final_output_path,
                 format.as_str(),
-                Some(MOSS_TTS_LOCAL_RECOMMENDED_AUDIO_SAMPLE_RATE),
                 &task_log_path,
             ),
         )
@@ -580,22 +566,15 @@ impl MossTtsLocalModelTaskPipeline {
         script_args: Vec<String>,
         label: VoiceCloneCommandLabel,
     ) -> Result<()> {
-        let platform = ScriptPlatform::current();
-        let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
-        let mut args = platform.shell_args(script_path);
-        args.push("--log-path".to_string());
-        args.push(log_dir.to_string_lossy().to_string());
-        args.push("--task-log-file".to_string());
-        args.push(task_log_path.to_string_lossy().to_string());
-        args.extend(script_args);
-
-        run_logged_command(
-            Path::new(platform.shell_program()),
-            &args,
+        run_pipeline_stage_shell_script(
+            script_path,
             current_dir,
+            HistoryTaskType::VoiceClone,
+            task_id,
+            log_dir,
             label.as_str(),
-            &task_log_path,
             "moss voice clone command completed successfully",
+            script_args,
         )
         .await
     }

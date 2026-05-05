@@ -1,9 +1,12 @@
 pub mod api;
 pub mod llm_models;
+pub mod model_artifacts;
 pub mod model_paths;
 pub mod moss_tts_local;
+pub mod pipeline;
 pub mod qwen3_tts;
 pub mod script_paths;
+pub mod training;
 pub mod vox_cpm2;
 
 use std::future::Future;
@@ -12,13 +15,23 @@ use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use async_trait::async_trait;
+use tokio::sync::watch;
 use tracing::info;
 
-use crate::{service::local::LocalService, Result};
+use crate::{
+    common::task_paths::task_log_file_path,
+    service::local::LocalService,
+    service::models::HistoryTaskType,
+    utils::process::{
+        run_logged_python_script, run_logged_python_script_cancellable, run_logged_shell_script,
+        LoggedCommandResult,
+    },
+    Result,
+};
 
 use self::{
-    moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL, qwen3_tts::QWEN3_TTS_BASE_MODEL,
-    vox_cpm2::VOX_CPM2_BASE_MODEL,
+    api::PythonScriptInvocationSpec, moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
+    qwen3_tts::QWEN3_TTS_BASE_MODEL, script_paths::ScriptPlatform, vox_cpm2::VOX_CPM2_BASE_MODEL,
 };
 
 #[derive(Debug, Clone)]
@@ -183,29 +196,6 @@ where
     Ok(())
 }
 
-pub(crate) fn validate_downloaded_paths(
-    base_model: &str,
-    model_scale: &str,
-    paths: &[PathBuf],
-) -> Result<()> {
-    let missing_paths = paths
-        .iter()
-        .filter(|path| !path.exists())
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
-
-    if missing_paths.is_empty() {
-        return Ok(());
-    }
-
-    bail!(
-        "模型 {}:{} 已在 model_info.downloaded 中标记为已下载，但以下权重路径缺失: {}。请先在模型管理页卸载该模型，再重新安装或重试任务。",
-        base_model,
-        model_scale,
-        missing_paths.join(", ")
-    )
-}
-
 fn ensure_required_path_exists(path: &Path, label: &str) -> Result<()> {
     if path.exists() {
         return Ok(());
@@ -243,4 +233,91 @@ pub(crate) fn resolve_inference_model_path(
         )
         .into()),
     }
+}
+
+pub(crate) async fn run_python_params_file_invocation(
+    python_path: &Path,
+    script_path: &Path,
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    params_json_path: &Path,
+    invocation: &PythonScriptInvocationSpec,
+) -> Result<()> {
+    invocation.write_to_json_file(params_json_path)?;
+
+    run_logged_python_script(
+        python_path,
+        script_path,
+        current_dir,
+        label,
+        task_log_path,
+        "python command completed successfully",
+        vec![
+            "--params-file".to_string(),
+            params_json_path.to_string_lossy().to_string(),
+        ],
+    )
+    .await
+}
+
+pub(crate) async fn run_python_params_file_invocation_cancellable(
+    python_path: &Path,
+    script_path: &Path,
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    params_json_path: &Path,
+    invocation: &PythonScriptInvocationSpec,
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
+    invocation.write_to_json_file(params_json_path)?;
+
+    run_logged_python_script_cancellable(
+        python_path,
+        script_path,
+        current_dir,
+        label,
+        task_log_path,
+        "python command completed successfully",
+        vec![
+            "--params-file".to_string(),
+            params_json_path.to_string_lossy().to_string(),
+        ],
+        cancel_rx,
+    )
+    .await
+}
+
+pub(crate) async fn run_pipeline_stage_shell_script(
+    script_path: &Path,
+    current_dir: &Path,
+    task_kind: HistoryTaskType,
+    task_id: i64,
+    log_dir: &Path,
+    label: &str,
+    success_message: &str,
+    script_args: Vec<String>,
+) -> Result<()> {
+    let platform = ScriptPlatform::current();
+    let task_log_path = task_log_file_path(log_dir, task_kind, task_id);
+    let mut forwarded_script_args = vec![
+        "--log-path".to_string(),
+        log_dir.to_string_lossy().to_string(),
+        "--task-log-file".to_string(),
+        task_log_path.to_string_lossy().to_string(),
+    ];
+    forwarded_script_args.extend(script_args);
+
+    run_logged_shell_script(
+        Path::new(platform.shell_program()),
+        script_path,
+        current_dir,
+        label,
+        &task_log_path,
+        success_message,
+        platform.shell_base_args(),
+        forwarded_script_args,
+    )
+    .await
 }

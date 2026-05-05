@@ -33,13 +33,9 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, MossTtsLocalTrainingModelParams, Qwen3TtsTrainingModelParams,
-            SpeakerSource, SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
+            ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
-        pipeline::{
-            model_paths::speaker_model_dir,
-            moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
-        },
+        pipeline::model_paths::speaker_model_dir,
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -143,20 +139,7 @@ impl LocalService {
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_scale = payload.model_scale.trim().to_string();
-        let model_params = if base_model == "vox_cpm2" {
-            serde_json::to_value(
-                serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?
-                    .normalized(),
-            )?
-        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
-            serde_json::to_value(serde_json::from_value::<MossTtsLocalTrainingModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        } else {
-            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        };
+        let model_params = payload.model_params.clone();
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_scale)
             .await?;
