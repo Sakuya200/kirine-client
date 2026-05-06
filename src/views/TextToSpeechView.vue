@@ -4,16 +4,15 @@ import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, XMarkIcon } from '@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
+import GeneratedAudioResultCard from '@/components/common/GeneratedAudioResultCard.vue';
 import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
-import StatusPill from '@/components/common/StatusPill.vue';
 import { getTextToSpeechModelRegistryEntry } from '@/components/form/textToSpeechRegistry';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
@@ -100,6 +99,7 @@ const isRefreshingHistory = ref(false);
 const activeResult = ref<TtsResult | null>(null);
 const generationHistory = ref<TtsResult[]>([]);
 const showClearDialog = ref(false);
+const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 const speakerStore = useSpeakerStore();
 const modelStore = useModelStore();
 const uiStore = useUiStore();
@@ -147,6 +147,13 @@ const activeResultSummaryLines = computed(() => {
   }
 
   return getTextToSpeechModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
+});
+const activeResultMetaText = computed(() => {
+  if (!activeResult.value) {
+    return '';
+  }
+
+  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelScale} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -407,6 +414,7 @@ const refreshActiveTaskStatus = async () => {
     activeResult.value = updated;
     generationHistory.value = generationHistory.value.map(item => (item.taskId === updated.taskId ? updated : item));
     syncActiveTaskStatusRefresh();
+    await resultCardRef.value?.refreshDetailRecord();
 
     if (updated.status === TaskStatus.Completed || updated.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
@@ -591,49 +599,30 @@ onMounted(async () => {
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard title="生成结果" subtitle="展示最近一次文本转语音任务的返回结果和输出文件信息">
-          <div v-if="activeResult" class="surface-grid rounded-2xl border border-brand-200 bg-white/82 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
-                <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.speakerLabel }} · {{ modelStore.getModelLabel(activeResult.baseModel) }} · {{ activeResult.modelScale }} ·
-                  {{ activeResult.languageLabel }} · {{ activeResult.formatLabel }}
-                </p>
-              </div>
-              <StatusPill :status="activeResult.status" />
-            </div>
-
-            <div class="mt-3">
-              <AudioResultPlayer
-                :task="activeResult"
-                :load-audio-asset="loadResultAudioAsset"
-                :download-audio="saveResultAudio"
-                download-label="下载"
-                download-tone="ghost"
-              />
-            </div>
-
-            <div class="mt-3 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
+        <GeneratedAudioResultCard
+          ref="resultCardRef"
+          :result="activeResult"
+          :meta-text="activeResultMetaText"
+          :load-audio-asset="loadResultAudioAsset"
+          :download-audio="saveResultAudio"
+          empty-text="还没有生成结果。完成文本输入并点击“生成音频”后，结果会显示在这里。"
+        >
+          <template #details>
+            <div v-if="activeResult" class="space-y-1">
               <p>任务 ID：{{ activeResult.taskId }}</p>
-              <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
-              <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
-              <p v-for="line in activeResultSummaryLines" :key="line" class="mt-1">{{ line }}</p>
-              <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
+              <p>生成时间：{{ activeResult.createdAt }}</p>
+              <p>导出名称：{{ activeResult.exportAudioName }}</p>
+              <p v-for="line in activeResultSummaryLines" :key="line">{{ line }}</p>
+              <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
-
-            <div class="mt-4 flex flex-wrap gap-2">
-              <BaseButton tone="ghost" @click="copyTaskId">
-                <ClipboardDocumentIcon class="h-4 w-4" aria-hidden="true" />
-                <span>复制任务ID</span>
-              </BaseButton>
-            </div>
-          </div>
-
-          <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/82 p-5 text-sm text-stone-500">
-            还没有生成结果。完成文本输入并点击“生成音频”后，结果会显示在这里。
-          </div>
-        </PanelCard>
+          </template>
+          <template #actions>
+            <BaseButton v-if="activeResult" tone="ghost" @click="copyTaskId">
+              <ClipboardDocumentIcon class="h-4 w-4" aria-hidden="true" />
+              <span>复制任务ID</span>
+            </BaseButton>
+          </template>
+        </GeneratedAudioResultCard>
 
         <PanelCard title="最近任务" subtitle="展示最近 5 条文本转语音任务，数据来自统一历史记录">
           <template #actions>

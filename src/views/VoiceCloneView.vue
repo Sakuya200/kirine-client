@@ -5,15 +5,14 @@ import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
+import GeneratedAudioResultCard from '@/components/common/GeneratedAudioResultCard.vue';
 import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
-import StatusPill from '@/components/common/StatusPill.vue';
 import { getVoiceCloneModelRegistryEntry } from '@/components/form/voiceCloneRegistry';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
@@ -106,6 +105,7 @@ const isGenerating = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<VoiceCloneResult | null>(null);
 const generationHistory = ref<VoiceCloneResult[]>([]);
+const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
@@ -151,6 +151,13 @@ const activeResultSummaryLines = computed(() => {
   }
 
   return getVoiceCloneModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
+});
+const activeResultMetaText = computed(() => {
+  if (!activeResult.value) {
+    return '';
+  }
+
+  return `${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelScale} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -412,6 +419,7 @@ const refreshActiveTaskStatus = async () => {
 
     activeResult.value = nextResult;
     generationHistory.value = generationHistory.value.map(item => (item.taskId === nextResult.taskId ? nextResult : item));
+    await resultCardRef.value?.refreshDetailRecord();
 
     if (nextResult.status === TaskStatus.Completed || nextResult.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
@@ -570,44 +578,26 @@ onBeforeUnmount(() => {
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard title="生成结果" subtitle="展示最近一次声音克隆任务的返回结果和输出文件信息">
-          <div v-if="activeResult" class="surface-grid rounded-2xl border border-brand-200 bg-white/82 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-sm font-medium text-slate-700">{{ activeResult.fileName }}</p>
-                <p class="mt-1 text-xs text-stone-500">
-                  {{ activeResult.refAudioName }} · {{ modelStore.getModelLabel(activeResult.baseModel) }} · {{ activeResult.modelScale }} ·
-                  {{ activeResult.languageLabel }} · {{ activeResult.formatLabel }}
-                </p>
-              </div>
-              <StatusPill :status="activeResult.status" />
-            </div>
-
-            <div class="mt-3">
-              <AudioResultPlayer
-                :task="activeResult"
-                :load-audio-asset="loadResultAudioAsset"
-                :download-audio="saveResultAudio"
-                download-label="下载"
-                download-tone="ghost"
-              />
-            </div>
-
-            <div class="mt-3 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
+        <GeneratedAudioResultCard
+          ref="resultCardRef"
+          :result="activeResult"
+          :meta-text="activeResultMetaText"
+          :load-audio-asset="loadResultAudioAsset"
+          :download-audio="saveResultAudio"
+          empty-text="还没有生成结果。完成参考音频和文本输入后，结果会显示在这里。"
+        >
+          <template #details>
+            <div v-if="activeResult" class="space-y-1">
               <p>任务 ID：{{ activeResult.taskId }}</p>
-              <p class="mt-1">生成时间：{{ activeResult.createdAt }}</p>
-              <p class="mt-1">导出名称：{{ activeResult.exportAudioName }}</p>
-              <p class="mt-1">参考音频：{{ activeResult.refAudioName }}</p>
-              <p v-for="line in activeResultSummaryLines" :key="line" class="mt-1">{{ line }}</p>
-              <p v-if="activeResult.refText" class="mt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
-              <p class="mt-2 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
+              <p>生成时间：{{ activeResult.createdAt }}</p>
+              <p>导出名称：{{ activeResult.exportAudioName }}</p>
+              <p>参考音频：{{ activeResult.refAudioName }}</p>
+              <p v-for="line in activeResultSummaryLines" :key="line">{{ line }}</p>
+              <p v-if="activeResult.refText" class="pt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
+              <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
-          </div>
-
-          <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/82 p-5 text-sm text-stone-500">
-            还没有生成结果。完成参考音频和文本输入后，结果会显示在这里。
-          </div>
-        </PanelCard>
+          </template>
+        </GeneratedAudioResultCard>
 
         <PanelCard title="最近任务" subtitle="展示最近 5 条声音克隆任务，数据来自统一历史记录">
           <template #actions>
