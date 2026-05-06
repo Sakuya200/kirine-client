@@ -90,7 +90,6 @@ async fn create_speakers_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
                         .not_null()
                         .default(""),
                 )
-                .col(ColumnDef::new(Speakers::ModelPath).text())
                 .col(ColumnDef::new(Speakers::Status).string().not_null())
                 .col(ColumnDef::new(Speakers::Source).string().not_null())
                 .col(ColumnDef::new(Speakers::CreateTime).string().not_null())
@@ -644,7 +643,6 @@ enum Speakers {
     Samples,
     BaseModel,
     Description,
-    ModelPath,
     Status,
     Source,
     CreateTime,

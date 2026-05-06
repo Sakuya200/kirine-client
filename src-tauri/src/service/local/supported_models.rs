@@ -207,7 +207,6 @@ where
     C: sea_orm::ConnectionTrait,
 {
     let languages_json = serde_json::to_string(&definition.languages)?;
-    let resolved_model_path = default_preset_speaker_model_path(definition.base_model.trim());
 
     let existing = speaker_entity::Entity::find()
         .filter(speaker_entity::Column::BaseModel.eq(definition.base_model.trim()))
@@ -224,7 +223,6 @@ where
         active_model.samples = Set(0);
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.description = Set(definition.description.trim().to_string());
-        active_model.model_path = Set(resolved_model_path);
         active_model.status = Set(SpeakerStatus::Ready.as_str().to_string());
         active_model.source = Set(SpeakerSource::Preset.as_str().to_string());
         active_model.create_time = Set(create_time);
@@ -239,7 +237,6 @@ where
             samples: Set(0),
             base_model: Set(definition.base_model.trim().to_string()),
             description: Set(definition.description.trim().to_string()),
-            model_path: Set(resolved_model_path),
             status: Set(SpeakerStatus::Ready.as_str().to_string()),
             source: Set(SpeakerSource::Preset.as_str().to_string()),
             create_time: Set(now.to_string()),
@@ -251,14 +248,4 @@ where
     }
 
     Ok(())
-}
-
-fn default_preset_speaker_model_path(base_model: &str) -> Option<String> {
-    match base_model {
-        "qwen3_tts" => {
-            Some("%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice".to_string())
-        }
-        "vox_cpm2" => Some("%SRC_MODEL_ROOT_PATH%/base-models/VoxCPM2".to_string()),
-        _ => None,
-    }
 }

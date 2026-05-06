@@ -125,13 +125,69 @@ def _require_resolved_path(path: str | None, label: str) -> str:
     return path
 
 
+def _resolve_nested_training_checkpoint_path(model_root_path: Path) -> Path | None:
+    checkpoints_root = model_root_path / "checkpoints"
+    if not checkpoints_root.is_dir():
+        return None
+
+    latest_dirs: list[Path] = []
+    step_dirs: list[Path] = []
+
+    for mode_entry in checkpoints_root.iterdir():
+        if not mode_entry.is_dir():
+            continue
+
+        latest_path = (mode_entry / "latest").resolve()
+        if latest_path.is_dir():
+            latest_dirs.append(latest_path)
+
+        for checkpoint_entry in mode_entry.iterdir():
+            checkpoint_path = checkpoint_entry.resolve()
+            if not checkpoint_entry.is_dir() or checkpoint_path == latest_path:
+                continue
+            step_dirs.append(checkpoint_path)
+
+    latest_dirs.sort()
+    if latest_dirs:
+        return latest_dirs[-1]
+
+    step_dirs.sort()
+    if step_dirs:
+        return step_dirs[-1]
+
+    return None
+
+
+def _resolve_vox_inference_checkpoint_path(model_root_path: Path) -> Path:
+    nested_checkpoint_path = _resolve_nested_training_checkpoint_path(model_root_path)
+    if nested_checkpoint_path is not None:
+        return nested_checkpoint_path
+
+    if not model_root_path.is_dir():
+        return model_root_path.resolve()
+
+    checkpoint_dirs: list[Path] = []
+    for entry in model_root_path.iterdir():
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith("checkpoint") or entry.name == "latest":
+            checkpoint_dirs.append(entry.resolve())
+
+    checkpoint_dirs.sort()
+    if checkpoint_dirs:
+        return checkpoint_dirs[-1]
+
+    return model_root_path.resolve()
+
+
 def _resolve_model_path(common: CommonTaskArgs) -> str:
     candidate = _resolve_locator_candidate(
         common,
         VOX_CPM2_MODEL_NAME,
         prefer_speaker_dir_name=True,
     )
-    return _require_resolved_path(candidate, "inference model path")
+    inference_root = Path(_require_resolved_path(candidate, "inference model path"))
+    return str(_resolve_vox_inference_checkpoint_path(inference_root))
 
 
 def _resolve_training_model_path(common: CommonTaskArgs) -> str:

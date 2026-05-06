@@ -1,12 +1,12 @@
-use anyhow::bail;
 use async_trait::async_trait;
 
 use crate::{
     service::{
         local::LocalService,
         pipeline::{
-            training::run_common_training_pipeline, ModelTaskPipeline, TrainingPipelineRequest,
-            TtsPipelineRequest, VoiceClonePipelineRequest,
+            training::run_common_training_pipeline, tts::run_common_tts_pipeline,
+            voice_clone::run_common_voice_clone_pipeline, ModelTaskPipeline,
+            TrainingPipelineRequest, TtsPipelineRequest, VoiceClonePipelineRequest,
         },
     },
     Result,
@@ -34,23 +34,17 @@ impl ModelTaskPipeline for CommonModelTaskPipeline {
 
     async fn run_tts_pipeline(
         &self,
-        _service: &LocalService,
-        _request: TtsPipelineRequest,
+        service: &LocalService,
+        request: TtsPipelineRequest,
     ) -> Result<()> {
-        bail!(
-            "{} text-to-speech pipeline is not implemented in CommonModelTaskPipeline yet",
-            self.base_model
-        )
+        run_common_tts_pipeline(service, request, self.base_model).await
     }
 
     async fn run_voice_clone_pipeline(
         &self,
-        _service: &LocalService,
-        _request: VoiceClonePipelineRequest,
+        service: &LocalService,
+        request: VoiceClonePipelineRequest,
     ) -> Result<()> {
-        bail!(
-            "{} voice clone pipeline is not implemented in CommonModelTaskPipeline yet",
-            self.base_model
-        )
+        run_common_voice_clone_pipeline(service, request, self.base_model).await
     }
 }

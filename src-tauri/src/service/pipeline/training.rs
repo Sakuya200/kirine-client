@@ -14,11 +14,11 @@ use crate::{
         local_paths::resolve_local_log_dir,
         task_paths::{ensure_task_metrics_log_dir, task_log_file_path, training_output_jsonl_path},
     },
-    config::{load_configs, BaseModel, HardwareType},
+    config::{BaseModel, EnvConfig, HardwareType},
     service::{
         local::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
-            sanitize_path_segment, LocalService,
+            LocalService,
         },
         models::{HistoryTaskType, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
         pipeline::TrainingPipelineRequest,
@@ -117,21 +117,25 @@ pub(crate) struct TrainingInvocationContext<'a> {
     pub runtime: TrainingRuntimeOptions,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct TrainingRuntimeOptions {
     hardware_type: HardwareType,
+    attn_implementation: String,
 }
 
 impl TrainingRuntimeOptions {
-    pub(crate) const fn from_hardware_type(hardware_type: HardwareType) -> Self {
-        Self { hardware_type }
+    pub(crate) fn from_env_config(config: &EnvConfig) -> Self {
+        Self {
+            hardware_type: config.hardware_type(),
+            attn_implementation: config.attn_implementation().as_str().to_string(),
+        }
     }
 
-    pub(crate) const fn is_cpu(self) -> bool {
+    pub(crate) const fn is_cpu(&self) -> bool {
         matches!(self.hardware_type, HardwareType::Cpu)
     }
 
-    pub(crate) const fn training_device(self) -> &'static str {
+    pub(crate) const fn training_device(&self) -> &'static str {
         if self.is_cpu() {
             "cpu"
         } else {
@@ -139,7 +143,11 @@ impl TrainingRuntimeOptions {
         }
     }
 
-    pub(crate) fn mode_label(self, base_model: &str) -> Result<String> {
+    pub(crate) fn attn_implementation(&self) -> &str {
+        &self.attn_implementation
+    }
+
+    pub(crate) fn mode_label(&self, base_model: &str) -> Result<String> {
         Ok(format!(
             "{} / {}",
             llm_model_display_name(base_model)?,
@@ -152,8 +160,6 @@ pub(crate) fn build_shared_training_invocation(
     base_model: &str,
     context: &TrainingInvocationContext<'_>,
 ) -> Result<PythonScriptInvocationSpec> {
-    let attn_implementation = load_configs()?.attn_implementation().as_str().to_string();
-
     Ok(PythonScriptInvocationSpec {
         version: 1,
         base_model: base_model.to_string(),
@@ -161,7 +167,7 @@ pub(crate) fn build_shared_training_invocation(
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.training_device().to_string()),
             logging_dir: Some(context.metrics_log_dir.to_string_lossy().to_string()),
-            attn_implementation: Some(attn_implementation),
+            attn_implementation: Some(context.runtime.attn_implementation().to_string()),
         },
         args: PythonScriptTaskArgs::Training(TrainingArgs {
             model_root_path: context.paths.model_root_path.to_string_lossy().to_string(),
@@ -198,8 +204,8 @@ pub(crate) async fn run_common_training_pipeline(
         mark_training_running_state(service, task_id, speaker_id).await?;
 
         let mut cancel_rx = service.active_training_cancel_receiver(task_id)?;
-        let training_config = load_configs()?;
-        let runtime = TrainingRuntimeOptions::from_hardware_type(training_config.hardware_type());
+        let runtime_config = service.runtime_config()?;
+        let runtime = TrainingRuntimeOptions::from_env_config(&runtime_config);
         let params = load_training_task_params(service, task_id, speaker_id, base_model).await?;
         let paths = resolve_training_paths_base(
             service,
@@ -229,7 +235,7 @@ pub(crate) async fn run_common_training_pipeline(
             &paths.download_models_script_path,
             task_id,
             &log_dir,
-            runtime,
+            runtime.clone(),
         )
         .await?;
 
@@ -368,9 +374,9 @@ pub(crate) async fn load_training_task_params(
 pub(crate) fn resolve_training_output_model_dir(
     model_dir: &Path,
     speaker_id: i64,
-    speaker_name: &str,
+    _speaker_name: &str,
 ) -> PathBuf {
-    speaker_model_dir(model_dir, speaker_id, &sanitize_path_segment(speaker_name))
+    speaker_model_dir(model_dir, speaker_id)
 }
 
 pub(crate) fn resolve_training_paths_base(

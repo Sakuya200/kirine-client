@@ -190,6 +190,21 @@ def _require_resolved_path(path: str | None, label: str) -> str:
     return path
 
 
+def _resolve_moss_inference_root(common: CommonTaskArgs) -> Path:
+    if common.model_root_path is None:
+        raise ValueError("MOSS params payload is missing a resolvable inference model path")
+
+    root_path = Path(common.model_root_path).expanduser().resolve()
+    if common.speaker_dir_name:
+        speaker_root = (root_path / common.speaker_dir_name).resolve()
+        bundled_root = (speaker_root / MOSS_MODEL_NAME).resolve()
+        if bundled_root.is_dir():
+            return bundled_root
+        return speaker_root
+
+    return (root_path / MOSS_MODEL_NAME).resolve()
+
+
 def _resolve_training_model_path(common: CommonTaskArgs) -> str:
     candidate = _resolve_locator_candidate(
         common,
@@ -200,12 +215,7 @@ def _resolve_training_model_path(common: CommonTaskArgs) -> str:
 
 
 def _resolve_inference_model_path(common: CommonTaskArgs) -> str:
-    candidate = _resolve_locator_candidate(
-        common,
-        MOSS_MODEL_NAME,
-        prefer_speaker_dir_name=True,
-    )
-    return _require_resolved_path(candidate, "inference model path")
+    return str(_resolve_moss_inference_root(common))
 
 
 def _resolve_codec_path(common: CommonTaskArgs) -> str:

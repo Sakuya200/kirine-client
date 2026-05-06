@@ -18,13 +18,13 @@ use zip::ZipArchive;
 
 use crate::{
     common::{
-        local_paths::{resolve_task_path, serialize_model_path, serialize_task_path},
+        local_paths::{resolve_task_path, serialize_task_path},
         task_paths::{
             task_sample_dir, training_audios_dir, training_imports_dir, training_index_jsonl_path,
             training_reference_audio_path, training_temp_extract_dir,
         },
     },
-    config::{load_configs, HardwareType},
+    config::HardwareType,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -35,7 +35,6 @@ use crate::{
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
-        pipeline::model_paths::speaker_model_dir,
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -132,7 +131,7 @@ impl LocalService {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
-        let selected_training_hardware = load_configs()?.hardware_type();
+        let selected_training_hardware = self.runtime_config()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
@@ -161,7 +160,6 @@ impl LocalService {
             samples: Set(0),
             base_model: Set(base_model.clone()),
             description: Set(speaker_description),
-            model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
             create_time: Set(create_time.clone()),
@@ -195,17 +193,7 @@ impl LocalService {
         let task_id = task_history.id;
 
         let prepared = self.prepare_training_data(task_id, &payload.samples)?;
-        let speaker_model_dir = speaker_model_dir(
-            Path::new(self.model_dir()),
-            speaker_id,
-            &super::sanitize_path_segment(&speaker_name),
-        );
-
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
-        speaker_active_model.model_path = Set(Some(serialize_model_path(
-            Path::new(self.model_dir()),
-            &speaker_model_dir,
-        )));
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
 

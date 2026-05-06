@@ -80,7 +80,8 @@ pub(crate) struct VoiceCloneArgs {
     #[serde(default)]
     pub model_params_json: serde_json::Value,
     pub ref_audio_path: String,
-    pub ref_text: String,
+    #[serde(default)]
+    pub ref_text: Option<String>,
     pub language: String,
     pub output_path: String,
     pub text: String,

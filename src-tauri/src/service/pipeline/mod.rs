@@ -2,12 +2,11 @@ pub mod api;
 pub mod llm_models;
 pub mod model_artifacts;
 pub mod model_paths;
-pub mod moss_tts_local;
 pub mod pipeline;
-pub mod qwen3_tts;
 pub mod script_paths;
 pub mod training;
-pub mod vox_cpm2;
+pub mod tts;
+pub mod voice_clone;
 
 use std::future::Future;
 use std::io;
@@ -20,6 +19,7 @@ use tracing::info;
 
 use crate::{
     common::task_paths::task_log_file_path,
+    config::{EnvConfig, HardwareType},
     service::local::LocalService,
     service::models::HistoryTaskType,
     utils::process::{
@@ -30,9 +30,18 @@ use crate::{
 };
 
 use self::{
-    api::PythonScriptInvocationSpec, moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
-    qwen3_tts::QWEN3_TTS_BASE_MODEL, script_paths::ScriptPlatform, vox_cpm2::VOX_CPM2_BASE_MODEL,
+    api::PythonScriptInvocationSpec,
+    llm_models::{MOSS_TTS_LOCAL_BASE_MODEL, QWEN3_TTS_BASE_MODEL, VOX_CPM2_BASE_MODEL},
+    pipeline::CommonModelTaskPipeline,
+    script_paths::ScriptPlatform,
 };
+
+static MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
+    CommonModelTaskPipeline::new(MOSS_TTS_LOCAL_BASE_MODEL);
+static QWEN3_TTS_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
+    CommonModelTaskPipeline::new(QWEN3_TTS_BASE_MODEL);
+static VOX_CPM2_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
+    CommonModelTaskPipeline::new(VOX_CPM2_BASE_MODEL);
 
 #[derive(Debug, Clone)]
 pub(crate) struct TrainingPipelineRequest {
@@ -50,6 +59,37 @@ pub(crate) struct TtsPipelineRequest {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VoiceClonePipelineRequest {
     pub task_id: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CommonRuntimeOptions {
+    hardware_type: HardwareType,
+    attn_implementation: String,
+}
+
+impl CommonRuntimeOptions {
+    pub(crate) fn from_env_config(config: &EnvConfig) -> Self {
+        Self {
+            hardware_type: config.hardware_type(),
+            attn_implementation: config.attn_implementation().as_str().to_string(),
+        }
+    }
+
+    pub(crate) const fn is_cpu(&self) -> bool {
+        matches!(self.hardware_type, HardwareType::Cpu)
+    }
+
+    pub(crate) const fn device(&self) -> &'static str {
+        if self.is_cpu() {
+            "cpu"
+        } else {
+            "cuda:0"
+        }
+    }
+
+    pub(crate) fn attn_implementation(&self) -> &str {
+        &self.attn_implementation
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,25 +248,9 @@ pub(crate) fn resolve_model_task_pipeline(
     base_model: &str,
 ) -> Result<&'static dyn ModelTaskPipeline> {
     match base_model.trim() {
-        MOSS_TTS_LOCAL_BASE_MODEL => Ok(&moss_tts_local::MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE),
-        QWEN3_TTS_BASE_MODEL => Ok(&qwen3_tts::QWEN3_TTS_MODEL_TASK_PIPELINE),
-        VOX_CPM2_BASE_MODEL => Ok(&vox_cpm2::VOX_CPM2_MODEL_TASK_PIPELINE),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("不支持的基础模型类型: {}", other),
-        )
-        .into()),
-    }
-}
-
-pub(crate) fn resolve_inference_model_path(
-    base_model: &str,
-    model_root_path: &Path,
-) -> Result<PathBuf> {
-    match base_model.trim() {
-        MOSS_TTS_LOCAL_BASE_MODEL => moss_tts_local::resolve_inference_model_path(model_root_path),
-        QWEN3_TTS_BASE_MODEL => qwen3_tts::resolve_inference_model_path(model_root_path),
-        VOX_CPM2_BASE_MODEL => vox_cpm2::resolve_inference_model_path(model_root_path),
+        MOSS_TTS_LOCAL_BASE_MODEL => Ok(&MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE),
+        QWEN3_TTS_BASE_MODEL => Ok(&QWEN3_TTS_MODEL_TASK_PIPELINE),
+        VOX_CPM2_BASE_MODEL => Ok(&VOX_CPM2_MODEL_TASK_PIPELINE),
         other => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("不支持的基础模型类型: {}", other),

@@ -27,9 +27,9 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ImportModelAsSpeakerPayload,
-            ModelInfo, ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo,
-            TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType,
+            ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
+            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
         },
         pipeline::{
@@ -46,6 +46,7 @@ pub struct LocalService {
     app_dir: PathBuf,
     data_dir: String,
     model_dir: String,
+    runtime_config: Arc<RwLock<EnvConfig>>,
     orm: DatabaseConnection,
     active_training_controls: Arc<RwLock<HashMap<i64, watch::Sender<bool>>>>,
 }
@@ -59,7 +60,7 @@ impl Service for LocalService {
             .context("failed to resolve local data directory")?;
         let model_dir = resolve_storage_dir(config.model_dir(), "models")
             .context("failed to resolve local model directory")?;
-        Self::from_paths(app_dir, data_dir, model_dir).await
+        Self::from_paths_with_config(app_dir, data_dir, model_dir, config.clone()).await
     }
     async fn close(&self) -> Result<()> {
         info!("Closing local storage connection pool");
@@ -71,7 +72,10 @@ impl Service for LocalService {
         self.create_speaker_info_impl(payload).await
     }
 
-    async fn import_model_as_speaker(&self, payload: ImportModelAsSpeakerPayload) -> Result<SpeakerInfo> {
+    async fn import_model_as_speaker(
+        &self,
+        payload: ImportModelAsSpeakerPayload,
+    ) -> Result<SpeakerInfo> {
         self.import_model_as_speaker_impl(payload).await
     }
 
@@ -159,6 +163,15 @@ impl LocalService {
         data_dir: PathBuf,
         model_dir: PathBuf,
     ) -> Result<Self> {
+        Self::from_paths_with_config(app_dir, data_dir, model_dir, EnvConfig::default()).await
+    }
+
+    pub(crate) async fn from_paths_with_config(
+        app_dir: PathBuf,
+        data_dir: PathBuf,
+        model_dir: PathBuf,
+        runtime_config: EnvConfig,
+    ) -> Result<Self> {
         if !data_dir.exists() {
             std::fs::create_dir_all(&data_dir).with_context(|| {
                 format!(
@@ -184,6 +197,7 @@ impl LocalService {
             app_dir,
             data_dir: data_dir.to_string_lossy().to_string(),
             model_dir: model_dir.to_string_lossy().to_string(),
+            runtime_config: Arc::new(RwLock::new(runtime_config)),
             orm,
             active_training_controls: Arc::new(RwLock::new(HashMap::new())),
         };
@@ -287,6 +301,22 @@ impl LocalService {
         &self.orm
     }
 
+    pub(crate) fn runtime_config(&self) -> Result<EnvConfig> {
+        self.runtime_config
+            .read()
+            .map(|config| config.clone())
+            .map_err(|_| anyhow::anyhow!("无法读取运行时配置状态"))
+    }
+
+    pub(crate) fn replace_runtime_config(&self, next_config: EnvConfig) -> Result<()> {
+        let mut config = self
+            .runtime_config
+            .write()
+            .map_err(|_| anyhow::anyhow!("无法写入运行时配置状态"))?;
+        *config = next_config;
+        Ok(())
+    }
+
     pub(crate) fn register_active_training_control(
         &self,
         task_id: i64,
@@ -311,9 +341,9 @@ impl LocalService {
             .active_training_controls
             .read()
             .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
-        let cancel_tx = controls
-            .get(&task_id)
-            .ok_or_else(|| anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启"))?;
+        let cancel_tx = controls.get(&task_id).ok_or_else(|| {
+            anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启")
+        })?;
         Ok(cancel_tx.subscribe())
     }
 
@@ -322,9 +352,9 @@ impl LocalService {
             .active_training_controls
             .read()
             .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
-        let cancel_tx = controls
-            .get(&task_id)
-            .ok_or_else(|| anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启"))?;
+        let cancel_tx = controls.get(&task_id).ok_or_else(|| {
+            anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启")
+        })?;
 
         if *cancel_tx.borrow() {
             return Ok(false);

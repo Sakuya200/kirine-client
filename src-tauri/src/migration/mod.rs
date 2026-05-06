@@ -113,13 +113,6 @@ mod tests {
             })
             .expect("vox preset speaker should exist");
 
-        let model_path = harness
-            .speaker_model_path_by_name(&vox_speaker.name)
-            .await
-            .expect("query vox preset speaker model path")
-            .expect("vox preset speaker model path should exist");
-        assert_eq!(model_path, "%SRC_MODEL_ROOT_PATH%/base-models/VoxCPM2");
-
         harness.shutdown().await.expect("shutdown harness");
     }
 }

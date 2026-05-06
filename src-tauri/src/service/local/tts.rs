@@ -8,8 +8,7 @@ use sea_orm::{
 use crate::{
     common::{
         local_paths::{
-            ensure_child_dir, resolve_runtime_model_path, serialize_runtime_model_path,
-            serialize_task_path,
+            ensure_child_dir, serialize_runtime_model_path, serialize_task_path,
         },
         task_paths::ensure_task_sample_dir,
     },
@@ -20,23 +19,20 @@ use crate::{
         },
         models::{
             CreateTextToSpeechTaskPayload, HistoryTaskType, MossTtsLocalTextToSpeechModelParams,
-            Qwen3TtsTextToSpeechModelParams, SpeakerStatus, TaskStatus,
+            Qwen3TtsTextToSpeechModelParams, SpeakerSource, SpeakerStatus, TaskStatus,
             TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
         },
         pipeline::{
-            moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
-            qwen3_tts::qwen3_tts_preset_custom_voice_model_path, resolve_inference_model_path,
-            script_paths::resolve_src_model_root, vox_cpm2::VOX_CPM2_BASE_MODEL,
+            model_paths::{
+                preset_model_root_path, speaker_model_dir,
+            },
+            script_paths::resolve_src_model_root,
         },
         LocalService,
     },
     utils::time::now_string,
     Result,
 };
-
-fn is_preset_model_root_path(src_model_root: &Path, model_path: &Path) -> bool {
-    model_path.starts_with(src_model_root.join("base-models"))
-}
 
 impl LocalService {
     pub(crate) async fn create_text_to_speech_task_impl(
@@ -55,46 +51,27 @@ impl LocalService {
             .filter(speaker_entity::Column::BaseModel.eq(base_model.as_str()))
             .one(&txn)
             .await?;
-        let speaker_label = speaker
-            .as_ref()
-            .map(|model| model.name.clone())
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "未找到与当前基础模型匹配的可用说话人",
-                )
-            })?;
-        let model_root_path = speaker
-            .and_then(|model| model.model_path)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "当前说话人尚未生成可用于文本转语音的本地模型",
-                )
-            })?;
-        let resolved_model_root_path = resolve_runtime_model_path(
-            Path::new(self.model_dir()),
-            &src_model_root,
-            &model_root_path,
-        )?;
-        let inference_model_path = if base_model == VOX_CPM2_BASE_MODEL {
-            resolved_model_root_path.clone()
-        } else if is_preset_model_root_path(&src_model_root, &resolved_model_root_path) {
-            qwen3_tts_preset_custom_voice_model_path(&src_model_root, &model_scale)?
+        let speaker = speaker.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "未找到与当前基础模型匹配的可用说话人",
+            )
+        })?;
+        let speaker_label = speaker.name.clone();
+        let model_root_path = if speaker.source == SpeakerSource::Preset.as_str() {
+            preset_model_root_path(&src_model_root, &base_model, &model_scale)?
         } else {
-            resolve_inference_model_path(&base_model, &resolved_model_root_path)?
+            speaker_model_dir(Path::new(self.model_dir()), speaker_id)
         };
         let task_speaker_id = speaker_id;
         let history_speaker_id = Some(speaker_id);
         let text = payload.text.trim().to_string();
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
-        let model_params = if base_model == VOX_CPM2_BASE_MODEL {
+        let model_params = if base_model == "vox_cpm2" {
             serde_json::to_value(serde_json::from_value::<VoxCpm2TextToSpeechModelParams>(
                 payload.model_params.clone(),
             )?)?
-        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
+        } else if base_model == "moss_tts_local" {
             serde_json::to_value(serde_json::from_value::<MossTtsLocalTextToSpeechModelParams>(
                 payload.model_params.clone(),
             )?)?
@@ -135,7 +112,7 @@ impl LocalService {
         let serialized_model_path = serialize_runtime_model_path(
             Path::new(self.model_dir()),
             &src_model_root,
-            &inference_model_path,
+            &model_root_path,
         );
 
         tts_task_entity::Entity::insert(tts_task_entity::ActiveModel {

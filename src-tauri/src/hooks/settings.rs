@@ -7,6 +7,7 @@ use crate::config::{
     load_configs, resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation,
     BasicConfig, EnvConfig, HardwareType, RemoteConfig,
 };
+use crate::service::{ServiceImpl, ServiceState};
 use crate::utils::file_ops::migrate_directory;
 
 pub struct EnvConfigState(pub RwLock<EnvConfig>);
@@ -89,6 +90,7 @@ pub fn get_settings_config(
 pub fn save_settings_config(
     payload: SaveSettingsPayload,
     state: State<'_, EnvConfigState>,
+    service_state: State<'_, ServiceState>,
 ) -> std::result::Result<SettingsPayload, String> {
     let mut config = state
         .0
@@ -162,6 +164,11 @@ pub fn save_settings_config(
 
     save_configs(&next_config).map_err(|err| err.to_string())?;
     *config = next_config.clone();
+    if let ServiceImpl::Local(local) = &service_state.0 {
+        local
+            .replace_runtime_config(next_config.clone())
+            .map_err(|err| err.to_string())?;
+    }
 
     Ok(SettingsPayload {
         restart_required: !migrated_directories.is_empty(),

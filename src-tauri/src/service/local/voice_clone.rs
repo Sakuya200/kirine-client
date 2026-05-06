@@ -19,7 +19,7 @@ use crate::{
             MossTtsLocalVoiceCloneModelParams, VoxCpm2VoiceCloneMode,
             VoxCpm2VoiceCloneModelParams,
         },
-        pipeline::moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
+        pipeline::llm_models::MOSS_TTS_LOCAL_BASE_MODEL,
         LocalService,
     },
     utils::time::now_string,

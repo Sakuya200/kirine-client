@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 
 use crate::{
     common::local_paths::{ensure_child_dir, resolve_local_log_dir},
-    config::{load_configs, HardwareType},
+    config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
         models::{ModelInfo, ModelMutationResult},
@@ -105,7 +105,7 @@ impl LocalService {
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
-        let use_cpu_mode = load_configs()?.hardware_type() == HardwareType::Cpu;
+        let use_cpu_mode = self.runtime_config()?.hardware_type() == HardwareType::Cpu;
         let init_log_path = log_dir.join(format!(
             "install-{}-{}-init.log",
             model_info.base_model, model_info.model_scale

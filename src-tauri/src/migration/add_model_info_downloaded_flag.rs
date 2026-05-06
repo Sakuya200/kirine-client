@@ -1,16 +1,14 @@
 use anyhow::Context;
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, QueryFilter, Statement};
 use sea_orm_migration::prelude::*;
 
 use crate::{
     config::application_dir,
     service::{
+        entity::model_info as model_info_entity,
         pipeline::{
-            model_artifacts::all_model_artifact_dirs_ready,
-            moss_tts_local::moss_tts_local_prepared_model_download_paths,
-            qwen3_tts::qwen3_tts_prepared_model_download_paths,
+            model_artifacts::{all_model_artifact_dirs_ready, MODEL_ARTIFACTS_DIR},
             script_paths::resolve_src_model_root,
-            vox_cpm2::vox_cpm2_prepared_model_download_paths,
         },
     },
     Result,
@@ -44,9 +42,7 @@ impl MigrationTrait for Migration {
 }
 
 async fn add_downloaded_column(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    let has_column = manager
-        .has_column("model_info", "downloaded")
-        .await?;
+    let has_column = manager.has_column("model_info", "downloaded").await?;
     if has_column {
         return Ok(());
     }
@@ -76,47 +72,41 @@ where
         Err(_) => app_dir.join("src-model"),
     };
 
-    for (base_model, model_scale, downloaded) in [
-        (
-            "qwen3_tts",
-            "1.7B",
-            all_model_artifact_dirs_ready(&qwen3_tts_prepared_model_download_paths(
-                &src_model_root,
-                "1.7B",
-            )?),
-        ),
-        (
-            "qwen3_tts",
-            "0.6B",
-            all_model_artifact_dirs_ready(&qwen3_tts_prepared_model_download_paths(
-                &src_model_root,
-                "0.6B",
-            )?),
-        ),
-        (
-            "moss_tts_local",
-            "1.7B",
-            all_model_artifact_dirs_ready(&moss_tts_local_prepared_model_download_paths(
-                &src_model_root,
-                "1.7B",
-            )?),
-        ),
-        (
-            "vox_cpm2",
-            "2B",
-            all_model_artifact_dirs_ready(&vox_cpm2_prepared_model_download_paths(
-                &src_model_root,
-                "2B",
-            )?),
-        ),
-    ] {
+    let rows = model_info_entity::Entity::find()
+        .filter(model_info_entity::Column::Deleted.eq(0))
+        .all(db)
+        .await?;
+
+    for row in rows {
+        let required_model_name_list: Vec<String> =
+            serde_json::from_str(&row.required_model_name_list_json).with_context(|| {
+                format!(
+                    "failed to parse required_model_name_list_json for {}:{}",
+                    row.base_model, row.model_scale
+                )
+            })?;
+        let download_paths = required_model_name_list
+            .iter()
+            .map(|artifact_name| src_model_root.join(MODEL_ARTIFACTS_DIR).join(artifact_name))
+            .collect::<Vec<_>>();
+        let downloaded = all_model_artifact_dirs_ready(&download_paths);
+
         db.execute(Statement::from_sql_and_values(
             backend,
             "UPDATE model_info SET downloaded = ? WHERE base_model = ? AND model_scale = ? AND deleted = 0",
-            vec![downloaded.into(), base_model.into(), model_scale.into()],
+            vec![
+                downloaded.into(),
+                row.base_model.clone().into(),
+                row.model_scale.clone().into(),
+            ],
         ))
         .await
-        .with_context(|| format!("failed to backfill downloaded flag for {base_model}:{model_scale}"))?;
+        .with_context(|| {
+            format!(
+                "failed to backfill downloaded flag for {}:{}",
+                row.base_model, row.model_scale
+            )
+        })?;
     }
 
     ensure_seed_directories_exist(&src_model_root)?;
@@ -127,8 +117,12 @@ where
 fn ensure_seed_directories_exist(src_model_root: &std::path::Path) -> Result<()> {
     let path = src_model_root.join("base-models");
     if !path.exists() {
-        std::fs::create_dir_all(&path)
-            .with_context(|| format!("failed to create model artifacts directory: {}", path.display()))?;
+        std::fs::create_dir_all(&path).with_context(|| {
+            format!(
+                "failed to create model artifacts directory: {}",
+                path.display()
+            )
+        })?;
     }
 
     Ok(())

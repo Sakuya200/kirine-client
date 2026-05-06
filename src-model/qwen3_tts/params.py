@@ -135,6 +135,33 @@ def _require_resolved_path(path: str | None, label: str) -> str:
     return path
 
 
+def _resolve_latest_qwen3_checkpoint(model_root_path: Path) -> Path:
+    if not model_root_path.is_dir():
+        return model_root_path.resolve()
+
+    checkpoint_dirs: list[tuple[int, Path]] = []
+    for entry in model_root_path.iterdir():
+        if not entry.is_dir():
+            continue
+
+        name = entry.name
+        if not name.startswith("checkpoint-epoch-"):
+            continue
+
+        try:
+            epoch = int(name.removeprefix("checkpoint-epoch-"))
+        except ValueError:
+            continue
+
+        checkpoint_dirs.append((epoch, entry.resolve()))
+
+    checkpoint_dirs.sort(key=lambda item: item[0])
+    if checkpoint_dirs:
+        return checkpoint_dirs[-1][1]
+
+    return model_root_path.resolve()
+
+
 def _infer_qwen3_model_scale(common: CommonTaskArgs) -> str:
     raw_model_scale = common.model_params_json.get("modelScale")
     if raw_model_scale is not None:
@@ -152,7 +179,8 @@ def _resolve_qwen3_inference_model_path(common: CommonTaskArgs) -> str:
         QWEN3_VARIANT_MODEL_NAMES[model_scale]["custom"],
         prefer_speaker_dir_name=True,
     )
-    return _require_resolved_path(candidate, "inference model path")
+    inference_root = Path(_require_resolved_path(candidate, "inference model path"))
+    return str(_resolve_latest_qwen3_checkpoint(inference_root))
 
 
 def _resolve_qwen3_training_model_path(common: CommonTaskArgs) -> str:

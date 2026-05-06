@@ -8,18 +8,13 @@ use sea_orm::{
 };
 
 use crate::{
-    common::local_paths::serialize_runtime_model_path,
     service::{
         local::entity::speaker as speaker_entity,
         models::{
             AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelInfo,
             SpeakerInfo, SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
         },
-        pipeline::{
-            model_paths::speaker_model_dir,
-            resolve_inference_model_path,
-            script_paths::resolve_src_model_root,
-        },
+        pipeline::model_paths::speaker_model_dir,
         LocalService,
     },
     utils::time::now_string,
@@ -50,7 +45,6 @@ impl LocalService {
             samples: Set(payload.samples as i64),
             base_model: Set(payload.base_model.as_str().to_string()),
             description: Set(description.to_string()),
-            model_path: Set(None),
             status: Set(status.as_str().to_string()),
             source: Set(source.as_str().to_string()),
             create_time: Set(create_time.clone()),
@@ -103,10 +97,7 @@ impl LocalService {
         }
 
         self.find_supported_model_variant(base_model, model_scale).await?;
-        resolve_inference_model_path(base_model, &source_model_dir)
-            .with_context(|| format!("导入目录不满足 {} {} 的推理模型结构", base_model, model_scale))?;
 
-        let src_model_root = resolve_src_model_root(self.app_dir())?;
         let languages_json = serde_json::to_string(&vec![payload.language])?;
         let txn = self.orm().begin().await?;
 
@@ -117,7 +108,6 @@ impl LocalService {
             samples: Set(0),
             base_model: Set(base_model.to_string()),
             description: Set(description.to_string()),
-            model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Ready.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
             create_time: Set(create_time.clone()),
@@ -127,11 +117,7 @@ impl LocalService {
         .insert(&txn)
         .await?;
 
-        let managed_model_dir = speaker_model_dir(
-            Path::new(self.model_dir()),
-            inserted.id,
-            &super::sanitize_path_segment(name),
-        );
+        let managed_model_dir = speaker_model_dir(Path::new(self.model_dir()), inserted.id);
         if managed_model_dir.exists() {
             bail!("目标模型目录已存在，请更换说话人名称后重试: {}", managed_model_dir.display());
         }
@@ -140,18 +126,6 @@ impl LocalService {
             let _ = fs::remove_dir_all(&managed_model_dir);
             return Err(err);
         }
-
-        resolve_inference_model_path(base_model, &managed_model_dir)
-            .with_context(|| format!("复制后的模型目录不满足 {} {} 的推理模型结构", base_model, model_scale))?;
-
-        let mut active_model: speaker_entity::ActiveModel = inserted.clone().into();
-        active_model.model_path = Set(Some(serialize_runtime_model_path(
-            Path::new(self.model_dir()),
-            &src_model_root,
-            &managed_model_dir,
-        )));
-        active_model.update(&txn).await?;
-
         txn.commit().await?;
         map_speaker_model(inserted)
     }
