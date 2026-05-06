@@ -87,12 +87,6 @@
       "languages": ["chinese", "english", "japanese"],
       "baseModel": "qwen3_tts",
       "description": "Warm Korean female voice with rich emotion. Native language: Korean."
-    },
-    {
-      "name": "VoxCPM2_Speaker",
-      "languages": ["chinese", "english", "japanese"],
-      "baseModel": "vox_cpm2",
-      "description": "VoxCPM2 内置说话人，可直接用于语音合成或作为微调起点。"
     }
   ]
 }
