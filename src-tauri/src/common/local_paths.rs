@@ -41,11 +41,6 @@ pub(crate) fn resolve_task_path(data_dir: &Path, value: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(trimmed))
 }
 
-pub(crate) fn serialize_model_path(model_dir: &Path, path: &Path) -> String {
-    serialize_path_with_placeholder(path, model_dir, MODEL_DIR_PATH_PLACEHOLDER)
-        .unwrap_or_else(|| normalize_path_string(path))
-}
-
 pub(crate) fn serialize_runtime_model_path(
     model_dir: &Path,
     src_model_root: &Path,

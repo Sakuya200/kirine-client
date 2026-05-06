@@ -38,6 +38,7 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
+import { useSpeakerStore } from '@/stores/speakers';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
 
@@ -95,6 +96,7 @@ const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const isTemplateDialogOpen = ref(false);
 const modelStore = useModelStore();
+const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -497,6 +499,10 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 };
 
+const syncSpeakerStore = async () => {
+  await speakerStore.refreshSpeakers({ silent: true });
+};
+
 const refreshActiveTaskStatus = async () => {
   if (
     !activeTrainingTask.value ||
@@ -514,6 +520,7 @@ const refreshActiveTaskStatus = async () => {
 
   isActiveTaskRefreshInFlight = true;
   const currentTaskId = activeTrainingTask.value.taskId;
+  const previousStatus = activeTrainingTask.value.status;
 
   try {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId: currentTaskId });
@@ -527,6 +534,10 @@ const refreshActiveTaskStatus = async () => {
     recentTrainingHistory.value = recentTrainingHistory.value.map(item =>
       item.id === currentTaskId ? ({ ...item, status: updatedTask.status } as ModelTrainingHistoryRecord) : item
     );
+
+    if (updatedTask.status !== previousStatus) {
+      await syncSpeakerStore();
+    }
 
     if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Cancelled || updatedTask.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
@@ -597,6 +608,7 @@ const startTraining = async () => {
     activeTrainingTask.value = payload;
     syncActiveTaskStatusRefresh();
     setSelectedHistoryTaskId(payload.taskId, true);
+    await syncSpeakerStore();
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(

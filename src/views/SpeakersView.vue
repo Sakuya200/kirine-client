@@ -265,9 +265,7 @@ onMounted(async () => {
     await modelStore.loadModels();
   }
 
-  if (!speakerStore.initialized) {
-    await speakerStore.loadSpeakers();
-  }
+  await speakerStore.ensureLoaded({ force: true });
 });
 </script>
 

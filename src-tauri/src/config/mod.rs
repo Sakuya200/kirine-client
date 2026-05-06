@@ -6,8 +6,8 @@ mod env_config;
 mod log;
 
 pub use env_config::{
-    application_dir, load_configs, resolve_storage_dir, save_configs, supported_models_path,
-    BasicConfig, EnvConfig, RemoteConfig,
+    load_configs, resolve_storage_dir, save_configs, supported_models_path, BasicConfig, EnvConfig,
+    RemoteConfig,
 };
 pub use log::{init_log, resolve_base_log_dir};
 

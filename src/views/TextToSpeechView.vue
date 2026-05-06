@@ -559,9 +559,7 @@ onBeforeUnmount(() => {
 
 onMounted(async () => {
   await modelStore.ensureLoaded();
-  if (!speakerStore.initialized) {
-    await speakerStore.loadSpeakers();
-  }
+  await speakerStore.ensureLoaded({ force: true });
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });

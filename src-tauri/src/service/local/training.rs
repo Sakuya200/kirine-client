@@ -259,8 +259,8 @@ impl LocalService {
                 effective_batch_size, batch_size, gradient_accumulation_steps
             ));
             notes.push(format!(
-                "预计每轮约 {} 步，总计约 {} 步。",
-                steps_per_epoch, total_steps
+                "预计执行 {} 轮，每轮约 {} 步，总计约 {} 步。",
+                epoch_count, steps_per_epoch, total_steps
             ));
         }
         if matches!(selected_training_hardware, HardwareType::Cpu) {
