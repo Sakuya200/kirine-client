@@ -6,8 +6,7 @@
       "modelScale": "1.7B",
       "requiredModelNameList": ["Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-1.7B-CustomVoice"],
       "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
-      "downloaded": true
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
     },
     {
       "baseModel": "qwen3_tts",
@@ -15,8 +14,7 @@
       "modelScale": "0.6B",
       "requiredModelNameList": ["Qwen3-TTS-12Hz-0.6B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-0.6B-CustomVoice"],
       "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-0.6B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
-      "downloaded": true
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
     },
     {
       "baseModel": "vox_cpm2",
@@ -24,8 +22,7 @@
       "modelScale": "2B",
       "requiredModelNameList": ["VoxCPM2"],
       "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "lora"],
-      "downloaded": true
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "lora"]
     },
     {
       "baseModel": "moss_tts_local",
@@ -33,8 +30,7 @@
       "modelScale": "1.7B",
       "requiredModelNameList": ["MOSS-TTS-Local-Transformer", "MOSS-Audio-Tokenizer"],
       "requiredModelRepoIdList": ["OpenMOSS-Team/MOSS-TTS-Local-Transformer", "OpenMOSS-Team/MOSS-Audio-Tokenizer"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"],
-      "downloaded": false
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
     }
   ],
   "speakers": [

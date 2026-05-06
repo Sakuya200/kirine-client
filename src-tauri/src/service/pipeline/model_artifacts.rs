@@ -77,10 +77,6 @@ pub(crate) fn validate_model_artifact_paths(
     )
 }
 
-pub(crate) fn all_model_artifact_dirs_ready(paths: &[PathBuf]) -> bool {
-    paths.iter().all(|path| validate_model_artifact_dir(path).is_ok())
-}
-
 fn validate_model_artifact_dir(path: &Path) -> std::result::Result<(), &'static str> {
     if !path.exists() {
         return Err("missing");

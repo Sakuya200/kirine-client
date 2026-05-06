@@ -33,7 +33,6 @@ struct SupportedModelDefinition {
     required_model_name_list: Vec<String>,
     required_model_repo_id_list: Vec<String>,
     supported_feature_list: Vec<String>,
-    downloaded: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,7 +171,7 @@ where
         active_model.required_model_name_list_json = Set(required_model_name_list_json);
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
         active_model.supported_feature_list_json = Set(supported_feature_list_json);
-        active_model.downloaded = Set(downloaded || definition.downloaded);
+        active_model.downloaded = Set(downloaded);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
         active_model.deleted = Set(0);
@@ -188,7 +187,7 @@ where
             supported_feature_list_json: Set(supported_feature_list_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
-            downloaded: Set(definition.downloaded),
+            downloaded: Set(false),
             deleted: Set(0),
         }
         .insert(connection)
