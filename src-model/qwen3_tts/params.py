@@ -36,7 +36,7 @@ class Qwen3TrainingRuntimeOptions:
 @dataclass
 class Qwen3TrainingParams:
     base_model: str
-    version: int
+    version: str
     common: CommonTaskArgs
     init_model_path: str
     tokenizer_model_path: str
@@ -162,7 +162,20 @@ def _resolve_latest_qwen3_checkpoint(model_root_path: Path) -> Path:
     return model_root_path.resolve()
 
 
-def _infer_qwen3_model_scale(common: CommonTaskArgs) -> str:
+def _payload_version(payload: dict[str, object]) -> str:
+    raw_version = payload.get("version")
+    if raw_version is None:
+        return "1.0.0"
+    return str(raw_version)
+
+
+def _infer_qwen3_model_scale(payload: dict[str, object], common: CommonTaskArgs) -> str:
+    raw_model_scale = payload.get("model_scale")
+    if raw_model_scale is not None:
+        model_scale = str(raw_model_scale).strip()
+        if model_scale in QWEN3_VARIANT_MODEL_NAMES:
+            return model_scale
+
     raw_model_scale = common.model_params_json.get("modelScale")
     if raw_model_scale is not None:
         model_scale = str(raw_model_scale).strip()
@@ -172,8 +185,10 @@ def _infer_qwen3_model_scale(common: CommonTaskArgs) -> str:
     raise ValueError("Qwen3 params payload is missing a supported modelScale value")
 
 
-def _resolve_qwen3_inference_model_path(common: CommonTaskArgs) -> str:
-    model_scale = _infer_qwen3_model_scale(common)
+def _resolve_qwen3_inference_model_path(
+    payload: dict[str, object], common: CommonTaskArgs
+) -> str:
+    model_scale = _infer_qwen3_model_scale(payload, common)
     candidate = _resolve_locator_candidate(
         common,
         QWEN3_VARIANT_MODEL_NAMES[model_scale]["custom"],
@@ -183,8 +198,10 @@ def _resolve_qwen3_inference_model_path(common: CommonTaskArgs) -> str:
     return str(_resolve_latest_qwen3_checkpoint(inference_root))
 
 
-def _resolve_qwen3_training_model_path(common: CommonTaskArgs) -> str:
-    model_scale = _infer_qwen3_model_scale(common)
+def _resolve_qwen3_training_model_path(
+    payload: dict[str, object], common: CommonTaskArgs
+) -> str:
+    model_scale = _infer_qwen3_model_scale(payload, common)
     candidate = _resolve_locator_candidate(
         common,
         QWEN3_VARIANT_MODEL_NAMES[model_scale]["base"],
@@ -230,9 +247,9 @@ def load_training_params(path: str | Path) -> Qwen3TrainingParams:
 
     return Qwen3TrainingParams(
         base_model=str(payload.get("base_model") or "qwen3_tts"),
-        version=int(payload.get("version") or 1),
+        version=_payload_version(payload),
         common=common,
-        init_model_path=_resolve_qwen3_training_model_path(common),
+        init_model_path=_resolve_qwen3_training_model_path(payload, common),
         tokenizer_model_path=_resolve_qwen3_tokenizer_model_path(common),
         input_jsonl=str(args["input_jsonl"]),
         output_jsonl=str(args["output_jsonl"]),
@@ -322,7 +339,7 @@ def load_tts_params(path: str | Path) -> Qwen3TtsParams:
 
     return Qwen3TtsParams(
         common=common,
-        init_model_path=_resolve_qwen3_inference_model_path(common),
+        init_model_path=_resolve_qwen3_inference_model_path(payload, common),
         text=str(args["text"]),
         language=str(args.get("language") or "Auto"),
         speaker=str(args.get("speaker") or ""),
@@ -352,7 +369,7 @@ def load_voice_clone_params(path: str | Path) -> Qwen3VoiceCloneParams:
         common=common,
         ref_audio_path=str(args["ref_audio_path"]),
         ref_text=str(args.get("ref_text") or ""),
-        init_model_path=_resolve_qwen3_training_model_path(common),
+        init_model_path=_resolve_qwen3_training_model_path(payload, common),
         language=str(args.get("language") or "Auto"),
         output_path=str(args["output_path"]),
         text=str(args["text"]),

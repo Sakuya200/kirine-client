@@ -95,8 +95,9 @@ pub(crate) fn build_shared_tts_invocation(
     context: &TtsInvocationContext<'_>,
 ) -> PythonScriptInvocationSpec {
     PythonScriptInvocationSpec {
-        version: 1,
+        version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
+        model_scale: context.params.model_scale.clone(),
         kind: PythonScriptTaskKind::TextToSpeech,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.device().to_string()),

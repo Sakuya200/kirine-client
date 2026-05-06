@@ -26,7 +26,7 @@ class VoxCpm2TrainingRuntimeOptions:
 @dataclass
 class VoxCpm2TrainingParams:
     base_model: str
-    version: int
+    version: str
     common: CommonTaskArgs
     init_model_path: str
     input_jsonl: str
@@ -209,6 +209,13 @@ def _parse_float_with_default(value: str | None, default: float) -> float:
     return default if value is None else float(value)
 
 
+def _payload_version(payload: dict[str, object]) -> str:
+    raw_version = payload.get("version")
+    if raw_version is None:
+        return "1.0.0"
+    return str(raw_version)
+
+
 def _model_param(common: CommonTaskArgs, key: str):
     return common.model_params_json.get(key)
 
@@ -254,7 +261,7 @@ def load_training_params(path: str | Path) -> VoxCpm2TrainingParams:
 
     return VoxCpm2TrainingParams(
         base_model=str(payload.get("base_model") or "vox_cpm2"),
-        version=int(payload.get("version") or 1),
+        version=_payload_version(payload),
         common=common,
         init_model_path=_resolve_training_model_path(common),
         input_jsonl=str(args["input_jsonl"]),

@@ -160,8 +160,9 @@ pub(crate) fn build_shared_training_invocation(
     context: &TrainingInvocationContext<'_>,
 ) -> Result<PythonScriptInvocationSpec> {
     Ok(PythonScriptInvocationSpec {
-        version: 1,
+        version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
+        model_scale: context.paths.model_scale.clone(),
         kind: PythonScriptTaskKind::Training,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.training_device().to_string()),

@@ -109,8 +109,9 @@ pub(crate) fn build_shared_voice_clone_invocation(
     context: &VoiceCloneInvocationContext<'_>,
 ) -> PythonScriptInvocationSpec {
     PythonScriptInvocationSpec {
-        version: 1,
+        version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
+        model_scale: context.paths.model_scale.clone(),
         kind: PythonScriptTaskKind::VoiceClone,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.device().to_string()),
