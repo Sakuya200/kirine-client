@@ -23,6 +23,7 @@ withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
+  'update:selectedTaskId': [taskId: number | null];
   select: [taskId: number];
 }>();
 </script>
@@ -41,7 +42,14 @@ const emit = defineEmits<{
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <StatusPill :status="item.status" />
-        <BaseButton tone="ghost" size="sm" @click="emit('select', item.taskId)">
+        <BaseButton
+          tone="ghost"
+          size="sm"
+          @click="
+            emit('update:selectedTaskId', item.taskId);
+            emit('select', item.taskId);
+          "
+        >
           <span>{{ actionLabel }}</span>
         </BaseButton>
       </div>

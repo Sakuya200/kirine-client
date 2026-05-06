@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::service::pipeline::model_paths::llm_model_paths;
+use crate::service::pipeline::model_paths::llm_model_python_script_path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScriptPlatform {
@@ -82,7 +82,7 @@ pub(crate) fn src_model_model_python_script_path(
     base_model: &str,
     script_name: &str,
 ) -> Result<PathBuf> {
-    Ok(llm_model_paths(base_model)?.python_script_path(src_model_root, script_name))
+    llm_model_python_script_path(base_model, src_model_root, script_name)
 }
 
 pub(crate) fn src_model_venv_python_path(src_model_root: &Path, base_model: &str) -> PathBuf {

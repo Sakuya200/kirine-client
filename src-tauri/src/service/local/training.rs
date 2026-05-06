@@ -18,13 +18,13 @@ use zip::ZipArchive;
 
 use crate::{
     common::{
-        local_paths::{resolve_task_path, serialize_model_path, serialize_task_path},
+        local_paths::{resolve_task_path, serialize_task_path},
         task_paths::{
             task_sample_dir, training_audios_dir, training_imports_dir, training_index_jsonl_path,
             training_reference_audio_path, training_temp_extract_dir,
         },
     },
-    config::{load_configs, HardwareType},
+    config::HardwareType,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -33,12 +33,7 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, MossTtsLocalTrainingModelParams, Qwen3TtsTrainingModelParams,
-            SpeakerSource, SpeakerStatus, TaskStatus, VoxCpm2TrainingModelParams,
-        },
-        pipeline::{
-            model_paths::{llm_model_display_name, speaker_model_dir},
-            moss_tts_local::MOSS_TTS_LOCAL_BASE_MODEL,
+            ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
         LocalService,
     },
@@ -136,30 +131,20 @@ impl LocalService {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
-        let selected_training_hardware = load_configs()?.hardware_type();
+        let selected_training_hardware = self.runtime_config()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.model_name.trim().to_string();
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_scale = payload.model_scale.trim().to_string();
-        let model_params = if base_model == "vox_cpm2" {
-            serde_json::to_value(
-                serde_json::from_value::<VoxCpm2TrainingModelParams>(payload.model_params.clone())?
-                    .normalized(),
-            )?
-        } else if base_model == MOSS_TTS_LOCAL_BASE_MODEL {
-            serde_json::to_value(serde_json::from_value::<MossTtsLocalTrainingModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        } else {
-            serde_json::to_value(serde_json::from_value::<Qwen3TtsTrainingModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        };
+        let model_params = payload.model_params.clone();
+        let selected_model_info = self
+            .find_supported_model_variant(&base_model, &model_scale)
+            .await?;
         let selected_training_mode_text = format!(
             "{} / {}",
-            llm_model_display_name(&base_model)?,
+            selected_model_info.model_name,
             match selected_training_hardware {
                 HardwareType::Cuda => "CUDA",
                 HardwareType::Cpu => "CPU",
@@ -175,7 +160,6 @@ impl LocalService {
             samples: Set(0),
             base_model: Set(base_model.clone()),
             description: Set(speaker_description),
-            model_path: Set(Some(String::new())),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
             create_time: Set(create_time.clone()),
@@ -209,17 +193,7 @@ impl LocalService {
         let task_id = task_history.id;
 
         let prepared = self.prepare_training_data(task_id, &payload.samples)?;
-        let speaker_model_dir = speaker_model_dir(
-            Path::new(self.model_dir()),
-            speaker_id,
-            &super::sanitize_path_segment(&speaker_name),
-        );
-
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
-        speaker_active_model.model_path = Set(Some(serialize_model_path(
-            Path::new(self.model_dir()),
-            &speaker_model_dir,
-        )));
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
 
@@ -288,40 +262,9 @@ impl LocalService {
                 "预计每轮约 {} 步，总计约 {} 步。",
                 steps_per_epoch, total_steps
             ));
-            if base_model == "vox_cpm2" {
-                notes.push(format!(
-                    "VoxCPM2 的 epoch 进度按外层 step × {} / 样本数计算，配置 {} 轮时应在约 {} 步内结束。",
-                    effective_batch_size, epoch_count, total_steps
-                ));
-            }
         }
         if matches!(selected_training_hardware, HardwareType::Cpu) {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
-        }
-        if base_model == "vox_cpm2" {
-            let use_lora = model_params
-                .get("useLora")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if use_lora {
-                notes.push(format!(
-                    "LoRA 微调参数: rank {}，alpha {}，dropout {}。",
-                    model_params
-                        .get("loraRank")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(32),
-                    model_params
-                        .get("loraAlpha")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(32),
-                    model_params
-                        .get("loraDropout")
-                        .and_then(Value::as_str)
-                        .unwrap_or("0.0")
-                ));
-            } else {
-                notes.push("当前使用全量微调，不启用 LoRA 适配器。".into());
-            }
         }
         if payload
             .samples

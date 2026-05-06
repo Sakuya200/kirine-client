@@ -77,15 +77,6 @@ pub(crate) fn resolve_runtime_model_path(
     Ok(resolved)
 }
 
-pub(crate) fn src_model_relative_runtime_path(relative_path: &str) -> String {
-    let normalized = relative_path.trim().trim_matches('/').replace('\\', "/");
-    if normalized.is_empty() {
-        SRC_MODEL_ROOT_PATH_PLACEHOLDER.to_string()
-    } else {
-        format!("{}/{}", SRC_MODEL_ROOT_PATH_PLACEHOLDER, normalized)
-    }
-}
-
 fn serialize_path_with_placeholder(path: &Path, root: &Path, placeholder: &str) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let relative = normalize_relative_path(relative);
@@ -129,9 +120,7 @@ fn normalize_path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        resolve_runtime_model_path, serialize_runtime_model_path, src_model_relative_runtime_path,
-    };
+    use super::{resolve_runtime_model_path, serialize_runtime_model_path};
     use std::path::Path;
 
     #[test]
@@ -174,16 +163,6 @@ mod tests {
         assert_eq!(
             path,
             Path::new("D:/workspace/src-model/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice")
-        );
-    }
-
-    #[test]
-    fn src_model_relative_runtime_path_normalizes_separators() {
-        let value = src_model_relative_runtime_path("base-models\\Qwen3-TTS-12Hz-1.7B-CustomVoice");
-
-        assert_eq!(
-            value,
-            "%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice"
         );
     }
 

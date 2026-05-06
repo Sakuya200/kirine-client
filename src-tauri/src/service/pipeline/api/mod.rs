@@ -21,85 +21,86 @@ pub(crate) struct PythonScriptRuntimeOptions {
     pub attn_implementation: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PythonScriptExecutionTarget {
-    pub model_script_name: String,
-    pub uses_shared_helpers: Vec<String>,
+pub(crate) fn split_model_locator(model_path: &Path) -> (String, Option<String>) {
+    let model_root_path = model_path
+        .parent()
+        .unwrap_or(model_path)
+        .to_string_lossy()
+        .to_string();
+    let speaker_dir_name = model_path.parent().and_then(|parent| {
+        let parent_name = parent.file_name()?.to_str()?;
+        if parent_name.eq_ignore_ascii_case("base-models") {
+            None
+        } else {
+            model_path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        }
+    });
+
+    (model_root_path, speaker_dir_name)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TrainingScriptArgs {
-    pub init_model_path: String,
-    pub codec_path: Option<String>,
-    pub tokenizer_model_path: Option<String>,
+pub(crate) struct TrainingArgs {
+    pub model_root_path: String,
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    #[serde(default)]
+    pub model_params_json: serde_json::Value,
     pub input_jsonl: String,
-    pub output_jsonl: Option<String>,
+    pub output_jsonl: String,
     pub output_model_path: String,
     pub batch_size: i64,
     pub lr: Option<String>,
     pub num_epochs: i64,
-    pub speaker_name: Option<String>,
+    pub speaker_name: String,
     pub gradient_accumulation_steps: i64,
     pub enable_gradient_checkpointing: bool,
-    pub use_lora: bool,
-    pub training_mode: Option<String>,
-    pub lora_rank: Option<i64>,
-    pub lora_alpha: Option<i64>,
-    pub lora_dropout: Option<String>,
-    pub weight_decay: Option<String>,
-    pub warmup_steps: Option<i64>,
-    pub warmup_ratio: Option<String>,
-    pub max_grad_norm: Option<String>,
-    pub mixed_precision: Option<String>,
-    pub channelwise_loss_weight: Option<String>,
-    pub skip_reference_audio_codes: Option<bool>,
-    pub prep_batch_size: Option<i64>,
-    pub prep_n_vq: Option<i64>,
-    pub lr_scheduler_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TtsScriptArgs {
-    pub init_model_path: String,
+pub(crate) struct TTSArgs {
+    pub model_root_path: String,
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    #[serde(default)]
+    pub model_params_json: serde_json::Value,
     pub text: String,
     pub language: String,
     pub speaker: String,
-    pub instruct: String,
     pub output_path: String,
-    pub cfg_value: Option<String>,
-    pub inference_timesteps: Option<i64>,
-    pub n_vq_for_inference: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct VoiceCloneScriptArgs {
+pub(crate) struct VoiceCloneArgs {
+    pub model_root_path: String,
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    #[serde(default)]
+    pub model_params_json: serde_json::Value,
     pub ref_audio_path: String,
-    pub ref_text: String,
-    pub init_model_path: String,
+    #[serde(default)]
+    pub ref_text: Option<String>,
     pub language: String,
     pub output_path: String,
     pub text: String,
-    pub mode: Option<String>,
-    pub style_prompt: Option<String>,
-    pub cfg_value: Option<String>,
-    pub inference_timesteps: Option<i64>,
-    pub n_vq_for_inference: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum PythonScriptTaskArgs {
-    Training(TrainingScriptArgs),
-    TextToSpeech(TtsScriptArgs),
-    VoiceClone(VoiceCloneScriptArgs),
+    Training(TrainingArgs),
+    TextToSpeech(TTSArgs),
+    VoiceClone(VoiceCloneArgs),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PythonScriptInvocationSpec {
-    pub version: u32,
+    pub version: String,
     pub base_model: String,
+    pub model_scale: String,
     pub kind: PythonScriptTaskKind,
     pub runtime: PythonScriptRuntimeOptions,
-    pub target: PythonScriptExecutionTarget,
     pub args: PythonScriptTaskArgs,
 }
 

@@ -1,28 +1,27 @@
 use std::{
     collections::HashSet,
     fs,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::de::DeserializeOwned;
 
 use crate::{
     common::local_paths::{ensure_child_dir, resolve_local_log_dir},
-    config::{load_configs, HardwareType},
+    config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
         models::{ModelInfo, ModelMutationResult},
         pipeline::{
-            moss_tts_local::{
-                moss_tts_local_download_script_args, moss_tts_local_prepared_model_download_paths,
+            model_artifacts::{
+                build_model_download_script_args, resolve_model_download_paths,
+                validate_model_artifact_paths,
             },
-            qwen3_tts::{qwen3_tts_download_script_args, qwen3_tts_prepared_model_download_paths},
             script_paths::{resolve_src_model_root, src_model_venv_python_path, ScriptPlatform},
-            validate_and_download, validate_and_init, validate_downloaded_paths,
-            vox_cpm2::{vox_cpm2_download_script_args, vox_cpm2_prepared_model_download_paths},
-            PipelineBootstrapPaths, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
+            validate_and_download, validate_and_init, PipelineBootstrapPaths,
+            DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
         LocalService,
     },
@@ -71,6 +70,18 @@ impl LocalService {
         Ok(())
     }
 
+    pub(crate) async fn get_model_info_by_base_and_scale_impl(
+        &self,
+        base_model: &str,
+        model_scale: &str,
+    ) -> Result<ModelInfo> {
+        let row = self
+            .find_model_info_row(base_model, model_scale)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到目标模型"))?;
+        map_model_info(row)
+    }
+
     async fn find_model_info_row(
         &self,
         base_model: &str,
@@ -94,7 +105,7 @@ impl LocalService {
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
-        let use_cpu_mode = load_configs()?.hardware_type() == HardwareType::Cpu;
+        let use_cpu_mode = self.runtime_config()?.hardware_type() == HardwareType::Cpu;
         let init_log_path = log_dir.join(format!(
             "install-{}-{}-init.log",
             model_info.base_model, model_info.model_scale
@@ -146,11 +157,7 @@ impl LocalService {
             bootstrap_paths,
             model_id,
             &log_dir,
-            resolve_model_download_script_args(
-                &src_model_root,
-                &model_info.base_model,
-                &model_info.model_scale,
-            )?,
+            build_model_download_script_args(&src_model_root, &model_info)?,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL,
             |script_path, working_dir, _task_id, log_dir, script_args, label| {
                 let log_path = download_log_path.clone();
@@ -173,14 +180,10 @@ impl LocalService {
                 }
             },
             || {
-                validate_downloaded_paths(
+                validate_model_artifact_paths(
                     &model_info.base_model,
                     &model_info.model_scale,
-                    &resolve_model_download_paths(
-                        &src_model_root,
-                        &model_info.base_model,
-                        &model_info.model_scale,
-                    )?,
+                    &resolve_model_download_paths(&src_model_root, &model_info),
                 )
             },
         )
@@ -273,34 +276,6 @@ impl LocalService {
         }
 
         Ok(shared)
-    }
-}
-
-fn resolve_model_download_paths(
-    src_model_root: &Path,
-    base_model: &str,
-    model_scale: &str,
-) -> Result<Vec<PathBuf>> {
-    match base_model.trim() {
-        "qwen3_tts" => qwen3_tts_prepared_model_download_paths(src_model_root, model_scale),
-        "vox_cpm2" => vox_cpm2_prepared_model_download_paths(src_model_root, model_scale),
-        "moss_tts_local" => {
-            moss_tts_local_prepared_model_download_paths(src_model_root, model_scale)
-        }
-        other => bail!("不支持的基础模型类型: {}", other),
-    }
-}
-
-fn resolve_model_download_script_args(
-    src_model_root: &Path,
-    base_model: &str,
-    model_scale: &str,
-) -> Result<Vec<String>> {
-    match base_model.trim() {
-        "qwen3_tts" => qwen3_tts_download_script_args(src_model_root, model_scale),
-        "vox_cpm2" => vox_cpm2_download_script_args(src_model_root, model_scale),
-        "moss_tts_local" => moss_tts_local_download_script_args(src_model_root, model_scale),
-        other => bail!("不支持的基础模型类型: {}", other),
     }
 }
 

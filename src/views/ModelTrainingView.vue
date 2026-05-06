@@ -92,6 +92,7 @@ const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
 const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
+const selectedHistoryTaskId = ref<number | null>(null);
 const isTemplateDialogOpen = ref(false);
 const modelStore = useModelStore();
 const uiStore = useUiStore();
@@ -101,6 +102,7 @@ let importedSampleIdSeed = Date.now();
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 let isHistoryRefreshInFlight = false;
+let skipHistoryTaskSelectionReload = false;
 
 const trainingChecklist = [
   '准备最少 1 条音频样本与对应文本稿，作为微调数据输入，建议 24kHz 以上质量。',
@@ -400,6 +402,47 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS.find(option => option.value === form.language) ?? null;
 };
 
+const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => {
+  if (selectedHistoryTaskId.value === taskId) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  skipHistoryTaskSelectionReload = skipReload;
+  selectedHistoryTaskId.value = taskId;
+};
+
+const loadSelectedHistoryTask = async (taskId: number) => {
+  try {
+    const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
+
+    if (!isModelTrainingHistoryRecord(record)) {
+      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      return;
+    }
+
+    applyTrainingHistoryToForm(record);
+    activeTrainingTask.value = mapHistoryRecordToTrainingTask(record);
+    recentTrainingHistory.value = recentTrainingHistory.value.map(item => (item.id === record.id ? record : item));
+    syncActiveTaskStatusRefresh();
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('载入模型微调历史任务配置失败，请检查 Rust 后端日志', error));
+  }
+};
+
+watch(selectedHistoryTaskId, taskId => {
+  if (skipHistoryTaskSelectionReload) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  if (taskId === null) {
+    return;
+  }
+
+  void loadSelectedHistoryTask(taskId);
+});
+
 const hydrateReplayTaskFromRoute = async () => {
   const historyId = getHistoryTaskReplayId(route.query[HISTORY_TASK_REPLAY_QUERY_KEY]);
 
@@ -553,6 +596,7 @@ const startTraining = async () => {
 
     activeTrainingTask.value = payload;
     syncActiveTaskStatusRefresh();
+    setSelectedHistoryTaskId(payload.taskId, true);
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
@@ -564,18 +608,6 @@ const startTraining = async () => {
   } finally {
     isStarting.value = false;
   }
-};
-
-const loadHistoryItem = (taskId: number) => {
-  const item = recentTrainingHistory.value.find(historyItem => historyItem.id === taskId);
-  if (!item) {
-    uiStore.notifyWarning('目标历史任务不存在或已被移除。');
-    return;
-  }
-
-  applyTrainingHistoryToForm(item);
-  activeTrainingTask.value = mapHistoryRecordToTrainingTask(item);
-  syncActiveTaskStatusRefresh();
 };
 
 onMounted(async () => {
@@ -749,10 +781,9 @@ onBeforeUnmount(() => {
           <div class="max-h-[420px] overflow-y-auto pr-1">
             <RecentTaskList
               :items="recentTaskItems"
-              :selected-task-id="activeTrainingTask?.taskId ?? null"
+              v-model:selected-task-id="selectedHistoryTaskId"
               empty-text="还没有历史任务。开始微调后会自动加入这里。"
               action-label="查看"
-              @select="loadHistoryItem"
             />
           </div>
         </PanelCard>

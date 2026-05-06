@@ -10,7 +10,6 @@ pub struct Model {
     pub samples: i64,
     pub base_model: String,
     pub description: String,
-    pub model_path: Option<String>,
     pub status: String,
     pub source: String,
     pub create_time: String,

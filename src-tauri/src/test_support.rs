@@ -13,7 +13,7 @@ use crate::{
             CreateTextToSpeechTaskPayload, HistoryRecord, ModelInfo, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerInfo, SpeakerSource, SpeakerStatus, TextToSpeechFormat,
-            TextToSpeechTaskResult, UpdateSpeakerPayload, VoxCpm2TextToSpeechModelParams,
+            TextToSpeechTaskResult, UpdateSpeakerPayload,
         },
         LocalService, Service,
     },
@@ -90,19 +90,6 @@ impl LocalServiceHarness {
         Ok(path)
     }
 
-    pub async fn speaker_model_path_by_name(&self, name: &str) -> Result<Option<String>> {
-        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let row = sqlx::query(
-            "SELECT model_path FROM speakers WHERE name = ? AND deleted = 0 ORDER BY id ASC LIMIT 1",
-        )
-        .bind(name)
-        .fetch_optional(&pool)
-        .await?;
-        pool.close().await;
-
-        Ok(row.and_then(|row| row.get::<Option<String>, _>("model_path")))
-    }
-
     pub async fn tts_task_model_path(&self, history_id: i64) -> Result<Option<String>> {
         let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
         let row = sqlx::query(
@@ -121,7 +108,9 @@ impl LocalServiceHarness {
             .list_speakers()
             .await?
             .into_iter()
-            .find(|speaker| speaker.name == "VoxCPM2_Speaker")
+            .find(|speaker| {
+                speaker.base_model == "vox_cpm2" && speaker.source == SpeakerSource::Preset
+            })
             .expect("expected built-in VoxCPM2 speaker to exist");
 
         self.service
@@ -133,10 +122,10 @@ impl LocalServiceHarness {
                 format: TextToSpeechFormat::Wav,
                 export_audio_name: "vox-preset-test".to_string(),
                 text: "测试 VoxCPM2 首次任务创建".to_string(),
-                model_params: serde_json::to_value(VoxCpm2TextToSpeechModelParams {
-                    cfg_value: Some("2.0".to_string()),
-                    inference_timesteps: 10,
-                })?,
+                model_params: serde_json::json!({
+                    "cfg_value": "2.0",
+                    "inference_timesteps": 10
+                }),
             })
             .await
     }
@@ -383,9 +372,9 @@ async fn seed_legacy_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description, model_path,
+            id, name, languages_json, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
@@ -394,7 +383,6 @@ async fn seed_legacy_schema(db_path: &PathBuf) -> Result<()> {
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")
-    .bind(Option::<String>::None)
     .bind("ready")
     .bind("local")
     .bind("2026-04-01 10:00:00")
@@ -443,9 +431,9 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description, model_path,
+            id, name, languages_json, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
@@ -454,7 +442,6 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")
-    .bind(Option::<String>::None)
     .bind("ready")
     .bind("local")
     .bind("2026-04-01 10:00:00")
@@ -605,7 +592,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             samples INTEGER NOT NULL DEFAULT 0,
             base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
             description TEXT NOT NULL DEFAULT '',
-            model_path TEXT,
             status TEXT NOT NULL,
             source TEXT NOT NULL,
             create_time TEXT NOT NULL,
@@ -745,9 +731,9 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description, model_path,
+            id, name, languages_json, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
@@ -756,7 +742,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")
-    .bind(Option::<String>::None)
     .bind("ready")
     .bind("local")
     .bind("2026-04-01 10:00:00")

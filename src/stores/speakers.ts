@@ -50,7 +50,7 @@ const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
     modifyTime: item.modifyTime ?? '',
     description: item.description?.trim() || '',
     status: safeStatus,
-    source: item.source === 'local' || item.source === 'remote' ? item.source : 'remote'
+    source: item.source === 'local' || item.source === 'preset' || item.source === 'remote' ? item.source : 'remote'
   };
 };
 

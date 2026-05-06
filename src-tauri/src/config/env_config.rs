@@ -145,11 +145,19 @@ pub fn resolve_storage_dir(
 }
 
 pub fn config_path() -> Result<std::path::PathBuf> {
+    resolve_root_file_path("config.toml")
+}
+
+pub fn supported_models_path() -> Result<std::path::PathBuf> {
+    resolve_root_file_path("supported_models.json")
+}
+
+fn resolve_root_file_path(file_name: &str) -> Result<std::path::PathBuf> {
     let current_path = current_dir().context("无法获取当前工作目录")?;
-    let primary_path = current_path.join("config.toml");
+    let primary_path = current_path.join(file_name);
     if primary_path.exists() {
         println!(
-            "[startup] 找到项目根目录下的配置文件: {}",
+            "[startup] 找到项目根目录下的文件: {}",
             primary_path.display()
         );
         return Ok(primary_path);
@@ -159,20 +167,20 @@ pub fn config_path() -> Result<std::path::PathBuf> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from(".."))
-        .join("config.toml");
+        .join(file_name);
     if fallback_path.exists() {
         println!(
-            "[startup] 当前目录下未找到 config.toml，已回退到上一级目录配置文件: {}",
+            "[startup] 当前目录下未找到 {file_name}，已回退到上一级目录文件: {}",
             fallback_path.display()
         );
         return Ok(fallback_path);
     }
 
     eprintln!(
-        "[startup] 未找到配置文件: config.toml, 当前目录: {}",
+        "[startup] 未找到文件: {file_name}, 当前目录: {}",
         current_path.display()
     );
-    Err(io::Error::new(io::ErrorKind::NotFound, "未找到配置文件: config.toml").into())
+    Err(io::Error::new(io::ErrorKind::NotFound, format!("未找到文件: {file_name}")).into())
 }
 
 pub fn load_configs() -> Result<EnvConfig> {
