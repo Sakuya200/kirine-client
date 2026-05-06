@@ -98,6 +98,7 @@ const isGenerating = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<TtsResult | null>(null);
 const generationHistory = ref<TtsResult[]>([]);
+const selectedHistoryTaskId = ref<number | null>(null);
 const showClearDialog = ref(false);
 const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 const speakerStore = useSpeakerStore();
@@ -110,6 +111,7 @@ const trimmedText = computed(() => form.text.trim());
 let isHistoryRefreshInFlight = false;
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
+let skipHistoryTaskSelectionReload = false;
 
 const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
@@ -328,6 +330,52 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   }
 };
 
+const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => {
+  if (selectedHistoryTaskId.value === taskId) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  skipHistoryTaskSelectionReload = skipReload;
+  selectedHistoryTaskId.value = taskId;
+};
+
+const loadSelectedHistoryTask = async (taskId: number) => {
+  try {
+    const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
+
+    if (record.taskType !== HistoryTaskType.TextToSpeech) {
+      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      return;
+    }
+
+    const result = mapHistoryRecordToResult(record);
+    if (!result) {
+      uiStore.notifyError('历史任务配置解析失败。');
+      return;
+    }
+
+    applyResultToForm(result, true);
+    generationHistory.value = generationHistory.value.map(item => (item.taskId === result.taskId ? result : item));
+    await resultCardRef.value?.refreshDetailRecord();
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('载入文本转语音历史任务配置失败，请检查 Rust 后端日志', error));
+  }
+};
+
+watch(selectedHistoryTaskId, taskId => {
+  if (skipHistoryTaskSelectionReload) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  if (taskId === null) {
+    return;
+  }
+
+  void loadSelectedHistoryTask(taskId);
+});
+
 const hydrateReplayTaskFromRoute = async () => {
   const historyId = getHistoryTaskReplayId(route.query[HISTORY_TASK_REPLAY_QUERY_KEY]);
 
@@ -451,6 +499,7 @@ const generateAudio = async () => {
 
     activeResult.value = result;
     syncActiveTaskStatusRefresh();
+    setSelectedHistoryTaskId(result.taskId, true);
     generationHistory.value = [result, ...generationHistory.value].slice(0, 5);
     uiStore.notifySuccess('任务已提交，可在历史记录中查看执行状态与结果。');
   } catch (error) {
@@ -503,16 +552,6 @@ const saveResultAudio = (taskId: number) =>
   invoke<boolean>('save_text_to_speech_audio_as', {
     historyId: taskId
   });
-
-const loadHistoryItem = (taskId: number) => {
-  const item = generationHistory.value.find(historyItem => historyItem.taskId === taskId);
-  if (!item) {
-    uiStore.notifyWarning('目标历史任务不存在或已被移除。');
-    return;
-  }
-
-  applyResultToForm(item, true);
-};
 
 onBeforeUnmount(() => {
   stopActiveTaskStatusRefresh();
@@ -635,10 +674,9 @@ onMounted(async () => {
 
           <RecentTaskList
             :items="recentTaskItems"
-            :selected-task-id="activeResult?.taskId ?? null"
+            v-model:selected-task-id="selectedHistoryTaskId"
             empty-text="还没有历史任务。生成音频后会自动加入这里。"
             action-label="查看"
-            @select="loadHistoryItem"
           />
         </PanelCard>
       </div>

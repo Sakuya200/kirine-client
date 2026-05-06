@@ -105,11 +105,13 @@ const isGenerating = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<VoiceCloneResult | null>(null);
 const generationHistory = ref<VoiceCloneResult[]>([]);
+const selectedHistoryTaskId = ref<number | null>(null);
 const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 let isHistoryRefreshInFlight = false;
+let skipHistoryTaskSelectionReload = false;
 
 const trimmedRefText = computed(() => form.refText.trim());
 const trimmedText = computed(() => form.text.trim());
@@ -290,8 +292,79 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.refText = result.refText;
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
+  selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
+  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
 };
+
+const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, setAsActiveResult: boolean) => {
+  stopActiveTaskStatusRefresh();
+  activeResult.value = setAsActiveResult ? result : null;
+  form.baseModel = result.baseModel;
+  form.modelScale = result.modelScale;
+  form.language = result.language;
+  form.format = result.format;
+  form.exportAudioName = result.exportAudioName;
+  form.refAudioFile = {
+    fileName: result.refAudioName,
+    filePath: refAudioPath
+  };
+  form.refText = result.refText;
+  form.text = result.text;
+  form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
+  selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
+  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+
+  if (setAsActiveResult) {
+    syncActiveTaskStatusRefresh();
+  }
+};
+
+const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => {
+  if (selectedHistoryTaskId.value === taskId) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  skipHistoryTaskSelectionReload = skipReload;
+  selectedHistoryTaskId.value = taskId;
+};
+
+const loadSelectedHistoryTask = async (taskId: number) => {
+  try {
+    const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
+
+    if (record.taskType !== HistoryTaskType.VoiceClone) {
+      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      return;
+    }
+
+    const result = mapHistoryRecordToResult(record);
+    if (!result) {
+      uiStore.notifyError('历史任务配置解析失败。');
+      return;
+    }
+
+    applyHistoryTaskToForm(result, record.detail.refAudioPath, true);
+    generationHistory.value = generationHistory.value.map(item => (item.taskId === result.taskId ? result : item));
+    await resultCardRef.value?.refreshDetailRecord();
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('载入声音克隆历史任务配置失败，请检查后端日志', error));
+  }
+};
+
+watch(selectedHistoryTaskId, taskId => {
+  if (skipHistoryTaskSelectionReload) {
+    skipHistoryTaskSelectionReload = false;
+    return;
+  }
+
+  if (taskId === null) {
+    return;
+  }
+
+  void loadSelectedHistoryTask(taskId);
+});
 
 const hydrateReplayTaskFromRoute = async () => {
   const historyId = getHistoryTaskReplayId(route.query[HISTORY_TASK_REPLAY_QUERY_KEY]);
@@ -456,6 +529,7 @@ const createTask = async () => {
     });
     const result = mapResultPayload(payload);
     activeResult.value = result;
+    setSelectedHistoryTaskId(result.taskId, true);
     generationHistory.value = [result, ...generationHistory.value.filter(item => item.taskId !== result.taskId)].slice(0, 5);
     syncActiveTaskStatusRefresh();
     uiStore.notifySuccess(`声音克隆任务已创建，任务 ID ${result.taskId}。`, 3600);
@@ -476,17 +550,6 @@ const saveResultAudio = (taskId: number) =>
   invoke<boolean>('save_voice_clone_audio_as', {
     historyId: taskId
   });
-
-const useHistoryResult = (taskId: number) => {
-  const result = generationHistory.value.find(historyItem => historyItem.taskId === taskId);
-  if (!result) {
-    uiStore.notifyWarning('目标历史任务不存在或已被移除。');
-    return;
-  }
-
-  activeResult.value = result;
-  syncActiveTaskStatusRefresh();
-};
 
 onMounted(async () => {
   await modelStore.ensureLoaded();
@@ -610,10 +673,9 @@ onBeforeUnmount(() => {
 
           <RecentTaskList
             :items="recentTaskItems"
-            :selected-task-id="activeResult?.taskId ?? null"
+            v-model:selected-task-id="selectedHistoryTaskId"
             empty-text="还没有历史任务。生成音频后会自动加入这里。"
             action-label="查看"
-            @select="useHistoryResult"
           />
         </PanelCard>
       </div>
