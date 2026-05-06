@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{
-    llm_models::{llm_model_definition, LlmModelDefinition},
-    model_artifacts::MODEL_ARTIFACTS_DIR,
-};
+use super::model_artifacts::MODEL_ARTIFACTS_DIR;
 use crate::Result;
 
 pub(crate) fn speaker_model_dir(model_dir: &Path, speaker_id: i64) -> PathBuf {
@@ -15,14 +12,7 @@ pub(crate) fn llm_model_python_script_path(
     src_model_root: &Path,
     script_name: &str,
 ) -> Result<PathBuf> {
-    let definition: &'static LlmModelDefinition = llm_model_definition(base_model)?;
-    Ok(src_model_root
-        .join(definition.python_script_dir)
-        .join(script_name))
-}
-
-pub(crate) fn llm_model_display_name(base_model: &str) -> Result<&'static str> {
-    Ok(llm_model_definition(base_model)?.display_name)
+    Ok(src_model_root.join(base_model).join(script_name))
 }
 
 pub(crate) fn preset_model_root_path(

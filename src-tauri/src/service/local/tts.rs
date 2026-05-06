@@ -7,9 +7,7 @@ use sea_orm::{
 
 use crate::{
     common::{
-        local_paths::{
-            ensure_child_dir, serialize_runtime_model_path, serialize_task_path,
-        },
+        local_paths::{ensure_child_dir, serialize_runtime_model_path, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
     service::{
@@ -18,14 +16,11 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, MossTtsLocalTextToSpeechModelParams,
-            Qwen3TtsTextToSpeechModelParams, SpeakerSource, SpeakerStatus, TaskStatus,
-            TextToSpeechTaskResult, VoxCpm2TextToSpeechModelParams,
+            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerSource, SpeakerStatus,
+            TaskStatus, TextToSpeechTaskResult,
         },
         pipeline::{
-            model_paths::{
-                preset_model_root_path, speaker_model_dir,
-            },
+            model_paths::{preset_model_root_path, speaker_model_dir},
             script_paths::resolve_src_model_root,
         },
         LocalService,
@@ -67,19 +62,7 @@ impl LocalService {
         let history_speaker_id = Some(speaker_id);
         let text = payload.text.trim().to_string();
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
-        let model_params = if base_model == "vox_cpm2" {
-            serde_json::to_value(serde_json::from_value::<VoxCpm2TextToSpeechModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        } else if base_model == "moss_tts_local" {
-            serde_json::to_value(serde_json::from_value::<MossTtsLocalTextToSpeechModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        } else {
-            serde_json::to_value(serde_json::from_value::<Qwen3TtsTextToSpeechModelParams>(
-                payload.model_params.clone(),
-            )?)?
-        };
+        let model_params = payload.model_params.clone();
         let char_count = text.chars().count();
         let title = super::build_task_title("文本转语音", Some(&speaker_label), &create_time);
         let output_dir = ensure_child_dir(Path::new(self.data_dir()), "generated")?;

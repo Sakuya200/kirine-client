@@ -216,6 +216,7 @@ impl LocalService {
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
                 .run_tts_pipeline(
+                    base_model.to_string(),
                     &service,
                     TtsPipelineRequest {
                         task_id,
@@ -241,7 +242,11 @@ impl LocalService {
 
         tauri::async_runtime::spawn(async move {
             if let Err(err) = pipeline
-                .run_voice_clone_pipeline(&service, VoiceClonePipelineRequest { task_id })
+                .run_voice_clone_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    VoiceClonePipelineRequest { task_id },
+                )
                 .await
             {
                 tracing::error!(error = %err, "local voice clone pipeline failed");
@@ -267,6 +272,7 @@ impl LocalService {
         tauri::async_runtime::spawn(async move {
             let result = pipeline
                 .run_training_pipeline(
+                    base_model.to_string(),
                     &service,
                     TrainingPipelineRequest {
                         task_id,

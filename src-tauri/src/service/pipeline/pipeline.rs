@@ -12,13 +12,11 @@ use crate::{
     Result,
 };
 
-pub(crate) struct CommonModelTaskPipeline {
-    base_model: &'static str,
-}
+pub(crate) struct CommonModelTaskPipeline();
 
 impl CommonModelTaskPipeline {
-    pub(crate) const fn new(base_model: &'static str) -> Self {
-        Self { base_model }
+    pub(crate) const fn new() -> Self {
+        Self()
     }
 }
 
@@ -26,25 +24,28 @@ impl CommonModelTaskPipeline {
 impl ModelTaskPipeline for CommonModelTaskPipeline {
     async fn run_training_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: TrainingPipelineRequest,
     ) -> Result<()> {
-        run_common_training_pipeline(service, request, self.base_model).await
+        run_common_training_pipeline(service, request, &base_model).await
     }
 
     async fn run_tts_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: TtsPipelineRequest,
     ) -> Result<()> {
-        run_common_tts_pipeline(service, request, self.base_model).await
+        run_common_tts_pipeline(service, request, &base_model).await
     }
 
     async fn run_voice_clone_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: VoiceClonePipelineRequest,
     ) -> Result<()> {
-        run_common_voice_clone_pipeline(service, request, self.base_model).await
+        run_common_voice_clone_pipeline(service, request, &base_model).await
     }
 }

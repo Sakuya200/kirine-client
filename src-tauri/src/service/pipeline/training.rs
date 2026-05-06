@@ -37,7 +37,6 @@ use super::{
         PythonScriptTaskKind, TrainingArgs,
     },
     model_artifacts::{build_model_download_script_args, resolve_model_download_paths},
-    model_paths::llm_model_display_name,
     model_paths::speaker_model_dir,
     run_pipeline_stage_shell_script, run_python_params_file_invocation_cancellable,
     script_paths::{
@@ -150,7 +149,7 @@ impl TrainingRuntimeOptions {
     pub(crate) fn mode_label(&self, base_model: &str) -> Result<String> {
         Ok(format!(
             "{} / {}",
-            llm_model_display_name(base_model)?,
+            base_model,
             if self.is_cpu() { "CPU" } else { "CUDA" }
         ))
     }

@@ -13,7 +13,7 @@ use crate::{
             CreateTextToSpeechTaskPayload, HistoryRecord, ModelInfo, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerInfo, SpeakerSource, SpeakerStatus, TextToSpeechFormat,
-            TextToSpeechTaskResult, UpdateSpeakerPayload, VoxCpm2TextToSpeechModelParams,
+            TextToSpeechTaskResult, UpdateSpeakerPayload,
         },
         LocalService, Service,
     },
@@ -122,10 +122,10 @@ impl LocalServiceHarness {
                 format: TextToSpeechFormat::Wav,
                 export_audio_name: "vox-preset-test".to_string(),
                 text: "测试 VoxCPM2 首次任务创建".to_string(),
-                model_params: serde_json::to_value(VoxCpm2TextToSpeechModelParams {
-                    cfg_value: Some("2.0".to_string()),
-                    inference_timesteps: 10,
-                })?,
+                model_params: serde_json::json!({
+                    "cfg_value": "2.0",
+                    "inference_timesteps": 10
+                }),
             })
             .await
     }

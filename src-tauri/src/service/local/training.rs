@@ -262,40 +262,9 @@ impl LocalService {
                 "预计每轮约 {} 步，总计约 {} 步。",
                 steps_per_epoch, total_steps
             ));
-            if base_model == "vox_cpm2" {
-                notes.push(format!(
-                    "VoxCPM2 的 epoch 进度按外层 step × {} / 样本数计算，配置 {} 轮时应在约 {} 步内结束。",
-                    effective_batch_size, epoch_count, total_steps
-                ));
-            }
         }
         if matches!(selected_training_hardware, HardwareType::Cpu) {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
-        }
-        if base_model == "vox_cpm2" {
-            let use_lora = model_params
-                .get("useLora")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if use_lora {
-                notes.push(format!(
-                    "LoRA 微调参数: rank {}，alpha {}，dropout {}。",
-                    model_params
-                        .get("loraRank")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(32),
-                    model_params
-                        .get("loraAlpha")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(32),
-                    model_params
-                        .get("loraDropout")
-                        .and_then(Value::as_str)
-                        .unwrap_or("0.0")
-                ));
-            } else {
-                notes.push("当前使用全量微调，不启用 LoRA 适配器。".into());
-            }
         }
         if payload
             .samples

@@ -78,12 +78,7 @@ async fn create_speakers_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
                         .not_null()
                         .default(0),
                 )
-                .col(
-                    ColumnDef::new(Speakers::BaseModel)
-                        .string()
-                        .not_null()
-                        .default("qwen3_tts"),
-                )
+                .col(ColumnDef::new(Speakers::BaseModel).string().not_null())
                 .col(
                     ColumnDef::new(Speakers::Description)
                         .text()
@@ -214,18 +209,8 @@ async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                 .col(ColumnDef::new(TtsTasks::HistoryId).integer().not_null())
                 .col(ColumnDef::new(TtsTasks::SpeakerId).integer().not_null())
                 .col(ColumnDef::new(TtsTasks::ModelPath).text())
-                .col(
-                    ColumnDef::new(TtsTasks::BaseModel)
-                        .string()
-                        .not_null()
-                        .default("qwen3_tts"),
-                )
-                .col(
-                    ColumnDef::new(TtsTasks::ModelScale)
-                        .string()
-                        .not_null()
-                        .default("1.7B"),
-                )
+                .col(ColumnDef::new(TtsTasks::BaseModel).string().not_null())
+                .col(ColumnDef::new(TtsTasks::ModelScale).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Language).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Format).string().not_null())
                 .col(
@@ -295,14 +280,12 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                 .col(
                     ColumnDef::new(ModelTrainingTasks::BaseModel)
                         .string()
-                        .not_null()
-                        .default("qwen3_tts"),
+                        .not_null(),
                 )
                 .col(
                     ColumnDef::new(ModelTrainingTasks::ModelScale)
                         .string()
-                        .not_null()
-                        .default("1.7B"),
+                        .not_null(),
                 )
                 .col(
                     ColumnDef::new(ModelTrainingTasks::ModelName)
@@ -332,6 +315,12 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .not_null(),
                 )
                 .col(ColumnDef::new(ModelTrainingTasks::OutputSpeakerId).integer())
+                .col(
+                    ColumnDef::new(ModelTrainingTasks::Description)
+                        .text()
+                        .not_null()
+                        .default(""),
+                )
                 .col(
                     ColumnDef::new(ModelTrainingTasks::CreateTime)
                         .string()
@@ -390,14 +379,12 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                 .col(
                     ColumnDef::new(VoiceCloneTasks::BaseModel)
                         .string()
-                        .not_null()
-                        .default("qwen3_tts"),
+                        .not_null(),
                 )
                 .col(
                     ColumnDef::new(VoiceCloneTasks::ModelScale)
                         .string()
-                        .not_null()
-                        .default("1.7B"),
+                        .not_null(),
                 )
                 .col(
                     ColumnDef::new(VoiceCloneTasks::Language)
@@ -718,6 +705,7 @@ enum ModelTrainingTasks {
     SampleCount,
     SamplesJson,
     NotesJson,
+    Description,
     OutputSpeakerId,
     CreateTime,
     ModifyTime,

@@ -1,5 +1,4 @@
 pub mod api;
-pub mod llm_models;
 pub mod model_artifacts;
 pub mod model_paths;
 pub mod pipeline;
@@ -9,10 +8,9 @@ pub mod tts;
 pub mod voice_clone;
 
 use std::future::Future;
-use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::bail;
+use anyhow::{bail, Ok};
 use async_trait::async_trait;
 use tokio::sync::watch;
 use tracing::info;
@@ -30,18 +28,11 @@ use crate::{
 };
 
 use self::{
-    api::PythonScriptInvocationSpec,
-    llm_models::{MOSS_TTS_LOCAL_BASE_MODEL, QWEN3_TTS_BASE_MODEL, VOX_CPM2_BASE_MODEL},
-    pipeline::CommonModelTaskPipeline,
+    api::PythonScriptInvocationSpec, pipeline::CommonModelTaskPipeline,
     script_paths::ScriptPlatform,
 };
 
-static MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
-    CommonModelTaskPipeline::new(MOSS_TTS_LOCAL_BASE_MODEL);
-static QWEN3_TTS_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
-    CommonModelTaskPipeline::new(QWEN3_TTS_BASE_MODEL);
-static VOX_CPM2_MODEL_TASK_PIPELINE: CommonModelTaskPipeline =
-    CommonModelTaskPipeline::new(VOX_CPM2_BASE_MODEL);
+static COMMON_TASK_PIPELINE: CommonModelTaskPipeline = CommonModelTaskPipeline::new();
 
 #[derive(Debug, Clone)]
 pub(crate) struct TrainingPipelineRequest {
@@ -109,18 +100,21 @@ pub(crate) const DOWNLOAD_MODEL_ARTIFACTS_LABEL: &str = "下载基础模型权�
 pub(crate) trait ModelTaskPipeline: Send + Sync {
     async fn run_training_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: TrainingPipelineRequest,
     ) -> Result<()>;
 
     async fn run_tts_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: TtsPipelineRequest,
     ) -> Result<()>;
 
     async fn run_voice_clone_pipeline(
         &self,
+        base_model: String,
         service: &LocalService,
         request: VoiceClonePipelineRequest,
     ) -> Result<()>;
@@ -245,18 +239,9 @@ fn ensure_required_path_exists(path: &Path, label: &str) -> Result<()> {
 }
 
 pub(crate) fn resolve_model_task_pipeline(
-    base_model: &str,
+    _base_model: &str,
 ) -> Result<&'static dyn ModelTaskPipeline> {
-    match base_model.trim() {
-        MOSS_TTS_LOCAL_BASE_MODEL => Ok(&MOSS_TTS_LOCAL_MODEL_TASK_PIPELINE),
-        QWEN3_TTS_BASE_MODEL => Ok(&QWEN3_TTS_MODEL_TASK_PIPELINE),
-        VOX_CPM2_BASE_MODEL => Ok(&VOX_CPM2_MODEL_TASK_PIPELINE),
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("不支持的基础模型类型: {}", other),
-        )
-        .into()),
-    }
+    Ok(&COMMON_TASK_PIPELINE)
 }
 
 pub(crate) async fn run_python_params_file_invocation(
