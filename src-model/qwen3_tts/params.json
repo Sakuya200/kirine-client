@@ -1,0 +1,97 @@
+[
+  {
+    "task": "training",
+    "base-model": "qwen3_tts",
+    "params": [
+      {
+        "name": "epochCount",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "训练轮次",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 30,
+        "description": "模型训练的 epoch 数。"
+      },
+      {
+        "name": "batchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "批次大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 8,
+        "description": "每个训练 step 使用的 batch size。"
+      },
+      {
+        "name": "gradientAccumulationSteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "梯度累积步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 4,
+        "description": "训练时的梯度累积步数。"
+      },
+      {
+        "name": "learningRate",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "学习率",
+          "min": 0,
+          "step": 0.000001
+        },
+        "required": true,
+        "defaultValue": "2e-5",
+        "description": "训练学习率，当前前端按字符串形式保存与透传。"
+      },
+      {
+        "name": "enableGradientCheckpointing",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "梯度检查点",
+          "text": "启用梯度检查点"
+        },
+        "required": true,
+        "defaultValue": false,
+        "description": "是否启用 gradient checkpointing。"
+      }
+    ]
+  },
+  {
+    "task": "tts",
+    "base-model": "qwen3_tts",
+    "params": [
+      {
+        "name": "voicePrompt",
+        "type": "string",
+        "componentType": "textarea",
+        "componentProps": {
+          "label": "声音 Prompt",
+          "rows": 4,
+          "placeholder": "例如：温柔、自然、轻微微笑感，适合长句播报。",
+          "helpText": "用于描述目标语气、情绪、节奏或播报风格。"
+        },
+        "required": false,
+        "defaultValue": "",
+        "description": "Qwen3-TTS 的声音风格提示词。为空时使用默认声音风格。"
+      }
+    ]
+  },
+  {
+    "task": "voice-clone",
+    "base-model": "qwen3_tts",
+    "params": []
+  }
+]

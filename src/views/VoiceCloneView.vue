@@ -594,49 +594,6 @@ onBeforeUnmount(() => {
               <span v-if="form.refAudioFile" class="break-all text-xs text-stone-500">{{ form.refAudioFile?.filePath }}</span>
             </div>
           </label>
-
-          <label class="block md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">{{ requiresReferenceText ? '参考台词' : '参考台词（当前模式可选）' }}</span>
-            <textarea
-              v-model="form.refText"
-              rows="4"
-              class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-              :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : '当前模型参考音频文本可留空'"
-            />
-          </label>
-
-          <label class="block md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">目标台词</span>
-            <textarea
-              v-model="form.text"
-              rows="5"
-              class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-              placeholder="填写要合成为新音频的目标文本"
-            />
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-              <span>参考台词 {{ refTextCharCount }} 字，目标台词 {{ charCount }} 字</span>
-            </div>
-          </label>
-        </div>
-
-        <div class="mt-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <component :is="activeVoiceCloneParamsComponent" class="mt-4" v-model="form.modelParams" />
-        </div>
-
-        <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
-          <p class="font-semibold text-slate-700">生成摘要</p>
-          <ul class="mt-2 space-y-1.5">
-            <li v-for="tip in cloneSummary" :key="tip">{{ tip }}</li>
-          </ul>
-        </div>
-
-        <div class="mt-4 flex flex-wrap gap-2">
-          <BaseButton :disabled="!canGenerate" @click="createTask">
-            <BaseLoadingIndicator v-if="isGenerating" size="sm" tone="muted" />
-            <SparklesIcon v-else class="h-4 w-4" aria-hidden="true" />
-            <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
-          </BaseButton>
         </div>
       </PanelCard>
 
@@ -680,5 +637,63 @@ onBeforeUnmount(() => {
         </PanelCard>
       </div>
     </div>
+
+    <PanelCard class="z-20" title="生成参数" subtitle="输入目标台词并配置模型特定参数后生成新的语音音频。">
+      <div class="space-y-5 text-sm text-slate-700">
+        <label class="block">
+          <span class="mb-1 block text-xs text-stone-500">{{ requiresReferenceText ? '参考台词' : '参考台词（当前模式可选）' }}</span>
+          <textarea
+            v-model="form.refText"
+            rows="4"
+            class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
+            :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : '当前模型参考音频文本可留空'"
+          />
+        </label>
+
+        <label class="block">
+          <span class="mb-1 block text-xs text-stone-500">目标台词</span>
+          <textarea
+            v-model="form.text"
+            rows="5"
+            class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
+            placeholder="填写要合成为新音频的目标文本"
+          />
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+            <span>参考台词 {{ refTextCharCount }} 字，目标台词 {{ charCount }} 字</span>
+          </div>
+        </label>
+
+        <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <component :is="activeVoiceCloneParamsComponent" class="mt-4" v-model="form.modelParams" />
+        </section>
+
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+          <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
+            <p>生成摘要</p>
+            <p v-for="tip in cloneSummary" :key="tip" class="mt-1">{{ tip }}</p>
+          </div>
+
+          <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              <BaseButton :disabled="!canGenerate" @click="createTask">
+                <BaseLoadingIndicator v-if="isGenerating" size="sm" tone="muted" />
+                <SparklesIcon v-else class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              </BaseButton>
+            </div>
+
+            <div v-if="activeResult" class="mt-4 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
+              <p>当前活动任务</p>
+              <p class="mt-1">任务 {{ activeResult.taskId }}，状态 {{ activeResult.status }}，参考音频 {{ activeResult.refAudioName }}。</p>
+              <p class="mt-1">
+                模型 {{ modelStore.getModelLabel(activeResult.baseModel) }} {{ activeResult.modelScale }}，输出 {{ activeResult.formatLabel }}。
+              </p>
+              <p class="mt-1">创建时间 {{ activeResult.createdAt }}。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </PanelCard>
   </div>
 </template>

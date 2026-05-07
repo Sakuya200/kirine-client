@@ -1,0 +1,227 @@
+[
+  {
+    "task": "training",
+    "base-model": "moss_tts_local",
+    "params": [
+      {
+        "name": "epochCount",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "训练轮次",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 3,
+        "description": "模型训练的 epoch 数。"
+      },
+      {
+        "name": "batchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "批次大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 1,
+        "description": "每个训练 step 使用的 batch size。"
+      },
+      {
+        "name": "gradientAccumulationSteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "梯度累积步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 8,
+        "description": "训练时的梯度累积步数。"
+      },
+      {
+        "name": "prepBatchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "预处理批次大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 16,
+        "description": "训练前数据预处理批次大小。"
+      },
+      {
+        "name": "learningRate",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "学习率",
+          "min": 0,
+          "step": 0.000001
+        },
+        "required": true,
+        "defaultValue": "1e-5",
+        "description": "训练学习率，当前前端按字符串保存与透传。"
+      },
+      {
+        "name": "weightDecay",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "权重衰减",
+          "min": 0,
+          "step": 0.01
+        },
+        "required": true,
+        "defaultValue": "0.1",
+        "description": "优化器权重衰减。"
+      },
+      {
+        "name": "warmupRatio",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Warmup Ratio",
+          "min": 0,
+          "step": 0.01
+        },
+        "required": true,
+        "defaultValue": "0.03",
+        "description": "学习率 warmup ratio。"
+      },
+      {
+        "name": "warmupSteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Warmup Steps",
+          "min": 0,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 0,
+        "description": "学习率 warmup 步数。"
+      },
+      {
+        "name": "maxGradNorm",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Max Grad Norm",
+          "min": 0,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "梯度裁剪阈值。"
+      },
+      {
+        "name": "prepNVq",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "预处理 nVQ",
+          "min": 1,
+          "step": 1,
+          "nullable": true,
+          "placeholder": "留空则使用脚本默认值"
+        },
+        "required": false,
+        "defaultValue": null,
+        "description": "训练预处理阶段使用的 nVQ。留空则走脚本默认值。"
+      },
+      {
+        "name": "mixedPrecision",
+        "type": "string",
+        "componentType": "input-text",
+        "componentProps": {
+          "label": "Mixed Precision",
+          "placeholder": "例如 bf16"
+        },
+        "required": true,
+        "defaultValue": "bf16",
+        "description": "训练混合精度模式。"
+      },
+      {
+        "name": "channelwiseLossWeight",
+        "type": "string",
+        "componentType": "input-text",
+        "componentProps": {
+          "label": "Channelwise Loss Weight",
+          "placeholder": "例如 1,32"
+        },
+        "required": true,
+        "defaultValue": "1,32",
+        "description": "通道级 loss 权重字符串。"
+      },
+      {
+        "name": "enableGradientCheckpointing",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "梯度检查点",
+          "text": "启用梯度检查点"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "是否启用 gradient checkpointing。"
+      },
+      {
+        "name": "skipReferenceAudioCodes",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "跳过参考音频编码",
+          "textOn": "跳过 reference audio codes",
+          "textOff": "保留 reference audio codes"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "是否跳过参考音频编码生成。"
+      }
+    ]
+  },
+  {
+    "task": "tts",
+    "base-model": "moss_tts_local",
+    "params": [
+      {
+        "name": "nVqForInference",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "并行码本数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 32,
+        "description": "透传到 `n_vq_for_inference` 的并行码本数。"
+      }
+    ]
+  },
+  {
+    "task": "voice-clone",
+    "base-model": "moss_tts_local",
+    "params": [
+      {
+        "name": "nVqForInference",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "并行码本数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 32,
+        "description": "MOSS 声音克隆当前仅暴露 `n_vq_for_inference`。"
+      }
+    ]
+  }
+]
