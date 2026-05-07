@@ -18,6 +18,9 @@ pub use ui_config::{
     UiTaskKind, VisibleWhenRule,
 };
 
+pub(crate) static SRC_MODEL_DIR_RELATIVE_PATHS: &[&str] = &["./lib/src-model", "../src-model"];
+pub(crate) static ROOT_RELATIVE_PATHS: &[&str] = &[".", ".."];
+
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageMode {

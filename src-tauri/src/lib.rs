@@ -33,7 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // 日志相关配置
+            // 应用后端初始化逻辑
             tauri::async_runtime::block_on(async { init(app).await })?;
             Ok(())
         });

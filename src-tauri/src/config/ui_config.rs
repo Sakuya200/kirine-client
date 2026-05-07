@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -8,9 +8,7 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Result;
-
-use super::env_config::supported_models_path;
+use crate::{config::SRC_MODEL_DIR_RELATIVE_PATHS, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -112,20 +110,23 @@ pub struct SelectOption {
 }
 
 pub fn ui_configs_dir_path() -> Result<PathBuf> {
-    let supported_models =
-        supported_models_path().context("解析 supported_models.json 路径失败")?;
-    let root_dir = supported_models.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("无法解析项目根目录: {}", supported_models.display()),
-        )
-    })?;
+    for src_model_relative_path in SRC_MODEL_DIR_RELATIVE_PATHS {
+        let candidate_path = Path::new(src_model_relative_path).join("configs");
+        if candidate_path.exists() {
+            return Ok(candidate_path);
+        }
+    }
 
-    Ok(root_dir.join("src-model").join("configs"))
+    eprintln!("未找到 UI 配置目录，请检查当前目录下是否存在 src-model/configs 目录");
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "未找到 UI 配置目录，请检查当前目录下是否存在 src-model/configs 目录",
+    )
+    .into())
 }
 
 pub fn load_ui_configs() -> Result<UiConfigCatalog> {
-    let config_dir = ui_configs_dir_path().context("解析 UI 配置目录失败")?;
+    let config_dir = ui_configs_dir_path()?;
     load_ui_configs_from_dir(&config_dir)
 }
 
