@@ -21,6 +21,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { getTrainingModelRegistryEntry } from '@/components/form/modelTrainingRegistry';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import { AppLanguage } from '@/enums/language';
@@ -39,8 +40,10 @@ import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType 
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
+import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
 type LocalFileKind = 'audio' | 'archive' | 'annotation';
 
@@ -72,8 +75,12 @@ interface ModelTrainingTaskResultPayload {
 }
 const LORA_FEATURE = 'lora';
 
-const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  getTrainingModelRegistryEntry(baseModel).normalizeParams(modelParams);
+const uiConfigStore = useUiConfigStore();
+
+const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'training');
+  return getTrainingModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+};
 
 const form = reactive({
   language: AppLanguage.Chinese,
@@ -81,7 +88,7 @@ const form = reactive({
   modelScale: '',
   modelName: 'speaker_a_custom',
   description: '',
-  modelParams: getTrainingModelRegistryEntry('').createDefaultParams() as Record<string, unknown>,
+  modelParams: {} as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
@@ -120,9 +127,8 @@ const modelOptions = computed(() =>
   }))
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const activeTrainingModelConfig = computed(() => getTrainingModelRegistryEntry(form.baseModel));
+const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
 const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
-const activeTrainingParamsComponent = computed(() => activeTrainingModelConfig.value.paramsComponent);
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -155,8 +161,6 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 
-const baseModelSummary = computed(() => activeTrainingModelConfig.value.baseSummary);
-const modelSpecificSummaryLines = computed(() => activeTrainingModelConfig.value.buildSummaryLines(form.modelParams));
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
     return '正在创建模型微调任务，请稍候';
@@ -623,6 +627,7 @@ const startTraining = async () => {
 };
 
 onMounted(async () => {
+  await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   await loadRecentTasks({ silentOnError: true });
   await hydrateReplayTaskFromRoute();
@@ -838,16 +843,21 @@ onBeforeUnmount(() => {
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
           <p class="mt-1 text-xs leading-5 text-stone-500">当选择不同的基础模型时，可配置的微调参数会有所不同，请参考不同模型的官方文档。</p>
-          <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
+          <GenericTaskParamsForm
+            class="mt-4"
+            v-model="form.modelParams"
+            :task-config="activeTrainingTaskConfig"
+            :supports-lora="supportsSelectedModelLora"
+          />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。</p>
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
-            <p v-for="line in modelSpecificSummaryLines" :key="line" class="mt-1">{{ line }}</p>
+            <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">
               当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点

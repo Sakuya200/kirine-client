@@ -29,22 +29,16 @@ interface GeneratedAudioResultCardTask {
 interface Props {
   result: GeneratedAudioResultCardTask | null;
   metaText: string;
-  summaryLines?: string[];
   emptyText: string;
   title?: string;
   subtitle?: string;
-  previewText?: string;
-  previewClass?: string;
   loadAudioAsset: (taskId: number) => Promise<AudioAssetPayload>;
   downloadAudio?: (taskId: number) => Promise<boolean>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '生成结果',
-  subtitle: '展示最近一次任务的返回结果和输出文件信息',
-  summaryLines: () => [],
-  previewText: '',
-  previewClass: 'mt-2 line-clamp-4 text-slate-700'
+  subtitle: '展示最近一次任务的返回结果和输出文件信息'
 });
 
 const slots = useSlots();
@@ -127,8 +121,6 @@ defineExpose({
       <div class="mt-3 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
         <slot name="details">
           <p>任务 ID：{{ result.taskId }}</p>
-          <p v-for="line in summaryLines" :key="line" class="mt-1">{{ line }}</p>
-          <p v-if="previewText" :class="previewClass">{{ previewText }}</p>
         </slot>
       </div>
 

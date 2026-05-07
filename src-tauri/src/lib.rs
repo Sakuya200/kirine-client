@@ -1,5 +1,5 @@
 use crate::{
-    hooks::{load_hooks, EnvConfigState},
+    hooks::{load_hooks, EnvConfigState, UiConfigState},
     service::{ServiceImpl, ServiceState},
 };
 use anyhow::Context;
@@ -20,7 +20,11 @@ pub mod test_support;
 mod utils;
 
 pub use anyhow::Result;
-pub use config::{load_configs, save_configs, EnvConfig, StorageMode};
+pub use config::{
+    load_configs, load_ui_configs, load_ui_configs_from_dir, save_configs, ComponentProps,
+    EnvConfig, ParamDefinition, SelectOption, StorageMode, TaskParamConfig, UiComponentType,
+    UiConfigCatalog, UiParamType, UiTaskKind, VisibleWhenRule,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -66,8 +70,15 @@ async fn init(app: &mut tauri::App) -> Result<()> {
             err
         })
         .context("failed to load application configuration before logger initialization")?;
+    let ui_config = config::load_ui_configs()
+        .map_err(|err| {
+            eprintln!("[startup] failed to load ui configuration: {err}");
+            err
+        })
+        .context("failed to load ui configuration catalog")?;
 
     app.manage(EnvConfigState(RwLock::new(config.clone())));
+    app.manage(UiConfigState(Arc::new(ui_config)));
 
     config::init_log(&app.handle(), config.log_dir())
         .map_err(|err| {

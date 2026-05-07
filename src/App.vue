@@ -11,15 +11,18 @@ import {
   UserGroupIcon
 } from '@heroicons/vue/24/outline';
 import type { Component } from 'vue';
+import { onMounted } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 
 import BaseTopNoticeBar from '@/components/common/BaseTopNoticeBar.vue';
 import { HistoryTaskType } from '@/enums/task';
 import { appRoutes } from '@/routers';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 
 const route = useRoute();
 const uiStore = useUiStore();
+const uiConfigStore = useUiConfigStore();
 
 const menuItems = appRoutes.filter(item => item.name && item.name !== 'not-found');
 
@@ -32,6 +35,10 @@ const navIcons: Record<string, Component> = {
   history: ClockIcon,
   settings: Cog6ToothIcon
 };
+
+onMounted(() => {
+  void uiConfigStore.ensureLoaded();
+});
 </script>
 
 <template>

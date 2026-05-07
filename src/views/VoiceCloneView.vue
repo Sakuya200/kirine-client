@@ -13,6 +13,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { getVoiceCloneModelRegistryEntry } from '@/components/form/voiceCloneRegistry';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
@@ -21,9 +22,11 @@ import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType 
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { useModelStore } from '@/stores/models';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
+import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
 interface VoiceCloneResult {
   taskId: number;
@@ -76,8 +79,12 @@ interface SelectedAudioFile {
 }
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
-const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  getVoiceCloneModelRegistryEntry(baseModel).normalizeParams(modelParams);
+const uiConfigStore = useUiConfigStore();
+
+const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'voice-clone');
+  return getVoiceCloneModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+};
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
@@ -92,7 +99,7 @@ const form = reactive({
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
-  modelParams: getVoiceCloneModelRegistryEntry('').createDefaultParams() as Record<string, unknown>
+  modelParams: {} as Record<string, unknown>
 });
 const languageOptions = Object.values(AppLanguage).map(value => ({
   label: APP_LANGUAGE_LABELS[value],
@@ -124,9 +131,8 @@ const modelOptions = computed(() =>
   }))
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const activeVoiceCloneConfig = computed(() => getVoiceCloneModelRegistryEntry(form.baseModel));
-const requiresReferenceText = computed(() => activeVoiceCloneConfig.value.requiresReferenceText(form.modelParams));
-const activeVoiceCloneParamsComponent = computed(() => activeVoiceCloneConfig.value.paramsComponent);
+const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'voice-clone'));
+const requiresReferenceText = computed(() => getVoiceCloneModelRegistryEntry(form.baseModel).requiresReferenceText(form.modelParams));
 const canGenerate = computed(
   () =>
     Boolean(form.baseModel) &&
@@ -138,22 +144,13 @@ const canGenerate = computed(
 );
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
-  activeVoiceCloneConfig.value.buildModeSummary(form.modelParams),
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
   requiresReferenceText.value
-    ? `参考台词 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
-    : `当前模式不要求参考台词，目标台词 ${charCount.value} 字。`,
-  ...activeVoiceCloneConfig.value.buildCloneSummaryLines(form.modelParams),
+    ? `当前参考台词为必填项，已填写 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
+    : `当前参考台词为可选项，已填写 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
-const activeResultSummaryLines = computed(() => {
-  if (!activeResult.value) {
-    return [];
-  }
-
-  return getVoiceCloneModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
-});
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
     return '';
@@ -552,6 +549,7 @@ const saveResultAudio = (taskId: number) =>
   });
 
 onMounted(async () => {
+  await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
@@ -612,7 +610,6 @@ onBeforeUnmount(() => {
               <p>生成时间：{{ activeResult.createdAt }}</p>
               <p>导出名称：{{ activeResult.exportAudioName }}</p>
               <p>参考音频：{{ activeResult.refAudioName }}</p>
-              <p v-for="line in activeResultSummaryLines" :key="line">{{ line }}</p>
               <p v-if="activeResult.refText" class="pt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
@@ -665,7 +662,7 @@ onBeforeUnmount(() => {
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <component :is="activeVoiceCloneParamsComponent" class="mt-4" v-model="form.modelParams" />
+          <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeVoiceCloneTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">

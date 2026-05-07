@@ -4,12 +4,19 @@ use serde::{Deserialize, Serialize};
 
 mod env_config;
 mod log;
+mod ui_config;
 
 pub use env_config::{
     load_configs, resolve_storage_dir, save_configs, supported_models_path, BasicConfig, EnvConfig,
     RemoteConfig,
 };
 pub use log::{init_log, resolve_base_log_dir};
+#[allow(unused_imports)]
+pub use ui_config::{
+    load_ui_configs, load_ui_configs_from_dir, ui_configs_dir_path, ComponentProps,
+    ParamDefinition, SelectOption, TaskParamConfig, UiComponentType, UiConfigCatalog, UiParamType,
+    UiTaskKind, VisibleWhenRule,
+};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

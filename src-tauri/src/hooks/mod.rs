@@ -5,7 +5,7 @@ mod model_info;
 mod speaker_info;
 mod task_history;
 
-pub use settings::EnvConfigState;
+pub use settings::{EnvConfigState, UiConfigState};
 
 pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
     builder.invoke_handler(tauri::generate_handler![
@@ -30,6 +30,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::cancel_model_training_task,
         task_history::create_voice_clone_task,
         settings::get_settings_config,
+        settings::get_ui_config,
         settings::save_settings_config
     ])
 }

@@ -13,6 +13,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { getTextToSpeechModelRegistryEntry } from '@/components/form/textToSpeechRegistry';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
@@ -27,9 +28,11 @@ import {
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
+import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
 interface TtsResult {
   taskId: number;
@@ -77,8 +80,12 @@ interface TextToSpeechAudioAssetPayload {
 }
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
-const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  getTextToSpeechModelRegistryEntry(baseModel).normalizeParams(modelParams);
+const uiConfigStore = useUiConfigStore();
+
+const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'tts');
+  return getTextToSpeechModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+};
 
 const form = reactive({
   speakerId: null as number | null,
@@ -88,7 +95,7 @@ const form = reactive({
   format: TextToSpeechFormat.Wav,
   exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
   text: '',
-  modelParams: getTextToSpeechModelRegistryEntry('').createDefaultParams() as Record<string, unknown>
+  modelParams: {} as Record<string, unknown>
 });
 
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
@@ -120,6 +127,7 @@ const modelOptions = computed(() =>
   }))
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
   speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
@@ -131,8 +139,6 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
 );
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const activeTextToSpeechConfig = computed(() => getTextToSpeechModelRegistryEntry(form.baseModel));
-const activeTextToSpeechParamsComponent = computed(() => activeTextToSpeechConfig.value.paramsComponent);
 const canGenerate = computed(
   () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
 );
@@ -140,16 +146,8 @@ const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`,
-  ...activeTextToSpeechConfig.value.buildGenerationSummaryLines(form.modelParams)
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
-const activeResultSummaryLines = computed(() => {
-  if (!activeResult.value) {
-    return [];
-  }
-
-  return getTextToSpeechModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
-});
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
     return '';
@@ -558,6 +556,7 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
+  await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   await speakerStore.ensureLoaded({ force: true });
   await loadRecentTasks();
@@ -610,7 +609,6 @@ onMounted(async () => {
               <p>任务 ID：{{ activeResult.taskId }}</p>
               <p>生成时间：{{ activeResult.createdAt }}</p>
               <p>导出名称：{{ activeResult.exportAudioName }}</p>
-              <p v-for="line in activeResultSummaryLines" :key="line">{{ line }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
           </template>
@@ -658,7 +656,7 @@ onMounted(async () => {
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <component :is="activeTextToSpeechParamsComponent" class="mt-4" v-model="form.modelParams" />
+          <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTextToSpeechTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">

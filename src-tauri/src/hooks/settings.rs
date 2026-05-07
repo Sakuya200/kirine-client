@@ -1,16 +1,17 @@
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::{
     load_configs, resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation,
-    BasicConfig, EnvConfig, HardwareType, RemoteConfig,
+    BasicConfig, EnvConfig, HardwareType, RemoteConfig, UiConfigCatalog,
 };
 use crate::service::{ServiceImpl, ServiceState};
 use crate::utils::file_ops::migrate_directory;
 
 pub struct EnvConfigState(pub RwLock<EnvConfig>);
+pub struct UiConfigState(pub Arc<UiConfigCatalog>);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +85,13 @@ pub fn get_settings_config(
     let config = state.0.read().map_err(|_| "读取配置状态失败".to_string())?;
 
     Ok(SettingsPayload::from_env_config(&config))
+}
+
+#[tauri::command]
+pub fn get_ui_config(
+    state: State<'_, UiConfigState>,
+) -> std::result::Result<UiConfigCatalog, String> {
+    Ok(state.0.as_ref().clone())
 }
 
 #[tauri::command]
