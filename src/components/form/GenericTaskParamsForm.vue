@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import UiParamInputField from '@/components/ui/UiParamInputField.vue';
+import UiParamEmptyState from '@/components/ui/UiParamEmptyState.vue';
 import UiParamSelectField from '@/components/ui/UiParamSelectField.vue';
 import UiParamSwitchField from '@/components/ui/UiParamSwitchField.vue';
 import UiParamTextareaField from '@/components/ui/UiParamTextareaField.vue';
@@ -41,6 +42,7 @@ const shouldRenderParam = (param: ParamDefinition) => {
 };
 
 const visibleParams = computed(() => (props.taskConfig?.params ?? []).filter(param => shouldRenderParam(param)));
+const showEmptyState = computed(() => props.taskConfig !== null && visibleParams.value.length === 0);
 
 const updateModelValue = (name: string, value: unknown) => {
   const nextValue: Record<string, unknown> = {
@@ -102,7 +104,9 @@ const mapSelectOptions = (options: SelectOption[]) =>
 
 <template>
   <div class="space-y-4 text-sm text-slate-700">
-    <div class="grid gap-3 md:grid-cols-2">
+    <UiParamEmptyState v-if="showEmptyState" />
+
+    <div v-else class="grid gap-3 md:grid-cols-2">
       <template v-for="param in visibleParams" :key="param.name">
         <UiParamInputField
           v-if="param.componentType === 'input-number' || param.componentType === 'input-text'"
