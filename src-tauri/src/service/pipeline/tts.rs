@@ -30,8 +30,7 @@ use crate::{
                 PythonScriptTaskKind, TTSArgs,
             },
             model_artifacts::{
-                build_model_download_script_args, resolve_model_download_paths,
-                validate_model_artifact_paths, MODEL_ARTIFACTS_DIR,
+                resolve_model_download_paths, validate_model_artifact_paths, MODEL_ARTIFACTS_DIR,
             },
             model_paths::speaker_model_dir,
             run_pipeline_stage_shell_script, run_python_params_file_invocation,
@@ -125,6 +124,16 @@ pub(crate) fn build_shared_tts_invocation(
             .to_string(),
         }),
     }
+}
+
+fn resolve_default_model_root_path(src_model_root: &Path, base_model: &str) -> String {
+    let artifact_root = src_model_root.join(MODEL_ARTIFACTS_DIR);
+    let dedicated_root = artifact_root.join(base_model);
+    if dedicated_root.exists() {
+        return dedicated_root.to_string_lossy().to_string();
+    }
+
+    artifact_root.to_string_lossy().to_string()
 }
 
 pub(crate) async fn run_common_tts_pipeline(
@@ -298,10 +307,7 @@ pub(crate) async fn load_tts_task_params(
             }
         } else {
             (
-                src_model_root
-                    .join(MODEL_ARTIFACTS_DIR)
-                    .to_string_lossy()
-                    .to_string(),
+                resolve_default_model_root_path(&src_model_root, task_detail.base_model.trim()),
                 None,
                 None,
             )
@@ -403,10 +409,6 @@ pub(crate) async fn prepare_tts_model_env(
         init_task_runtime_script_path,
         download_models_script_path,
     };
-    let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
-        .await?;
-    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
 
     validate_and_init(
         bootstrap_paths,
@@ -430,12 +432,17 @@ pub(crate) async fn prepare_tts_model_env(
     )
     .await?;
 
+    let model_info = service
+        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
+        .await?;
+    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
+
     validate_and_download(
         service,
         bootstrap_paths,
         task_id,
         log_dir,
-        build_model_download_script_args(src_model_root, &model_info)?,
+        &model_info,
         DOWNLOAD_MODEL_ARTIFACTS_LABEL,
         |script_path, working_dir, task_id, log_dir, script_args, label| async move {
             run_pipeline_stage_shell_script(

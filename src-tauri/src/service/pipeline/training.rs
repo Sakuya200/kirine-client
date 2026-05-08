@@ -20,7 +20,7 @@ use crate::{
             entity::{speaker as speaker_entity, training_task as training_task_entity},
             LocalService,
         },
-        models::{HistoryTaskType, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
+        models::{HistoryTaskType, ModelInfo, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
         pipeline::TrainingPipelineRequest,
     },
     utils::{
@@ -36,7 +36,7 @@ use super::{
         PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
         PythonScriptTaskKind, TrainingArgs,
     },
-    model_artifacts::{build_model_download_script_args, resolve_model_download_paths},
+    model_artifacts::resolve_model_download_paths,
     model_paths::speaker_model_dir,
     run_pipeline_stage_shell_script, run_python_params_file_invocation_cancellable,
     script_paths::{
@@ -500,7 +500,7 @@ pub(crate) async fn prepare_training_model_env(
     task_id: i64,
     log_dir: &Path,
     use_cpu_mode: bool,
-    download_script_args: Vec<String>,
+    model_info: &ModelInfo,
     download_paths: &[PathBuf],
 ) -> Result<()> {
     validate_and_init(
@@ -528,7 +528,7 @@ pub(crate) async fn prepare_training_model_env(
         bootstrap_paths,
         task_id,
         log_dir,
-        download_script_args,
+        model_info,
         DOWNLOAD_MODEL_ARTIFACTS_LABEL,
         |script_path, working_dir, task_id, log_dir, script_args, label| async move {
             run_training_stage_shell_script(
@@ -583,7 +583,7 @@ pub(crate) async fn prepare_training_model_env_for_paths(
         task_id,
         log_dir,
         runtime.is_cpu(),
-        build_model_download_script_args(src_model_root, &model_info)?,
+        &model_info,
         &download_paths,
     )
     .await

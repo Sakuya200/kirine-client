@@ -11,7 +11,7 @@ use crate::{
     config::supported_models_path,
     service::{
         local::entity::{model_info as model_info_entity, speaker as speaker_entity},
-        models::{AppLanguage, SpeakerSource, SpeakerStatus},
+        models::{AppLanguage, ModelDownloadType, SpeakerSource, SpeakerStatus},
     },
     utils::time::now_string,
     Result,
@@ -30,9 +30,15 @@ struct SupportedModelDefinition {
     base_model: String,
     model_name: String,
     model_scale: String,
+    #[serde(default = "default_model_download_type")]
+    download_type: ModelDownloadType,
     required_model_name_list: Vec<String>,
     required_model_repo_id_list: Vec<String>,
     supported_feature_list: Vec<String>,
+}
+
+fn default_model_download_type() -> ModelDownloadType {
+    ModelDownloadType::HfLike
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +130,15 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
         if !model_keys.insert(key.clone()) {
             bail!("supported_models.json 中存在重复模型定义: {key}");
         }
+
+        if definition.download_type == ModelDownloadType::HfLike
+            && definition.required_model_name_list.len()
+                != definition.required_model_repo_id_list.len()
+        {
+            bail!(
+                "supported_models.json 中模型 {key} 的 requiredModelNameList 与 requiredModelRepoIdList 长度不一致"
+            );
+        }
     }
 
     let mut speaker_keys = HashSet::new();
@@ -168,6 +183,7 @@ where
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.model_name = Set(definition.model_name.trim().to_string());
         active_model.model_scale = Set(definition.model_scale.trim().to_string());
+        active_model.download_type = Set(definition.download_type.as_str().to_string());
         active_model.required_model_name_list_json = Set(required_model_name_list_json);
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
         active_model.supported_feature_list_json = Set(supported_feature_list_json);
@@ -182,6 +198,7 @@ where
             base_model: Set(definition.base_model.trim().to_string()),
             model_name: Set(definition.model_name.trim().to_string()),
             model_scale: Set(definition.model_scale.trim().to_string()),
+            download_type: Set(definition.download_type.as_str().to_string()),
             required_model_name_list_json: Set(required_model_name_list_json),
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),

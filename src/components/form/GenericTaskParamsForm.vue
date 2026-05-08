@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import UiParamAudioFileField from '@/components/ui/UiParamAudioFileField.vue';
 import UiParamInputField from '@/components/ui/UiParamInputField.vue';
 import UiParamEmptyState from '@/components/ui/UiParamEmptyState.vue';
 import UiParamSelectField from '@/components/ui/UiParamSelectField.vue';
 import UiParamSwitchField from '@/components/ui/UiParamSwitchField.vue';
+import UiParamTextFileField from '@/components/ui/UiParamTextFileField.vue';
 import UiParamTextareaField from '@/components/ui/UiParamTextareaField.vue';
 import type { ParamDefinition, SelectOption, TaskParamConfig } from '@/types/uiConfig';
 
@@ -95,6 +97,10 @@ const handleSelectChange = (param: ParamDefinition, value: string | number | boo
   updateModelValue(param.name, value);
 };
 
+const handleFileChange = (param: ParamDefinition, value: string) => {
+  updateModelValue(param.name, value);
+};
+
 const mapSelectOptions = (options: SelectOption[]) =>
   options.map(option => ({
     label: option.label,
@@ -151,6 +157,32 @@ const mapSelectOptions = (options: SelectOption[]) =>
           :text-on="param.componentProps.textOn"
           :text-off="param.componentProps.textOff"
           @update:model-value="handleSwitchChange(param, $event)"
+        />
+
+        <UiParamAudioFileField
+          v-else-if="param.componentType === 'input-audio-file'"
+          :model-value="toInputString(param)"
+          :label="param.componentProps.label || param.name"
+          :description="param.componentProps.helpText || param.description"
+          :placeholder="param.componentProps.placeholder"
+          :dialog-title="String(param.componentProps.extra.dialogTitle ?? '选择音频文件')"
+          :button-text="String(param.componentProps.extra.buttonText ?? '选择音频')"
+          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? '清空')"
+          :extensions="Array.isArray(param.componentProps.extra.extensions) ? (param.componentProps.extra.extensions as string[]) : []"
+          @update:model-value="handleFileChange(param, $event)"
+        />
+
+        <UiParamTextFileField
+          v-else-if="param.componentType === 'input-text-file'"
+          :model-value="toInputString(param)"
+          :label="param.componentProps.label || param.name"
+          :description="param.componentProps.helpText || param.description"
+          :placeholder="param.componentProps.placeholder"
+          :dialog-title="String(param.componentProps.extra.dialogTitle ?? '选择文本文件')"
+          :button-text="String(param.componentProps.extra.buttonText ?? '上传文本')"
+          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? '清空')"
+          :extensions="Array.isArray(param.componentProps.extra.extensions) ? (param.componentProps.extra.extensions as string[]) : []"
+          @update:model-value="handleFileChange(param, $event)"
         />
       </template>
     </div>

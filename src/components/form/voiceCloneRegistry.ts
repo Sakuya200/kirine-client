@@ -3,34 +3,38 @@ interface VoiceCloneModelRegistryEntry {
   requiresReferenceText: (modelParams: Record<string, unknown>) => boolean;
 }
 
-const VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS = {
-  mode: 'reference',
-  stylePrompt: '',
-  cfgValue: '2.0',
-  inferenceTimesteps: 10
-} as const;
-
-const MOSS_TTS_LOCAL_VOICE_CLONE_DEFAULT_PARAMS = {
-  nVqForInference: 32
-} as const;
-
 const normalizeQwen3VoiceCloneParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
   ...modelParams
 });
 
 const normalizeVoxCpm2VoiceCloneParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
-  ...VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS,
   ...modelParams,
-  mode: String(modelParams.mode ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.mode),
-  stylePrompt: String(modelParams.stylePrompt ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.stylePrompt),
-  cfgValue: String(modelParams.cfgValue ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue).trim() || VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.cfgValue,
-  inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? VOX_CPM2_VOICE_CLONE_DEFAULT_PARAMS.inferenceTimesteps)
+  mode: String(modelParams.mode ?? ''),
+  stylePrompt: String(modelParams.stylePrompt ?? ''),
+  cfgValue: String(modelParams.cfgValue ?? '').trim(),
+  inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? 0)
 });
 
 const normalizeMossVoiceCloneParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
-  ...MOSS_TTS_LOCAL_VOICE_CLONE_DEFAULT_PARAMS,
   ...modelParams,
-  nVqForInference: Number(modelParams.nVqForInference ?? MOSS_TTS_LOCAL_VOICE_CLONE_DEFAULT_PARAMS.nVqForInference)
+  nVqForInference: Number(modelParams.nVqForInference ?? 0)
+});
+
+const normalizeGptSovitsV2ppVoiceCloneParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
+  ...modelParams,
+  refAudioPath: String(modelParams.refAudioPath ?? ''),
+  refTextPath: String(modelParams.refTextPath ?? ''),
+  promptLang: String(modelParams.promptLang ?? ''),
+  topK: Number(modelParams.topK ?? 0),
+  topP: String(modelParams.topP ?? '').trim(),
+  temperature: String(modelParams.temperature ?? '').trim(),
+  speedFactor: String(modelParams.speedFactor ?? '').trim(),
+  textSplitMethod: String(modelParams.textSplitMethod ?? ''),
+  batchSize: Number(modelParams.batchSize ?? 0),
+  splitBucket: Boolean(modelParams.splitBucket),
+  fragmentInterval: String(modelParams.fragmentInterval ?? '').trim(),
+  parallelInfer: Boolean(modelParams.parallelInfer),
+  seed: Number(modelParams.seed ?? 0)
 });
 
 const defaultEntry: VoiceCloneModelRegistryEntry = {
@@ -47,6 +51,14 @@ const VOICE_CLONE_MODEL_REGISTRY: Record<string, VoiceCloneModelRegistryEntry> =
   moss_tts_local: {
     normalizeParams: normalizeMossVoiceCloneParams,
     requiresReferenceText: () => false
+  },
+  gpt_sovits_v2pp: {
+    normalizeParams: normalizeGptSovitsV2ppVoiceCloneParams,
+    requiresReferenceText: () => true
+  },
+  gpt_sovits_cpufast: {
+    normalizeParams: normalizeGptSovitsV2ppVoiceCloneParams,
+    requiresReferenceText: () => true
   }
 };
 

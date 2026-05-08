@@ -631,6 +631,7 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             base_model TEXT NOT NULL,
             model_name TEXT NOT NULL,
             model_scale_list_json TEXT NOT NULL,
+            download_type TEXT NOT NULL DEFAULT 'HF-Like',
             required_model_name_list_json TEXT NOT NULL,
             required_model_repo_id_list_json TEXT NOT NULL,
             supported_feature_list_json TEXT NOT NULL,
@@ -753,16 +754,17 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_info (
-            id, base_model, model_name, model_scale_list_json,
+            id, base_model, model_name, model_scale_list_json, download_type,
             required_model_name_list_json, required_model_repo_id_list_json,
             supported_feature_list_json, create_time, modify_time, downloaded, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
     .bind("qwen3_tts")
     .bind("Qwen3-TTS")
     .bind(r#"["1.7B","0.6B"]"#)
+    .bind("HF-Like")
     .bind(r#"["Qwen3-TTS-12Hz-1.7B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
     .bind(r#"["Qwen/Qwen3-TTS-12Hz-1.7B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
     .bind(r#"["text_to_speech","voice_clone","model_training"]"#)

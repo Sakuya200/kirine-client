@@ -55,6 +55,8 @@ pub enum UiComponentType {
     Textarea,
     Select,
     Switch,
+    InputAudioFile,
+    InputTextFile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -78,6 +78,8 @@ interface TextToSpeechAudioAssetPayload {
   contentType: string;
   bytes: number[];
 }
+
+const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_v2pp', 'gpt_sovits_cpufast']);
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();
@@ -120,6 +122,10 @@ let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 let skipHistoryTaskSelectionReload = false;
 
+const isDynamicReferenceModel = computed(() => DYNAMIC_REFERENCE_BASE_MODELS.has(form.baseModel));
+const dynamicRefAudioPath = computed(() => String(form.modelParams.refAudioPath ?? '').trim());
+const dynamicRefTextPath = computed(() => String(form.modelParams.refTextPath ?? '').trim());
+
 const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
     label: item.modelName,
@@ -144,10 +150,17 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
 ]);
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const canGenerate = computed(() => Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale);
+const canGenerate = computed(
+  () =>
+    Boolean(form.language) &&
+    charCount.value > 0 &&
+    !isGenerating.value &&
+    !!form.modelScale &&
+    (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
+);
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
-  `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
+  isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
@@ -486,7 +499,7 @@ const generateAudio = async () => {
   try {
     const payload = await invoke<TextToSpeechTaskResultPayload>('create_text_to_speech_task', {
       payload: {
-        speakerId: form.speakerId,
+        speakerId: isDynamicReferenceModel.value ? null : form.speakerId,
         baseModel: form.baseModel,
         modelScale: form.modelScale,
         language: form.language,
@@ -583,7 +596,12 @@ onMounted(async () => {
             :options="speakerOptions"
             placeholder="可选，不指定时自动选择"
           />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
+          <BaseListbox
+            v-model="form.language"
+            v-model:selected-option="selectedLanguageOption"
+            label="输出语言"
+            :options="TEXT_TO_SPEECH_LANGUAGES"
+          />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />

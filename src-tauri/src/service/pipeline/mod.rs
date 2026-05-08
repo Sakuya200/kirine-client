@@ -19,7 +19,7 @@ use crate::{
     common::task_paths::task_log_file_path,
     config::{EnvConfig, HardwareType},
     service::local::LocalService,
-    service::models::HistoryTaskType,
+    service::models::{HistoryTaskType, ModelDownloadType, ModelInfo},
     utils::process::{
         run_logged_python_script, run_logged_python_script_cancellable, run_logged_shell_script,
         LoggedCommandResult,
@@ -28,8 +28,7 @@ use crate::{
 };
 
 use self::{
-    api::PythonScriptInvocationSpec, pipeline::CommonModelTaskPipeline,
-    script_paths::ScriptPlatform,
+    api::PythonScriptInvocationSpec, pipeline::CommonModelTaskPipeline, script_paths::ScriptPlatform,
 };
 
 static COMMON_TASK_PIPELINE: CommonModelTaskPipeline = CommonModelTaskPipeline::new();
@@ -173,7 +172,7 @@ pub(crate) async fn validate_and_download<RunStage, Fut, Validate, Label>(
     paths: PipelineBootstrapPaths<'_>,
     task_id: i64,
     log_dir: &Path,
-    download_script_args: Vec<String>,
+    model_info: &ModelInfo,
     download_label: Label,
     run_stage: RunStage,
     validate_downloads: Validate,
@@ -182,7 +181,7 @@ where
     RunStage: Fn(PathBuf, PathBuf, i64, PathBuf, Vec<String>, Label) -> Fut,
     Fut: Future<Output = Result<()>>,
     Validate: Fn() -> Result<()>,
-    Label: Copy,
+    Label: Copy + AsRef<str>,
 {
     if service
         .model_downloaded_impl(paths.base_model, paths.model_scale)
@@ -200,22 +199,66 @@ where
     info!(
         base_model = %paths.base_model,
         model_scale = %paths.model_scale,
-        download_script = %paths.download_models_script_path.display(),
-        "当前模型未标记为已下载，开始下载基础模型权重"
+        download_type = %model_info.download_type,
+        "当前模型未标记为已下载，开始准备模型运行时产物"
     );
 
-    let mut args = vec!["--base-model".to_string(), paths.base_model.to_string()];
-    args.extend(download_script_args);
+    match model_info.download_type {
+        ModelDownloadType::HfLike => {
+            let mut args = vec!["--base-model".to_string(), paths.base_model.to_string()];
+            args.extend(self::model_artifacts::build_model_download_script_args(
+                paths.src_model_root,
+                model_info,
+            )?);
 
-    run_stage(
-        paths.download_models_script_path.to_path_buf(),
-        paths.src_model_root.to_path_buf(),
-        task_id,
-        log_dir.to_path_buf(),
-        args,
-        download_label,
-    )
-    .await?;
+            run_stage(
+                paths.download_models_script_path.to_path_buf(),
+                paths.src_model_root.to_path_buf(),
+                task_id,
+                log_dir.to_path_buf(),
+                args,
+                download_label,
+            )
+            .await?;
+        }
+        ModelDownloadType::Custom => {
+            let task_log_path = log_dir.join(format!(
+                "{}_{}_download.log",
+                paths.base_model, paths.model_scale
+            ));
+            let script_path = self::model_artifacts::resolve_custom_model_download_script_path(
+                paths.src_model_root,
+                model_info,
+            )?;
+            let script_args = vec![
+                "--base-model".to_string(),
+                paths.base_model.to_string(),
+                "--model-scale".to_string(),
+                paths.model_scale.to_string(),
+                "--target-root-dir".to_string(),
+                paths
+                    .src_model_root
+                    .join(self::model_artifacts::MODEL_ARTIFACTS_DIR)
+                    .to_string_lossy()
+                    .to_string(),
+                "--log-path".to_string(),
+                log_dir.to_string_lossy().to_string(),
+                "--task-log-file".to_string(),
+                task_log_path.to_string_lossy().to_string(),
+            ];
+
+            run_logged_python_script(
+                paths.venv_python_path,
+                &script_path,
+                paths.src_model_root,
+                download_label.as_ref(),
+                &task_log_path,
+                "python script completed successfully",
+                script_args,
+            )
+            .await?;
+        }
+    }
 
     validate_downloads()?;
     service

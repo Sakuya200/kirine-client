@@ -28,9 +28,7 @@ use crate::{
                 PythonScriptTaskKind, VoiceCloneArgs,
             },
             model_artifacts::{
-                build_model_download_script_args, resolve_model_download_paths,
-                validate_model_artifact_paths,
-                MODEL_ARTIFACTS_DIR,
+                resolve_model_download_paths, validate_model_artifact_paths, MODEL_ARTIFACTS_DIR,
             },
             run_pipeline_stage_shell_script, run_python_params_file_invocation,
             script_paths::{
@@ -132,6 +130,16 @@ pub(crate) fn build_shared_voice_clone_invocation(
             text: context.params.text.clone(),
         }),
     }
+}
+
+fn resolve_default_model_root_path(src_model_root: &Path, base_model: &str) -> String {
+    let artifact_root = src_model_root.join(MODEL_ARTIFACTS_DIR);
+    let dedicated_root = artifact_root.join(base_model);
+    if dedicated_root.exists() {
+        return dedicated_root.to_string_lossy().to_string();
+    }
+
+    artifact_root.to_string_lossy().to_string()
 }
 
 pub(crate) async fn run_common_voice_clone_pipeline(
@@ -393,10 +401,6 @@ pub(crate) async fn prepare_voice_clone_model_env(
         init_task_runtime_script_path,
         download_models_script_path,
     };
-    let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
-        .await?;
-    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
 
     validate_and_init(
         bootstrap_paths,
@@ -420,12 +424,17 @@ pub(crate) async fn prepare_voice_clone_model_env(
     )
     .await?;
 
+    let model_info = service
+        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
+        .await?;
+    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
+
     validate_and_download(
         service,
         bootstrap_paths,
         task_id,
         log_dir,
-        build_model_download_script_args(src_model_root, &model_info)?,
+        &model_info,
         DOWNLOAD_MODEL_ARTIFACTS_LABEL,
         |script_path, working_dir, task_id, log_dir, script_args, label| async move {
             run_pipeline_stage_shell_script(
@@ -548,10 +557,7 @@ pub(crate) fn resolve_voice_clone_paths_base(
         task_id,
     );
     let params_json_path = voice_clone_params_json_path(&sample_root);
-    let model_root_path = src_model_root
-        .join(MODEL_ARTIFACTS_DIR)
-        .to_string_lossy()
-        .to_string();
+    let model_root_path = resolve_default_model_root_path(&src_model_root, base_model);
 
     Ok(ResolvedVoiceClonePaths {
         base_model: base_model.to_string(),
@@ -574,15 +580,10 @@ pub(crate) fn resolve_voice_clone_paths(
     base_model: &str,
     model_scale: &str,
 ) -> Result<ResolvedVoiceClonePaths> {
-    let src_model_root = crate::service::pipeline::script_paths::resolve_src_model_root(service.app_dir())?;
+    let src_model_root =
+        crate::service::pipeline::script_paths::resolve_src_model_root(service.app_dir())?;
 
-    resolve_voice_clone_paths_base(
-        service,
-        task_id,
-        base_model,
-        model_scale,
-        src_model_root,
-    )
+    resolve_voice_clone_paths_base(service, task_id, base_model, model_scale, src_model_root)
 }
 
 pub(crate) fn validate_voice_clone_environment(

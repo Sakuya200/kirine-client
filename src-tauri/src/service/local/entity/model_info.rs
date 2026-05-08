@@ -8,6 +8,7 @@ pub struct Model {
     pub base_model: String,
     pub model_name: String,
     pub model_scale: String,
+    pub download_type: String,
     pub required_model_name_list_json: String,
     pub required_model_repo_id_list_json: String,
     pub supported_feature_list_json: String,

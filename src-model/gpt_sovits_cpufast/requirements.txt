@@ -1,0 +1,2 @@
+# GPT-SoVITS-CPUFast currently reuses the gpt_sovits_v2pp runtime wrapper implementation.
+# Keep this file intentionally minimal until the custom installer is finalized.

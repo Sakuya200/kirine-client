@@ -1,0 +1,376 @@
+[
+  {
+    "task": "tts",
+    "base-model": "gpt_sovits_cpufast",
+    "params": [
+      {
+        "name": "refAudioPath",
+        "type": "string",
+        "componentType": "input-audio-file",
+        "componentProps": {
+          "label": "参考音频",
+          "helpText": "选择 3 到 10 秒左右的参考音频文件。",
+          "placeholder": "尚未选择参考音频",
+          "dialogTitle": "选择参考音频",
+          "buttonText": "选择参考音频",
+          "extensions": ["wav", "mp3", "flac", "m4a", "ogg"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "GPT-SoVITS-CPUFast 推理所需的参考音频路径。"
+      },
+      {
+        "name": "refTextPath",
+        "type": "string",
+        "componentType": "input-text-file",
+        "componentProps": {
+          "label": "参考文本文件",
+          "helpText": "上传与参考音频对应的文本文件。",
+          "placeholder": "尚未选择参考文本文件",
+          "dialogTitle": "选择参考文本文件",
+          "buttonText": "上传参考文本",
+          "extensions": ["txt", "md", "text"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "参考音频对应的文本文件路径。"
+      },
+      {
+        "name": "promptLang",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "参考语种",
+          "options": [
+            { "label": "中文", "value": "chinese" },
+            { "label": "英文", "value": "english" },
+            { "label": "日文", "value": "japanese" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "chinese",
+        "description": "参考音频文本所属语种。"
+      },
+      {
+        "name": "topK",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Top K",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 15,
+        "description": "GPT 采样 Top K。"
+      },
+      {
+        "name": "topP",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Top P",
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "GPT 采样 Top P。"
+      },
+      {
+        "name": "temperature",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Temperature",
+          "min": 0,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "GPT 采样温度。"
+      },
+      {
+        "name": "speedFactor",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "语速倍率",
+          "min": 0.1,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "输出语速倍率。"
+      },
+      {
+        "name": "textSplitMethod",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "文本切分方式",
+          "options": [
+            { "label": "凑四句一切", "value": "cut1" },
+            { "label": "凑 50 字一切", "value": "cut2" },
+            { "label": "按中文句号切", "value": "cut3" },
+            { "label": "按英文句号切", "value": "cut4" },
+            { "label": "按标点符号切", "value": "cut5" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "cut5",
+        "description": "目标文本切分策略。"
+      },
+      {
+        "name": "batchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "批大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 1,
+        "description": "并行推理批大小。"
+      },
+      {
+        "name": "splitBucket",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "数据分桶",
+          "text": "启用数据分桶"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "并行推理时是否启用数据分桶。"
+      },
+      {
+        "name": "fragmentInterval",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "片段间隔",
+          "min": 0,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "0.3",
+        "description": "片段拼接静音间隔，单位秒。"
+      },
+      {
+        "name": "parallelInfer",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "并行推理",
+          "text": "启用并行推理"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "是否启用并行推理。"
+      },
+      {
+        "name": "seed",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "随机种子",
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": -1,
+        "description": "随机种子，-1 表示随机。"
+      }
+    ]
+  },
+  {
+    "task": "voice-clone",
+    "base-model": "gpt_sovits_cpufast",
+    "params": [
+      {
+        "name": "refAudioPath",
+        "type": "string",
+        "componentType": "input-audio-file",
+        "componentProps": {
+          "label": "参考音频",
+          "helpText": "选择用于声音克隆的参考音频。",
+          "placeholder": "尚未选择参考音频",
+          "dialogTitle": "选择参考音频",
+          "buttonText": "选择参考音频",
+          "extensions": ["wav", "mp3", "flac", "m4a", "ogg"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "GPT-SoVITS-CPUFast 声音克隆所需的参考音频路径。"
+      },
+      {
+        "name": "refTextPath",
+        "type": "string",
+        "componentType": "input-text-file",
+        "componentProps": {
+          "label": "参考文本文件",
+          "helpText": "上传参考音频对应的文本文件。",
+          "placeholder": "尚未选择参考文本文件",
+          "dialogTitle": "选择参考文本文件",
+          "buttonText": "上传参考文本",
+          "extensions": ["txt", "md", "text"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "参考音频对应的文本文件路径。"
+      },
+      {
+        "name": "promptLang",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "参考语种",
+          "options": [
+            { "label": "中文", "value": "chinese" },
+            { "label": "英文", "value": "english" },
+            { "label": "日文", "value": "japanese" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "chinese",
+        "description": "参考音频文本所属语种。"
+      },
+      {
+        "name": "topK",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Top K",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 15,
+        "description": "GPT 采样 Top K。"
+      },
+      {
+        "name": "topP",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Top P",
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "GPT 采样 Top P。"
+      },
+      {
+        "name": "temperature",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Temperature",
+          "min": 0,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "GPT 采样温度。"
+      },
+      {
+        "name": "speedFactor",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "语速倍率",
+          "min": 0.1,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "1.0",
+        "description": "输出语速倍率。"
+      },
+      {
+        "name": "textSplitMethod",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "文本切分方式",
+          "options": [
+            { "label": "凑四句一切", "value": "cut1" },
+            { "label": "凑 50 字一切", "value": "cut2" },
+            { "label": "按中文句号切", "value": "cut3" },
+            { "label": "按英文句号切", "value": "cut4" },
+            { "label": "按标点符号切", "value": "cut5" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "cut5",
+        "description": "目标文本切分策略。"
+      },
+      {
+        "name": "batchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "批大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 1,
+        "description": "并行推理批大小。"
+      },
+      {
+        "name": "splitBucket",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "数据分桶",
+          "text": "启用数据分桶"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "并行推理时是否启用数据分桶。"
+      },
+      {
+        "name": "fragmentInterval",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "片段间隔",
+          "min": 0,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "0.3",
+        "description": "片段拼接静音间隔，单位秒。"
+      },
+      {
+        "name": "parallelInfer",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "并行推理",
+          "text": "启用并行推理"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "是否启用并行推理。"
+      },
+      {
+        "name": "seed",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "随机种子",
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": -1,
+        "description": "随机种子，-1 表示随机。"
+      }
+    ]
+  }
+]

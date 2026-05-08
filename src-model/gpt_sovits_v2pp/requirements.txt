@@ -1,0 +1,2 @@
+# GPT-SoVITS-V2PP currently shells out to an external GPT-SoVITS-CPUFast checkout.
+# Keep this file intentionally minimal until runtime bootstrap/install logic is added.

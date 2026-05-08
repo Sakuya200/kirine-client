@@ -11,8 +11,9 @@ use crate::{
     service::{
         local::entity::speaker as speaker_entity,
         models::{
-            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelInfo,
-            SpeakerInfo, SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
+            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload,
+            ModelDownloadType, ModelInfo, SpeakerInfo, SpeakerSource, SpeakerStatus,
+            UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
         LocalService,
@@ -181,6 +182,7 @@ impl LocalService {
             base_model: row.base_model,
             model_name: row.model_name,
             model_scale: row.model_scale,
+            download_type: row.download_type.parse().unwrap_or(ModelDownloadType::HfLike),
             required_model_name_list: serde_json::from_str(&row.required_model_name_list_json)?,
             required_model_repo_id_list: serde_json::from_str(&row.required_model_repo_id_list_json)?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,

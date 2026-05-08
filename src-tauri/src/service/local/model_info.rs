@@ -13,11 +13,10 @@ use crate::{
     config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
-        models::{ModelInfo, ModelMutationResult},
+        models::{ModelDownloadType, ModelInfo, ModelMutationResult},
         pipeline::{
             model_artifacts::{
-                build_model_download_script_args, resolve_model_download_paths,
-                validate_model_artifact_paths,
+                resolve_model_download_paths, validate_model_artifact_paths,
             },
             script_paths::{resolve_src_model_root, src_model_venv_python_path, ScriptPlatform},
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
@@ -157,7 +156,7 @@ impl LocalService {
             bootstrap_paths,
             model_id,
             &log_dir,
-            build_model_download_script_args(&src_model_root, &model_info)?,
+            &model_info,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL,
             |script_path, working_dir, _task_id, log_dir, script_args, label| {
                 let log_path = download_log_path.clone();
@@ -285,6 +284,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         base_model: row.base_model,
         model_name: row.model_name,
         model_scale: row.model_scale,
+        download_type: row.download_type.parse().unwrap_or(ModelDownloadType::HfLike),
         required_model_name_list: parse_json_field(&row.required_model_name_list_json)?,
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,

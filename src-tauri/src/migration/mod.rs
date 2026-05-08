@@ -8,6 +8,7 @@ use crate::Result;
 
 mod create_local_schema;
 mod m20260508_000002_make_tts_speaker_nullable;
+mod m20260508_000003_add_model_download_type;
 
 const LOCAL_SCHEMA_VERSION: &str = "20";
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(create_local_schema::Migration),
             Box::new(m20260508_000002_make_tts_speaker_nullable::Migration),
+            Box::new(m20260508_000003_add_model_download_type::Migration),
         ]
     }
 }

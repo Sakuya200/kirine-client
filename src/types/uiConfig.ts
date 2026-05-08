@@ -2,7 +2,7 @@ export type UiTaskKind = 'training' | 'tts' | 'voice-clone';
 
 export type UiParamType = 'number' | 'string' | 'boolean';
 
-export type UiComponentType = 'input-number' | 'input-text' | 'textarea' | 'select' | 'switch';
+export type UiComponentType = 'input-number' | 'input-text' | 'textarea' | 'select' | 'switch' | 'input-audio-file' | 'input-text-file';
 
 export interface VisibleWhenRule {
   field: string;

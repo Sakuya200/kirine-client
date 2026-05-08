@@ -248,6 +248,41 @@ impl FromStr for SpeakerSource {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ModelDownloadType {
+    #[serde(rename = "HF-Like")]
+    HfLike,
+    #[serde(rename = "Custom")]
+    Custom,
+}
+
+impl ModelDownloadType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HfLike => "HF-Like",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+impl fmt::Display for ModelDownloadType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ModelDownloadType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "HF-Like" | "hf-like" | "hflike" | "hf_like" => Ok(Self::HfLike),
+            "Custom" | "custom" => Ok(Self::Custom),
+            other => Err(format!("不支持的模型下载类型: {}", other)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelTrainingSampleType {
     Single,
@@ -380,6 +415,7 @@ pub struct ModelInfo {
     pub base_model: BaseModel,
     pub model_name: String,
     pub model_scale: String,
+    pub download_type: ModelDownloadType,
     pub required_model_name_list: Vec<String>,
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,

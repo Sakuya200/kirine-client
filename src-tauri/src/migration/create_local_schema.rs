@@ -160,6 +160,12 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                 .col(ColumnDef::new(ModelInfo::ModelName).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModelScale).string().not_null())
                 .col(
+                    ColumnDef::new(ModelInfo::DownloadType)
+                        .string()
+                        .not_null()
+                        .default("HF-Like"),
+                )
+                .col(
                     ColumnDef::new(ModelInfo::RequiredModelNameListJson)
                         .text()
                         .not_null(),
@@ -661,6 +667,7 @@ enum ModelInfo {
     BaseModel,
     ModelName,
     ModelScale,
+    DownloadType,
     RequiredModelNameListJson,
     RequiredModelRepoIdListJson,
     SupportedFeatureListJson,

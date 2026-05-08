@@ -77,6 +77,8 @@ interface SelectedAudioFile {
   fileName: string;
   filePath: string;
 }
+
+const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_v2pp', 'gpt_sovits_cpufast']);
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
 const uiConfigStore = useUiConfigStore();
@@ -120,10 +122,23 @@ let isActiveTaskRefreshInFlight = false;
 let isHistoryRefreshInFlight = false;
 let skipHistoryTaskSelectionReload = false;
 
+const extractFileName = (filePath: string) => {
+  const segments = filePath.split(/[/\\]/);
+  return segments[segments.length - 1] ?? filePath;
+};
+
 const trimmedRefText = computed(() => form.refText.trim());
 const trimmedText = computed(() => form.text.trim());
-const refTextCharCount = computed(() => trimmedRefText.value.length);
 const charCount = computed(() => trimmedText.value.length);
+const isDynamicReferenceModel = computed(() => DYNAMIC_REFERENCE_BASE_MODELS.has(form.baseModel));
+const dynamicRefAudioPath = computed(() => String(form.modelParams.refAudioPath ?? '').trim());
+const dynamicRefTextPath = computed(() => String(form.modelParams.refTextPath ?? '').trim());
+const effectiveRefAudioPath = computed(() => (isDynamicReferenceModel.value ? dynamicRefAudioPath.value : (form.refAudioFile?.filePath ?? '')));
+const effectiveRefAudioName = computed(() => {
+  const path = effectiveRefAudioPath.value;
+  return path ? extractFileName(path) : '';
+});
+const effectiveReferenceText = computed(() => (isDynamicReferenceModel.value ? dynamicRefTextPath.value : trimmedRefText.value));
 const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.VoiceClone).map(item => ({
     label: item.modelName,
@@ -137,18 +152,18 @@ const canGenerate = computed(
   () =>
     Boolean(form.baseModel) &&
     Boolean(form.modelScale) &&
-    Boolean(form.refAudioFile) &&
-    (!requiresReferenceText.value || Boolean(trimmedRefText.value)) &&
+    Boolean(effectiveRefAudioPath.value) &&
+    (!requiresReferenceText.value || Boolean(effectiveReferenceText.value)) &&
     Boolean(trimmedText.value) &&
     !isGenerating.value
 );
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
-  form.refAudioFile ? `已选择参考音频 ${form.refAudioFile.fileName}。` : '尚未选择参考音频。',
+  effectiveRefAudioName.value ? `已选择参考音频 ${effectiveRefAudioName.value}。` : '尚未选择参考音频。',
   requiresReferenceText.value
-    ? `当前参考台词为必填项，已填写 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`
-    : `当前参考台词为可选项，已填写 ${refTextCharCount.value} 字，目标台词 ${charCount.value} 字。`,
+    ? `当前参考信息为必填项，已填写 ${effectiveReferenceText.value.length} 字，目标台词 ${charCount.value} 字。`
+    : `当前参考信息为可选项，已填写 ${effectiveReferenceText.value.length} 字，目标台词 ${charCount.value} 字。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
 const activeResultMetaText = computed(() => {
@@ -502,7 +517,7 @@ const refreshActiveTaskStatus = async () => {
 };
 
 const createTask = async () => {
-  if (!canGenerate.value || !form.refAudioFile) {
+  if (!canGenerate.value || !effectiveRefAudioPath.value) {
     return;
   }
 
@@ -517,9 +532,9 @@ const createTask = async () => {
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
-        refAudioName: form.refAudioFile.fileName,
-        refAudioPath: form.refAudioFile.filePath,
-        refText: trimmedRefText.value,
+        refAudioName: effectiveRefAudioName.value || 'reference.wav',
+        refAudioPath: effectiveRefAudioPath.value,
+        refText: effectiveReferenceText.value,
         text: trimmedText.value,
         modelParams: form.modelParams
       }
@@ -573,7 +588,7 @@ onBeforeUnmount(() => {
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="languageOptions" />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">
             <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
@@ -584,7 +599,7 @@ onBeforeUnmount(() => {
             />
           </label>
 
-          <label class="block md:col-span-2">
+          <label v-if="!isDynamicReferenceModel" class="block md:col-span-2">
             <span class="mb-1 block text-xs text-stone-500">参考音频</span>
             <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
               <BaseButton tone="ghost" @click="selectReferenceAudio">选择音频</BaseButton>
@@ -637,7 +652,7 @@ onBeforeUnmount(() => {
 
     <PanelCard class="z-20" title="生成参数" subtitle="输入目标台词并配置模型特定参数后生成新的语音音频。">
       <div class="space-y-5 text-sm text-slate-700">
-        <label class="block">
+        <label v-if="!isDynamicReferenceModel" class="block">
           <span class="mb-1 block text-xs text-stone-500">{{ requiresReferenceText ? '参考台词' : '参考台词（当前模式可选）' }}</span>
           <textarea
             v-model="form.refText"
@@ -656,7 +671,10 @@ onBeforeUnmount(() => {
             placeholder="填写要合成为新音频的目标文本"
           />
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-            <span>参考台词 {{ refTextCharCount }} 字，目标台词 {{ charCount }} 字</span>
+            <span
+              >{{ isDynamicReferenceModel ? '参考文本文件路径' : '参考台词' }} {{ effectiveReferenceText.length }} 字，目标台词
+              {{ charCount }} 字</span
+            >
           </div>
         </label>
 

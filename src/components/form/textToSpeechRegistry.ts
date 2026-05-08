@@ -2,35 +2,37 @@ interface TextToSpeechModelRegistryEntry {
   normalizeParams: (modelParams: Record<string, unknown>) => Record<string, unknown>;
 }
 
-const QWEN3_TTS_DEFAULT_PARAMS = {
-  voicePrompt: ''
-} as const;
-
-const VOX_CPM2_TTS_DEFAULT_PARAMS = {
-  cfgValue: '2.0',
-  inferenceTimesteps: 10
-} as const;
-
-const MOSS_TTS_LOCAL_TTS_DEFAULT_PARAMS = {
-  nVqForInference: 32
-} as const;
-
 const normalizeQwen3TtsModelParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
-  ...QWEN3_TTS_DEFAULT_PARAMS,
-  ...modelParams
+  ...modelParams,
+  voicePrompt: String(modelParams.voicePrompt ?? '')
 });
 
 const normalizeVoxCpm2TtsModelParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
-  ...VOX_CPM2_TTS_DEFAULT_PARAMS,
   ...modelParams,
-  cfgValue: String(modelParams.cfgValue ?? VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue).trim() || VOX_CPM2_TTS_DEFAULT_PARAMS.cfgValue,
-  inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? VOX_CPM2_TTS_DEFAULT_PARAMS.inferenceTimesteps)
+  cfgValue: String(modelParams.cfgValue ?? '').trim(),
+  inferenceTimesteps: Number(modelParams.inferenceTimesteps ?? 0)
 });
 
 const normalizeMossTtsLocalTtsModelParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
-  ...MOSS_TTS_LOCAL_TTS_DEFAULT_PARAMS,
   ...modelParams,
-  nVqForInference: Number(modelParams.nVqForInference ?? MOSS_TTS_LOCAL_TTS_DEFAULT_PARAMS.nVqForInference)
+  nVqForInference: Number(modelParams.nVqForInference ?? 0)
+});
+
+const normalizeGptSovitsV2ppTtsModelParams = (modelParams: Record<string, unknown>): Record<string, unknown> => ({
+  ...modelParams,
+  refAudioPath: String(modelParams.refAudioPath ?? ''),
+  refTextPath: String(modelParams.refTextPath ?? ''),
+  promptLang: String(modelParams.promptLang ?? ''),
+  topK: Number(modelParams.topK ?? 0),
+  topP: String(modelParams.topP ?? '').trim(),
+  temperature: String(modelParams.temperature ?? '').trim(),
+  speedFactor: String(modelParams.speedFactor ?? '').trim(),
+  textSplitMethod: String(modelParams.textSplitMethod ?? ''),
+  batchSize: Number(modelParams.batchSize ?? 0),
+  splitBucket: Boolean(modelParams.splitBucket),
+  fragmentInterval: String(modelParams.fragmentInterval ?? '').trim(),
+  parallelInfer: Boolean(modelParams.parallelInfer),
+  seed: Number(modelParams.seed ?? 0)
 });
 
 const defaultEntry: TextToSpeechModelRegistryEntry = {
@@ -44,6 +46,12 @@ const TEXT_TO_SPEECH_MODEL_REGISTRY: Record<string, TextToSpeechModelRegistryEnt
   },
   moss_tts_local: {
     normalizeParams: normalizeMossTtsLocalTtsModelParams
+  },
+  gpt_sovits_v2pp: {
+    normalizeParams: normalizeGptSovitsV2ppTtsModelParams
+  },
+  gpt_sovits_cpufast: {
+    normalizeParams: normalizeGptSovitsV2ppTtsModelParams
   }
 };
 
