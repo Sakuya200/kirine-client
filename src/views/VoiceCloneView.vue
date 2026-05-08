@@ -14,7 +14,6 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
-import { getVoiceCloneModelRegistryEntry } from '@/components/form/voiceCloneRegistry';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
@@ -85,7 +84,7 @@ const uiConfigStore = useUiConfigStore();
 
 const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
   const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'voice-clone');
-  return getVoiceCloneModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+  return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
 const uiStore = useUiStore();
@@ -147,24 +146,25 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'voice-clone'));
-const requiresReferenceText = computed(() => getVoiceCloneModelRegistryEntry(form.baseModel).requiresReferenceText(form.modelParams));
-const canGenerate = computed(
-  () =>
+const requiresReferenceText = computed(() => true);
+const canGenerate = computed(() => {
+  const modelParamsValid = activeVoiceCloneTaskConfig.value
+    ? uiConfigStore.validateModelParams(form.baseModel, 'voice-clone', form.modelParams)
+    : true;
+
+  return (
     Boolean(form.baseModel) &&
     Boolean(form.modelScale) &&
     Boolean(effectiveRefAudioPath.value) &&
     (!requiresReferenceText.value || Boolean(effectiveReferenceText.value)) &&
-    Boolean(trimmedText.value) &&
-    !isGenerating.value
-);
+    modelParamsValid
+  );
+});
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
-  effectiveRefAudioName.value ? `已选择参考音频 ${effectiveRefAudioName.value}。` : '尚未选择参考音频。',
-  requiresReferenceText.value
-    ? `当前参考信息为必填项，已填写 ${effectiveReferenceText.value.length} 字，目标台词 ${charCount.value} 字。`
-    : `当前参考信息为可选项，已填写 ${effectiveReferenceText.value.length} 字，目标台词 ${charCount.value} 字。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
+  `导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -653,12 +653,12 @@ onBeforeUnmount(() => {
     <PanelCard class="z-20" title="生成参数" subtitle="输入目标台词并配置模型特定参数后生成新的语音音频。">
       <div class="space-y-5 text-sm text-slate-700">
         <label v-if="!isDynamicReferenceModel" class="block">
-          <span class="mb-1 block text-xs text-stone-500">{{ requiresReferenceText ? '参考台词' : '参考台词（当前模式可选）' }}</span>
+          <span class="mb-1 block text-xs text-stone-500">参考台词</span>
           <textarea
             v-model="form.refText"
             rows="4"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            :placeholder="requiresReferenceText ? '填写参考音频中实际说出的文本' : '当前模型参考音频文本可留空'"
+            placeholder="填写参考音频中实际说出的文本"
           />
         </label>
 

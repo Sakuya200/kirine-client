@@ -14,7 +14,6 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
-import { getTextToSpeechModelRegistryEntry } from '@/components/form/textToSpeechRegistry';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
@@ -86,7 +85,7 @@ const uiConfigStore = useUiConfigStore();
 
 const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
   const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'tts');
-  return getTextToSpeechModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+  return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
 const form = reactive({
@@ -150,14 +149,18 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
 ]);
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const canGenerate = computed(
-  () =>
+const canGenerate = computed(() => {
+  const modelParamsValid = activeTextToSpeechTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'tts', form.modelParams) : true;
+
+  return (
     Boolean(form.language) &&
     charCount.value > 0 &&
+    modelParamsValid &&
     !isGenerating.value &&
     !!form.modelScale &&
     (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
-);
+  );
+});
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,

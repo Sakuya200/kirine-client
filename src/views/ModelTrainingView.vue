@@ -22,7 +22,6 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
-import { getTrainingModelRegistryEntry } from '@/components/form/modelTrainingRegistry';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import { AppLanguage } from '@/enums/language';
 import {
@@ -79,7 +78,7 @@ const uiConfigStore = useUiConfigStore();
 
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
   const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'training');
-  return getTrainingModelRegistryEntry(baseModel).normalizeParams(mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams));
+  return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
 const form = reactive({
@@ -137,6 +136,9 @@ const canStartTraining = computed(() => {
   const batchSize = Number(form.modelParams.batchSize ?? 0);
   const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
 
+  // 判断模型特有参数是否正确填写
+  const modelParamsValid = activeTrainingTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'training', form.modelParams) : true;
+
   return (
     form.modelName.trim().length > 0 &&
     form.description.trim().length > 0 &&
@@ -144,6 +146,7 @@ const canStartTraining = computed(() => {
     epochCount > 0 &&
     batchSize > 0 &&
     gradientAccumulationSteps > 0 &&
+    modelParamsValid &&
     !isStarting.value &&
     !!form.modelScale
   );

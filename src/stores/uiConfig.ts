@@ -151,12 +151,48 @@ export const useUiConfigStore = defineStore('ui-config', () => {
 
   const getTaskConfig = (baseModel: string, task: UiTaskKind) => taskConfigMap.value.get(`${baseModel}:${task}`) ?? null;
 
+  const validateModelParams = (baseModel: string, task: UiTaskKind, modelParams: Record<string, unknown>): boolean => {
+    const taskConfig = getTaskConfig(baseModel, task);
+    if (!taskConfig) {
+      return false;
+    }
+    const paramDefinitionsMap = new Map<string, ParamDefinition>(taskConfig.params.map(param => [param.name, param]));
+    for (const [key, value] of Object.entries(modelParams)) {
+      const paramDefinition = paramDefinitionsMap.get(key);
+      if (!paramDefinition || !paramDefinition.required) {
+        continue;
+      }
+
+      switch (paramDefinition.paramType) {
+        case 'number':
+          if (typeof value !== 'number') {
+            return false;
+          }
+          break;
+        case 'string':
+          if (typeof value !== 'string' || value.trim() === '') {
+            return false;
+          }
+          break;
+        case 'boolean':
+          if (typeof value !== 'boolean') {
+            return false;
+          }
+          break;
+        default:
+          return false;
+      }
+    }
+    return true;
+  };
+
   return {
     catalog,
     initialized,
     isLoading,
     loadCatalog,
     ensureLoaded,
-    getTaskConfig
+    getTaskConfig,
+    validateModelParams
   };
 });
