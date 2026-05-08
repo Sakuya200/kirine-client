@@ -886,15 +886,6 @@ onBeforeUnmount(() => {
                 <span>重置表单</span>
               </BaseButton>
             </div>
-
-            <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
-              <p>当前活动任务</p>
-              <p class="mt-1">
-                任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
-                {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
-              </p>
-              <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
-            </div>
           </div>
         </div>
       </div>

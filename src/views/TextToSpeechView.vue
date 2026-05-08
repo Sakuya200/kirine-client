@@ -680,15 +680,6 @@ onMounted(async () => {
                 <span>清空文本</span>
               </BaseButton>
             </div>
-
-            <div v-if="activeResult" class="mt-4 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
-              <p>当前活动任务</p>
-              <p class="mt-1">任务 {{ activeResult.taskId }}，状态 {{ activeResult.status }}，说话人 {{ activeResult.speakerLabel }}。</p>
-              <p class="mt-1">
-                模型 {{ modelStore.getModelLabel(activeResult.baseModel) }} {{ activeResult.modelScale }}，输出 {{ activeResult.formatLabel }}。
-              </p>
-              <p class="mt-1">创建时间 {{ activeResult.createdAt }}。</p>
-            </div>
           </div>
         </div>
       </div>
