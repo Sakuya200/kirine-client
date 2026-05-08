@@ -208,7 +208,6 @@ impl LocalService {
         &self,
         base_model: BaseModel,
         task_id: i64,
-        speaker_id: i64,
     ) -> Result<()> {
         let service = self.clone();
         let pipeline = resolve_model_task_pipeline(&base_model)?;
@@ -218,10 +217,7 @@ impl LocalService {
                 .run_tts_pipeline(
                     base_model.to_string(),
                     &service,
-                    TtsPipelineRequest {
-                        task_id,
-                        speaker_id,
-                    },
+                    TtsPipelineRequest { task_id },
                 )
                 .await
             {

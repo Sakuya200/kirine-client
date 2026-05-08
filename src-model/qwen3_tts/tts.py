@@ -49,10 +49,21 @@ def normalize_speaker_name(speaker_name: str) -> str:
     return normalized.casefold()
 
 
+def resolve_model_config_path(model_path: str) -> Path:
+    candidate_root = Path(model_path).expanduser().resolve()
+    direct_config_path = candidate_root / "config.json"
+    if direct_config_path.exists():
+        return direct_config_path
+
+    parent_config_path = candidate_root.parent / "config.json"
+    if candidate_root.name.startswith("checkpoint-epoch-") and parent_config_path.exists():
+        return parent_config_path
+
+    raise FileNotFoundError(f"config.json not found under model path: {direct_config_path}")
+
+
 def load_speaker_mapping(model_path: str) -> dict[str, object]:
-    config_path = Path(model_path).expanduser().resolve() / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"config.json not found under model path: {config_path}")
+    config_path = resolve_model_config_path(model_path)
 
     with config_path.open("r", encoding="utf-8") as file:
         config = json.load(file)

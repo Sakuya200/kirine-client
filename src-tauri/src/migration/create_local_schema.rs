@@ -207,7 +207,7 @@ async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                         .primary_key(),
                 )
                 .col(ColumnDef::new(TtsTasks::HistoryId).integer().not_null())
-                .col(ColumnDef::new(TtsTasks::SpeakerId).integer().not_null())
+                .col(ColumnDef::new(TtsTasks::SpeakerId).integer())
                 .col(ColumnDef::new(TtsTasks::ModelPath).text())
                 .col(ColumnDef::new(TtsTasks::BaseModel).string().not_null())
                 .col(ColumnDef::new(TtsTasks::ModelScale).string().not_null())

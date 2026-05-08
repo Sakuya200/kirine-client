@@ -66,6 +66,8 @@ def _resolve_locator_candidate(
     leaf_name = default_leaf_name
     if prefer_speaker_dir_name and common.speaker_dir_name:
         leaf_name = common.speaker_dir_name
+        if leaf_name.strip().casefold() == "base-models":
+            leaf_name = default_leaf_name
     if leaf_name is None:
         return None
 

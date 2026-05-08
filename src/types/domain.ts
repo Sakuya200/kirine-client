@@ -62,7 +62,7 @@ export interface ModelTrainingSampleDetail {
 }
 
 export interface TextToSpeechTaskDetail {
-  speakerId: number;
+  speakerId: number | null;
   baseModel: BaseModel;
   modelScale: string;
   language: AppLanguage;

@@ -44,7 +44,6 @@ pub(crate) struct TrainingPipelineRequest {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TtsPipelineRequest {
     pub task_id: i64,
-    pub speaker_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]

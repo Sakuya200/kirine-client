@@ -125,6 +125,8 @@ def _resolve_locator_candidate(
     leaf_name = default_leaf_name
     if prefer_speaker_dir_name and common.speaker_dir_name:
         leaf_name = common.speaker_dir_name
+        if leaf_name.strip().casefold() == "base-models":
+            leaf_name = default_leaf_name
     return str((root_path / leaf_name).resolve())
 
 
@@ -139,8 +141,12 @@ def _resolve_moss_inference_root(common: CommonTaskArgs) -> Path:
         raise ValueError("MOSS params payload is missing a resolvable inference model path")
 
     root_path = Path(common.model_root_path).expanduser().resolve()
-    if common.speaker_dir_name:
-        speaker_root = (root_path / common.speaker_dir_name).resolve()
+    speaker_dir_name = common.speaker_dir_name
+    if speaker_dir_name and speaker_dir_name.strip().casefold() == "base-models":
+        speaker_dir_name = None
+
+    if speaker_dir_name:
+        speaker_root = (root_path / speaker_dir_name).resolve()
         bundled_root = (speaker_root / MOSS_MODEL_NAME).resolve()
         if bundled_root.is_dir():
             return bundled_root

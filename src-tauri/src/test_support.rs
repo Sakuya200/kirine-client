@@ -115,7 +115,7 @@ impl LocalServiceHarness {
 
         self.service
             .create_text_to_speech_task(CreateTextToSpeechTaskPayload {
-                speaker_id: speaker.id,
+                speaker_id: Some(speaker.id),
                 base_model: "vox_cpm2".to_string(),
                 model_scale: "2B".to_string(),
                 language: AppLanguage::Chinese,

@@ -37,7 +37,7 @@ import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParam
 interface TtsResult {
   taskId: number;
   fileName: string;
-  speakerId: number;
+  speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
   modelScale: string;
@@ -57,7 +57,7 @@ interface TtsResult {
 interface TextToSpeechTaskResultPayload {
   taskId: number;
   fileName: string;
-  speakerId: number;
+  speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
   modelScale: string;
@@ -128,20 +128,23 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
-const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
-  speakerStore.speakers
+const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
+  {
+    value: null,
+    label: '自动选择',
+    description: '不指定说话人，后端会按当前模型使用默认推理说话人或模型内默认配置。'
+  },
+  ...speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
     .map(speaker => ({
       value: speaker.id,
       label: speaker.name,
       description: speaker.description || '该说话人暂无备注。'
     }))
-);
+]);
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const canGenerate = computed(
-  () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
-);
+const canGenerate = computed(() => Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale);
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
   `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
@@ -213,8 +216,8 @@ watch(
       return;
     }
 
-    const matched = options.find(option => option.value === form.speakerId) ?? options[0];
-    form.speakerId = typeof matched.value === 'number' ? matched.value : Number(matched.value);
+    const matched = options.find(option => option.value === form.speakerId) ?? options[0] ?? null;
+    form.speakerId = typeof matched?.value === 'number' ? matched.value : null;
     selectedSpeakerOption.value = matched;
   },
   { immediate: true }
@@ -483,7 +486,7 @@ const generateAudio = async () => {
   try {
     const payload = await invoke<TextToSpeechTaskResultPayload>('create_text_to_speech_task', {
       payload: {
-        speakerId: form.speakerId ?? 0,
+        speakerId: form.speakerId,
         baseModel: form.baseModel,
         modelScale: form.modelScale,
         language: form.language,
@@ -566,7 +569,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="文本转语音" description="选择说话人和模型，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
+    <PageHeader title="文本转语音" description="选择模型，可选说话人，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
@@ -578,7 +581,7 @@ onMounted(async () => {
             v-model:selected-option="selectedSpeakerOption"
             label="说话人"
             :options="speakerOptions"
-            :placeholder="speakerOptions.length > 0 ? '请选择说话人' : '暂无可用说话人'"
+            placeholder="可选，不指定时自动选择"
           />
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />

@@ -8,8 +8,6 @@ use anyhow::{Context, Result};
 use crate::config::{load_configs, resolve_base_log_dir};
 
 const DATA_DIR_PATH_PLACEHOLDER: &str = "%DATA_DIR_PATH%";
-const MODEL_DIR_PATH_PLACEHOLDER: &str = "%MODEL_DIR_PATH%";
-const SRC_MODEL_ROOT_PATH_PLACEHOLDER: &str = "%SRC_MODEL_ROOT_PATH%";
 
 pub(crate) fn resolve_local_log_dir() -> Result<PathBuf> {
     let config =
@@ -39,37 +37,6 @@ pub(crate) fn resolve_task_path(data_dir: &Path, value: &str) -> PathBuf {
     }
     resolve_placeholder_path(trimmed, DATA_DIR_PATH_PLACEHOLDER, data_dir)
         .unwrap_or_else(|| PathBuf::from(trimmed))
-}
-
-pub(crate) fn serialize_runtime_model_path(
-    model_dir: &Path,
-    src_model_root: &Path,
-    path: &Path,
-) -> String {
-    serialize_path_with_placeholder(path, model_dir, MODEL_DIR_PATH_PLACEHOLDER)
-        .or_else(|| {
-            serialize_path_with_placeholder(path, src_model_root, SRC_MODEL_ROOT_PATH_PLACEHOLDER)
-        })
-        .unwrap_or_else(|| normalize_path_string(path))
-}
-
-pub(crate) fn resolve_runtime_model_path(
-    model_dir: &Path,
-    src_model_root: &Path,
-    value: &str,
-) -> Result<PathBuf> {
-    let trimmed = value.trim();
-    let resolved = if trimmed.contains(MODEL_DIR_PATH_PLACEHOLDER) {
-        resolve_placeholder_path(trimmed, MODEL_DIR_PATH_PLACEHOLDER, model_dir)
-            .unwrap_or_else(|| PathBuf::from(trimmed))
-    } else if trimmed.contains(SRC_MODEL_ROOT_PATH_PLACEHOLDER) {
-        resolve_placeholder_path(trimmed, SRC_MODEL_ROOT_PATH_PLACEHOLDER, src_model_root)
-            .unwrap_or_else(|| PathBuf::from(trimmed))
-    } else {
-        PathBuf::from(trimmed)
-    };
-
-    Ok(resolved)
 }
 
 fn serialize_path_with_placeholder(path: &Path, root: &Path, placeholder: &str) -> Option<String> {
@@ -111,87 +78,4 @@ fn normalize_relative_path(path: &Path) -> String {
 
 fn normalize_path_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{resolve_runtime_model_path, serialize_runtime_model_path};
-    use std::path::Path;
-
-    #[test]
-    fn serialize_runtime_model_path_prefers_model_dir_placeholder() {
-        let model_dir = Path::new("D:/models");
-        let src_model_root = Path::new("D:/workspace/src-model");
-        let path = Path::new("D:/models/42_speaker/checkpoint-epoch-9");
-
-        let value = serialize_runtime_model_path(model_dir, src_model_root, path);
-
-        assert_eq!(value, "%MODEL_DIR_PATH%/42_speaker/checkpoint-epoch-9");
-    }
-
-    #[test]
-    fn serialize_runtime_model_path_supports_src_model_root_placeholder() {
-        let model_dir = Path::new("D:/models");
-        let src_model_root = Path::new("D:/workspace/src-model");
-        let path = Path::new("D:/workspace/src-model/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice");
-
-        let value = serialize_runtime_model_path(model_dir, src_model_root, path);
-
-        assert_eq!(
-            value,
-            "%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice"
-        );
-    }
-
-    #[test]
-    fn resolve_runtime_model_path_supports_src_model_root_placeholder() {
-        let model_dir = Path::new("D:/models");
-        let src_model_root = Path::new("D:/workspace/src-model");
-
-        let path = resolve_runtime_model_path(
-            model_dir,
-            src_model_root,
-            "%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-        )
-        .expect("resolve runtime model path");
-
-        assert_eq!(
-            path,
-            Path::new("D:/workspace/src-model/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice")
-        );
-    }
-
-    #[test]
-    fn resolve_runtime_model_path_keeps_missing_directory_uncreated() {
-        let unique = format!(
-            "kirine-runtime-model-path-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time before unix epoch")
-                .as_nanos()
-        );
-        let root = std::env::temp_dir().join(unique);
-        let model_dir = root.join("models");
-        let src_model_root = root.join("src-model");
-
-        std::fs::create_dir_all(&model_dir).expect("create model dir");
-        std::fs::create_dir_all(&src_model_root).expect("create src-model dir");
-
-        let resolved = resolve_runtime_model_path(
-            &model_dir,
-            &src_model_root,
-            "%SRC_MODEL_ROOT_PATH%/base-models/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-        )
-        .expect("resolve runtime model path");
-
-        assert!(!resolved.exists());
-        assert_eq!(
-            resolved,
-            src_model_root
-                .join("base-models")
-                .join("Qwen3-TTS-12Hz-1.7B-CustomVoice")
-        );
-
-        std::fs::remove_dir_all(&root).expect("remove temp root dir");
-    }
 }

@@ -399,7 +399,7 @@ pub struct ModelMutationResult {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TextToSpeechTaskDetail {
-    pub speaker_id: i64,
+    pub speaker_id: Option<i64>,
     pub base_model: BaseModel,
     pub model_scale: String,
     pub language: AppLanguage,
@@ -462,7 +462,7 @@ pub struct HistoryRecord {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {
-    pub speaker_id: i64,
+    pub speaker_id: Option<i64>,
     pub base_model: BaseModel,
     pub model_scale: String,
     pub language: AppLanguage,
@@ -477,7 +477,7 @@ pub struct CreateTextToSpeechTaskPayload {
 pub struct TextToSpeechTaskResult {
     pub task_id: i64,
     pub file_name: String,
-    pub speaker_id: i64,
+    pub speaker_id: Option<i64>,
     pub speaker_label: String,
     pub base_model: BaseModel,
     pub model_scale: String,

@@ -7,7 +7,7 @@ use sea_orm::{
 
 use crate::{
     common::{
-        local_paths::{ensure_child_dir, serialize_runtime_model_path, serialize_task_path},
+        local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
     service::{
@@ -16,12 +16,8 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerSource, SpeakerStatus,
-            TaskStatus, TextToSpeechTaskResult,
-        },
-        pipeline::{
-            model_paths::{preset_model_root_path, speaker_model_dir},
-            script_paths::resolve_src_model_root,
+            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
+            TextToSpeechTaskResult,
         },
         LocalService,
     },
@@ -38,40 +34,40 @@ impl LocalService {
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
-        let src_model_root = resolve_src_model_root(self.app_dir())?;
         let model_scale = payload.model_scale.trim().to_string();
-        let speaker = speaker_entity::Entity::find_by_id(speaker_id)
-            .filter(speaker_entity::Column::Deleted.eq(0))
-            .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
-            .filter(speaker_entity::Column::BaseModel.eq(base_model.as_str()))
-            .one(&txn)
-            .await?;
-        let speaker = speaker.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "未找到与当前基础模型匹配的可用说话人",
-            )
-        })?;
-        let speaker_label = speaker.name.clone();
-        let model_root_path = if speaker.source == SpeakerSource::Preset.as_str() {
-            preset_model_root_path(&src_model_root, &base_model, &model_scale)?
+        let speaker_label = if let Some(speaker_id) = speaker_id {
+            let speaker = speaker_entity::Entity::find_by_id(speaker_id)
+                .filter(speaker_entity::Column::Deleted.eq(0))
+                .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
+                .filter(speaker_entity::Column::BaseModel.eq(base_model.as_str()))
+                .one(&txn)
+                .await?;
+            let speaker = speaker.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "未找到与当前基础模型匹配的可用说话人",
+                )
+            })?;
+            speaker.name.clone()
         } else {
-            speaker_model_dir(Path::new(self.model_dir()), speaker_id)
+            "自动选择".to_string()
         };
-        let task_speaker_id = speaker_id;
-        let history_speaker_id = Some(speaker_id);
         let text = payload.text.trim().to_string();
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
         let model_params = payload.model_params.clone();
         let char_count = text.chars().count();
-        let title = super::build_task_title("文本转语音", Some(&speaker_label), &create_time);
+        let title = if speaker_id.is_some() {
+            super::build_task_title("文本转语音", Some(&speaker_label), &create_time)
+        } else {
+            super::build_task_title("文本转语音", None, &create_time)
+        };
         let output_dir = ensure_child_dir(Path::new(self.data_dir()), "generated")?;
 
         let task_history = task_history_entity::ActiveModel {
             id: NotSet,
             task_type: Set(HistoryTaskType::TextToSpeech.as_str().to_string()),
             title: Set(title),
-            speaker_id: Set(history_speaker_id),
+            speaker_id: Set(speaker_id),
             speaker_name_snapshot: Set(speaker_label.clone()),
             status: Set(TaskStatus::Pending.as_str().to_string()),
             duration_seconds: Set(0),
@@ -92,17 +88,12 @@ impl LocalService {
         let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
-        let serialized_model_path = serialize_runtime_model_path(
-            Path::new(self.model_dir()),
-            &src_model_root,
-            &model_root_path,
-        );
 
         tts_task_entity::Entity::insert(tts_task_entity::ActiveModel {
             id: NotSet,
             history_id: Set(task_id),
-            speaker_id: Set(task_speaker_id),
-            model_path: Set(Some(serialized_model_path)),
+            speaker_id: Set(speaker_id),
+            model_path: Set(None),
             base_model: Set(base_model.clone()),
             model_scale: Set(model_scale.clone()),
             language: Set(payload.language.as_str().to_string()),
@@ -121,12 +112,12 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
-        self.start_tts_inference(base_model.clone(), task_id, speaker_id)?;
+        self.start_tts_inference(base_model.clone(), task_id)?;
 
         Ok(TextToSpeechTaskResult {
             task_id,
             file_name,
-            speaker_id: task_speaker_id,
+            speaker_id,
             speaker_label,
             base_model,
             model_scale,

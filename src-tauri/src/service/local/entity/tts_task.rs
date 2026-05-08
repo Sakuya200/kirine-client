@@ -6,7 +6,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub history_id: i64,
-    pub speaker_id: i64,
+    pub speaker_id: Option<i64>,
     pub model_path: Option<String>,
     pub base_model: String,
     pub model_scale: String,
