@@ -11,7 +11,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 	parser.add_argument("--gpt_model", required=True)
 	parser.add_argument("--sovits_model", required=True)
 	parser.add_argument("--ref_audio", required=True)
-	parser.add_argument("--ref_text", required=True)
+	parser.add_argument("--ref_text", default="")
 	parser.add_argument("--prompt_language", required=True)
 	parser.add_argument("--target_text", required=True)
 	parser.add_argument("--target_language", required=True)
@@ -45,6 +45,8 @@ def ensure_cpufast_root_on_path() -> Path:
 
 
 def read_text_file(path: str) -> str:
+	if not path or not path.strip():
+		return ""
 	return Path(path).expanduser().resolve().read_text(encoding="utf-8").strip()
 
 
@@ -70,8 +72,6 @@ def synthesize(args: argparse.Namespace) -> None:
 
 	prompt_text = read_text_file(args.ref_text)
 	target_text = read_text_file(args.target_text)
-	if not prompt_text:
-		raise ValueError("Reference text cannot be empty.")
 	if not target_text:
 		raise ValueError("Target text cannot be empty.")
 
