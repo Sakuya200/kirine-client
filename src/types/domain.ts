@@ -30,7 +30,7 @@ export interface HistoryRecordBase {
   durationSeconds: number;
   createTime: string;
   modifyTime: string;
-  errorMessage?: string | null;
+  taskLog?: string | null;
 }
 
 export interface ModelTrainingTaskDetail {

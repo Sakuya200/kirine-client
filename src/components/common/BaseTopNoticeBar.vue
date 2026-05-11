@@ -35,6 +35,8 @@ const iconMap: Record<'success' | 'error' | 'info' | 'warning', Component> = {
       :key="notice.id"
       class="pointer-events-auto w-fit max-w-full overflow-hidden rounded-2xl border backdrop-blur"
       :class="toneClassMap[notice.tone]"
+      @mouseenter="uiStore.pauseNotice(notice.id)"
+      @mouseleave="uiStore.resumeNotice(notice.id)"
     >
       <div class="flex items-center gap-3 px-4 py-3 md:px-5">
         <div class="shrink-0 rounded-xl p-2" :class="iconClassMap[notice.tone]">

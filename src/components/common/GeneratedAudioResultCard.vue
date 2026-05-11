@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
 import { EyeIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, useSlots } from 'vue';
 
@@ -10,9 +9,6 @@ import PanelCard from '@/components/common/PanelCard.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { TaskStatus } from '@/enums/status';
-import { formatErrorMessage } from '@/hooks/useErrorMessage';
-import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
 
 interface AudioAssetPayload {
   fileName: string;
@@ -42,11 +38,11 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const slots = useSlots();
-const uiStore = useUiStore();
-const detailRecord = ref<HistoryRecord | null>(null);
+const detailRecordId = ref<number | null>(null);
+const detailReloadToken = ref(0);
 const isDetailLoading = ref(false);
 
-const canViewDetail = computed(() => props.result?.status === TaskStatus.Failed);
+const canViewDetail = computed(() => Boolean(props.result));
 const hasActionsSlot = computed(() => Boolean(slots.actions));
 
 const openDetail = async () => {
@@ -55,34 +51,21 @@ const openDetail = async () => {
   }
 
   isDetailLoading.value = true;
-
-  try {
-    detailRecord.value = await invoke<HistoryRecord>('get_history_record', {
-      historyId: props.result.taskId
-    });
-  } catch (error) {
-    uiStore.notifyError(formatErrorMessage('读取任务详情失败，请检查历史记录是否仍然存在', error));
-  } finally {
-    isDetailLoading.value = false;
-  }
+  detailRecordId.value = props.result.taskId;
+  detailReloadToken.value += 1;
+  isDetailLoading.value = false;
 };
 
 const closeDetail = () => {
-  detailRecord.value = null;
+  detailRecordId.value = null;
 };
 
 const refreshDetailRecord = async () => {
-  if (!detailRecord.value) {
+  if (detailRecordId.value === null) {
     return;
   }
 
-  try {
-    detailRecord.value = await invoke<HistoryRecord>('get_history_record', {
-      historyId: detailRecord.value.id
-    });
-  } catch (error) {
-    uiStore.notifyError(formatErrorMessage('刷新任务详情失败，请检查历史记录是否仍然存在', error));
-  }
+  detailReloadToken.value += 1;
 };
 
 defineExpose({
@@ -133,6 +116,6 @@ defineExpose({
       {{ emptyText }}
     </div>
 
-    <HistoryTaskDetailDialog :open="detailRecord !== null" :record="detailRecord" @close="closeDetail" />
+    <HistoryTaskDetailDialog :open="detailRecordId !== null" :record-id="detailRecordId" :reload-token="detailReloadToken" @close="closeDetail" />
   </PanelCard>
 </template>

@@ -459,8 +459,8 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
             r#"
             INSERT INTO task_history (
                 id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, error_message, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, create_time, modify_time, finished_time, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(history_id)
@@ -472,7 +472,6 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
         .bind(0_i64)
         .bind("2026-04-01 10:00:00")
         .bind("2026-04-01 10:00:00")
-        .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .bind(0_i64)
         .execute(&pool)
@@ -616,7 +615,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             create_time TEXT NOT NULL,
             modify_time TEXT NOT NULL,
             finished_time TEXT,
-            error_message TEXT,
             deleted INTEGER NOT NULL DEFAULT 0
         )
         "#,
@@ -784,8 +782,8 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             r#"
             INSERT INTO task_history (
                 id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, error_message, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, create_time, modify_time, finished_time, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(history_id)
@@ -797,7 +795,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
         .bind(0_i64)
         .bind("2026-04-01 10:00:00")
         .bind("2026-04-01 10:00:00")
-        .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .bind(0_i64)
         .execute(&pool)

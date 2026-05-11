@@ -22,8 +22,20 @@ const normalizeErrorDetail = (error: unknown) => {
   return String(error);
 };
 
+const MAX_ERROR_MESSAGE_CHARS = 280;
+
+const truncateErrorMessage = (value: string) => {
+  const trimmed = value.trim();
+
+  if (trimmed.length <= MAX_ERROR_MESSAGE_CHARS) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_ERROR_MESSAGE_CHARS)}...`;
+};
+
 export const formatErrorMessage = (description: string, error: unknown) => {
-  const detail = normalizeErrorDetail(error);
+  const detail = truncateErrorMessage(normalizeErrorDetail(error));
 
   return detail ? `${description}：${detail}` : description;
 };

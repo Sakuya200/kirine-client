@@ -73,7 +73,6 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
-            error_message: Set(None),
             deleted: Set(0),
         }
         .insert(&txn)

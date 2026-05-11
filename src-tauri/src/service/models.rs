@@ -405,7 +405,6 @@ pub struct UpdateTaskStatusPayload {
     pub task_id: i64,
     pub status: TaskStatus,
     pub duration_seconds: Option<i64>,
-    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -491,7 +490,7 @@ pub struct HistoryRecord {
     pub duration_seconds: i64,
     pub create_time: String,
     pub modify_time: String,
-    pub error_message: Option<String>,
+    pub task_log: Option<String>,
     pub detail: serde_json::Value,
 }
 

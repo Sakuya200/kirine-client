@@ -131,7 +131,6 @@ async fn create_task_history_node(manager: &SchemaManager<'_>) -> Result<(), DbE
                 .col(ColumnDef::new(TaskHistory::CreateTime).string().not_null())
                 .col(ColumnDef::new(TaskHistory::ModifyTime).string().not_null())
                 .col(ColumnDef::new(TaskHistory::FinishedTime).string())
-                .col(ColumnDef::new(TaskHistory::ErrorMessage).text())
                 .col(
                     ColumnDef::new(TaskHistory::Deleted)
                         .integer()
@@ -656,7 +655,6 @@ enum TaskHistory {
     CreateTime,
     ModifyTime,
     FinishedTime,
-    ErrorMessage,
     Deleted,
 }
 

@@ -14,7 +14,6 @@ pub struct Model {
     pub create_time: String,
     pub modify_time: String,
     pub finished_time: Option<String>,
-    pub error_message: Option<String>,
     pub deleted: i32,
 }
 

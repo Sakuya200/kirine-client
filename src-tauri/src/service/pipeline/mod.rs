@@ -28,7 +28,8 @@ use crate::{
 };
 
 use self::{
-    api::PythonScriptInvocationSpec, pipeline::CommonModelTaskPipeline, script_paths::ScriptPlatform,
+    api::PythonScriptInvocationSpec, pipeline::CommonModelTaskPipeline,
+    script_paths::ScriptPlatform,
 };
 
 static COMMON_TASK_PIPELINE: CommonModelTaskPipeline = CommonModelTaskPipeline::new();

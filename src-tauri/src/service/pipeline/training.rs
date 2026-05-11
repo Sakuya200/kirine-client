@@ -314,15 +314,8 @@ pub(crate) async fn run_common_training_pipeline(
         }
         Err(err) => {
             let duration_seconds = started_at.elapsed().as_secs() as i64;
-            let error_message = err.to_string();
-            if let Err(update_err) = mark_training_failed_state(
-                service,
-                task_id,
-                speaker_id,
-                duration_seconds,
-                &error_message,
-            )
-            .await
+            if let Err(update_err) =
+                mark_training_failed_state(service, task_id, speaker_id, duration_seconds).await
             {
                 error!(
                     error = %update_err,
@@ -882,7 +875,6 @@ pub(crate) async fn mark_training_running_state(
             task_id,
             status: TaskStatus::Running,
             duration_seconds: None,
-            error_message: None,
         })
         .await?;
     update_training_speaker_status(service, speaker_id, SpeakerStatus::Training).await
@@ -899,7 +891,6 @@ pub(crate) async fn mark_training_completed_state(
             task_id,
             status: TaskStatus::Completed,
             duration_seconds: Some(duration_seconds),
-            error_message: None,
         })
         .await?;
     update_training_speaker_status(service, speaker_id, SpeakerStatus::Ready).await
@@ -916,7 +907,6 @@ pub(crate) async fn mark_training_cancelled_state(
             task_id,
             status: TaskStatus::Cancelled,
             duration_seconds: Some(duration_seconds),
-            error_message: Some("模型训练任务已由用户终止。".to_string()),
         })
         .await?;
     let _ = delete_failed_training_speaker(service, speaker_id).await?;
@@ -928,14 +918,12 @@ pub(crate) async fn mark_training_failed_state(
     task_id: i64,
     speaker_id: i64,
     duration_seconds: i64,
-    error_message: &str,
 ) -> Result<()> {
     service
         .update_task_status_impl(UpdateTaskStatusPayload {
             task_id,
             status: TaskStatus::Failed,
             duration_seconds: Some(duration_seconds),
-            error_message: Some(error_message.trim().to_string()),
         })
         .await?;
     let _ = delete_failed_training_speaker(service, speaker_id).await?;

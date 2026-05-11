@@ -224,10 +224,7 @@ pub(crate) async fn run_common_tts_pipeline(
 
     if let Err(err) = result {
         let duration_seconds = started_at.elapsed().as_secs() as i64;
-        let error_message = err.to_string();
-        if let Err(update_err) =
-            mark_tts_failed_state(service, task_id, duration_seconds, &error_message).await
-        {
+        if let Err(update_err) = mark_tts_failed_state(service, task_id, duration_seconds).await {
             error!(
                 error = %update_err,
                 task_id,
@@ -350,7 +347,6 @@ pub(crate) async fn mark_tts_running_state(service: &LocalService, task_id: i64)
             task_id,
             status: TaskStatus::Running,
             duration_seconds: None,
-            error_message: None,
         })
         .await?;
     Ok(())
@@ -366,7 +362,6 @@ pub(crate) async fn mark_tts_completed_state(
             task_id,
             status: TaskStatus::Completed,
             duration_seconds: Some(duration_seconds),
-            error_message: None,
         })
         .await?;
     Ok(())
@@ -376,14 +371,12 @@ pub(crate) async fn mark_tts_failed_state(
     service: &LocalService,
     task_id: i64,
     duration_seconds: i64,
-    error_message: &str,
 ) -> Result<()> {
     service
         .update_task_status_impl(UpdateTaskStatusPayload {
             task_id,
             status: TaskStatus::Failed,
             duration_seconds: Some(duration_seconds),
-            error_message: Some(error_message.trim().to_string()),
         })
         .await?;
     Ok(())

@@ -48,7 +48,6 @@ const isLoading = ref(false);
 const isMutating = ref(false);
 const uiStore = useUiStore();
 
-const selectedRecord = computed(() => rows.value.find(row => row.id === selectedRecordId.value) ?? null);
 const deleteTarget = computed(() => rows.value.find(row => row.id === deleteTargetId.value) ?? null);
 const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
 const filteredRows = computed(() =>
@@ -237,7 +236,7 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <HistoryTaskDetailDialog :open="selectedRecord !== null" :record="selectedRecord" @close="closeDetail" @cancel="cancelTrainingTask" />
+    <HistoryTaskDetailDialog :open="selectedRecordId !== null" :record-id="selectedRecordId" @close="closeDetail" @cancel="cancelTrainingTask" />
 
     <BaseDialog :open="deleteTarget !== null" title="删除历史任务" @close="closeDeleteDialog">
       <p class="text-sm text-slate-600">

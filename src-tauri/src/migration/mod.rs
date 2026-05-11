@@ -9,8 +9,9 @@ use crate::Result;
 mod create_local_schema;
 mod m20260508_000002_make_tts_speaker_nullable;
 mod m20260508_000003_add_model_download_type;
+mod m20260511_000004_remove_task_history_error_message;
 
-const LOCAL_SCHEMA_VERSION: &str = "20";
+const LOCAL_SCHEMA_VERSION: &str = "21";
 
 pub(crate) struct Migrator;
 
@@ -21,6 +22,7 @@ impl MigratorTrait for Migrator {
             Box::new(create_local_schema::Migration),
             Box::new(m20260508_000002_make_tts_speaker_nullable::Migration),
             Box::new(m20260508_000003_add_model_download_type::Migration),
+            Box::new(m20260511_000004_remove_task_history_error_message::Migration),
         ]
     }
 }
