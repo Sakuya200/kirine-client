@@ -12,6 +12,29 @@ from gpt_sovits_cpufast.params_entity import ParamsEntity, RuntimeOptions
 
 GPT_SOVITS_CPUFAST_BASE_MODEL = "gpt_sovits_cpufast"
 
+MODEL_SCALE_CHECKPOINTS = {
+	"v1": (
+		"GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
+		"GPT_SoVITS/pretrained_models/s2G488k.pth",
+	),
+	"v2": (
+		"GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+		"GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
+	),
+	"v2pro": (
+		"GPT_SoVITS/pretrained_models/s1v3.ckpt",
+		"GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth",
+	),
+	"v2proplus": (
+		"GPT_SoVITS/pretrained_models/s1v3.ckpt",
+		"GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth",
+	),
+	"v2pp": (
+		"GPT_SoVITS/pretrained_models/s1v3.ckpt",
+		"GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth",
+	),
+}
+
 
 def _require_path(path: str | None, label: str) -> Path:
 	if path is None or not str(path).strip():
@@ -50,18 +73,30 @@ def _resolve_cpufast_root(model_root_path: str | None) -> Path:
 	raise FileNotFoundError(f"GPT-SoVITS-CPUFast root not found under: {root_path}")
 
 
-def _resolve_default_gpt_path(cpufast_root: Path) -> Path:
-	path = cpufast_root / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
-	if not path.exists():
-		raise FileNotFoundError(f"GPT checkpoint not found: {path}")
-	return path
+def _normalize_model_scale(model_scale: str | None) -> str:
+	normalized = (model_scale or "").strip().lower()
+	if normalized in MODEL_SCALE_CHECKPOINTS:
+		return normalized
+	if normalized == "v2pro+":
+		return "v2proplus"
+	raise ValueError(
+		"Unsupported GPT-SoVITS-CPUFast model_scale: "
+		f"{model_scale}. Supported values include V1, V2, V2Pro, V2ProPlus (or v2pp)."
+	)
 
 
-def _resolve_default_sovits_path(cpufast_root: Path) -> Path:
-	path = cpufast_root / "GPT_SoVITS" / "pretrained_models" / "v2Pro" / "s2Gv2ProPlus.pth"
-	if not path.exists():
-		raise FileNotFoundError(f"SoVITS checkpoint not found: {path}")
-	return path
+def _resolve_checkpoint_paths(cpufast_root: Path, model_scale: str | None) -> tuple[Path, Path]:
+	scale_key = _normalize_model_scale(model_scale)
+	gpt_rel, sovits_rel = MODEL_SCALE_CHECKPOINTS[scale_key]
+	gpt_path = cpufast_root / gpt_rel
+	sovits_path = cpufast_root / sovits_rel
+
+	if not gpt_path.exists():
+		raise FileNotFoundError(f"GPT checkpoint not found for {scale_key}: {gpt_path}")
+	if not sovits_path.exists():
+		raise FileNotFoundError(f"SoVITS checkpoint not found for {scale_key}: {sovits_path}")
+
+	return gpt_path, sovits_path
 
 
 def _resolve_ref_audio_path(ref_audio_path: str | None, label: str = "refAudioPath") -> Path:
@@ -73,6 +108,15 @@ def _resolve_ref_audio_path(ref_audio_path: str | None, label: str = "refAudioPa
 
 def _resolve_ref_text_path(ref_text_path: str | None) -> Path:
 	path = _require_path(ref_text_path, "refTextPath")
+	if not path.exists():
+		raise FileNotFoundError(f"Reference text file not found: {path}")
+	return path
+
+
+def _resolve_optional_ref_text_path(ref_text_path: str | None) -> Path | None:
+	if ref_text_path is None or not str(ref_text_path).strip():
+		return None
+	path = Path(ref_text_path).expanduser().resolve()
 	if not path.exists():
 		raise FileNotFoundError(f"Reference text file not found: {path}")
 	return path
@@ -167,7 +211,8 @@ class GptSovitsCpufastVoiceCloneParams:
 	gpt_model_path: Path
 	sovits_model_path: Path
 	ref_audio_path: Path
-	ref_text_path: Path
+	ref_text_path: Path | None
+	ref_text: str
 	target_text: str
 	target_language: str
 	prompt_language: str
@@ -191,7 +236,8 @@ class GptSovitsCpufastVoiceCloneParams:
 			gpt_model_path=str(self.gpt_model_path),
 			sovits_model_path=str(self.sovits_model_path),
 			ref_audio_path=str(self.ref_audio_path),
-			ref_text_path=str(self.ref_text_path),
+			ref_text_path=str(self.ref_text_path) if self.ref_text_path else None,
+			ref_text=self.ref_text,
 			target_text=self.target_text,
 			target_language=self.target_language,
 			prompt_language=self.prompt_language,
@@ -214,13 +260,14 @@ def load_tts_params(path: str | Path) -> GptSovitsCpufastTtsParams:
 	params = ParamsEntity.from_file(path)
 	args = params.tts_args()
 	cpufast_root = _resolve_cpufast_root(args.common.model_root_path)
+	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_scale)
 	runtime = _normalize_runtime(params.runtime)
 
 	return GptSovitsCpufastTtsParams(
 		bridge_script_path=_resolve_bridge_script_path(),
 		cpufast_root=cpufast_root,
-		gpt_model_path=_resolve_default_gpt_path(cpufast_root),
-		sovits_model_path=_resolve_default_sovits_path(cpufast_root),
+		gpt_model_path=gpt_model_path,
+		sovits_model_path=sovits_model_path,
 		ref_audio_path=_resolve_ref_audio_path(params.model_param_str("refAudioPath", None)),
 		ref_text_path=_resolve_ref_text_path(params.model_param_str("refTextPath", None)),
 		target_text=args.text.strip(),
@@ -245,17 +292,19 @@ def load_voice_clone_params(path: str | Path) -> GptSovitsCpufastVoiceCloneParam
 	params = ParamsEntity.from_file(path)
 	args = params.voice_clone_args()
 	cpufast_root = _resolve_cpufast_root(args.common.model_root_path)
+	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_scale)
 	runtime = _normalize_runtime(params.runtime)
 
 	return GptSovitsCpufastVoiceCloneParams(
 		bridge_script_path=_resolve_bridge_script_path(),
 		cpufast_root=cpufast_root,
-		gpt_model_path=_resolve_default_gpt_path(cpufast_root),
-		sovits_model_path=_resolve_default_sovits_path(cpufast_root),
+		gpt_model_path=gpt_model_path,
+		sovits_model_path=sovits_model_path,
 		ref_audio_path=_resolve_ref_audio_path(
 			params.model_param_str("refAudioPath", args.ref_audio_path)
 		),
-		ref_text_path=_resolve_ref_text_path(params.model_param_str("refTextPath", None)),
+		ref_text_path=_resolve_optional_ref_text_path(params.model_param_str("refTextPath", None)),
+		ref_text=(args.ref_text or "").strip(),
 		target_text=args.text.strip(),
 		target_language=_map_runtime_language(args.language),
 		prompt_language=_map_runtime_language(params.model_param_str("promptLang", args.language)),
@@ -283,6 +332,11 @@ def run_inference_cli(args: Namespace) -> None:
 		target_text_path = temp_root / "target.txt"
 		target_text_path.write_text(args.target_text, encoding="utf-8")
 
+		ref_text_path = args.ref_text_path
+		if not ref_text_path:
+			ref_text_path = temp_root / "ref_text.txt"
+			Path(ref_text_path).write_text((args.ref_text or "").strip(), encoding="utf-8")
+
 		command = [
 			sys.executable,
 			str(args.bridge_script_path),
@@ -293,7 +347,7 @@ def run_inference_cli(args: Namespace) -> None:
 			"--ref_audio",
 			str(args.ref_audio_path),
 			"--ref_text",
-			str(args.ref_text_path),
+			str(ref_text_path),
 			"--prompt_language",
 			str(args.prompt_language),
 			"--target_text",

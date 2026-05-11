@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -8,7 +8,6 @@ import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import GeneratedAudioResultCard from '@/components/common/GeneratedAudioResultCard.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
@@ -527,9 +526,15 @@ const generateAudio = async () => {
 };
 
 const requestClearText = () => {
-  if (!trimmedText.value) {
-    form.text = '';
-    uiStore.notifyInfo('输入文本已清空。', 2200);
+  const hasChanges =
+    trimmedText.value ||
+    form.speakerId ||
+    form.baseModel ||
+    form.language !== AppLanguage.Chinese ||
+    form.format !== TextToSpeechFormat.Wav ||
+    JSON.stringify(form.modelParams) !== '{}';
+  if (!hasChanges) {
+    uiStore.notifyInfo('表单已为默认状态。', 2200);
     return;
   }
 
@@ -537,9 +542,17 @@ const requestClearText = () => {
 };
 
 const confirmClearText = () => {
+  form.speakerId = null;
+  form.language = AppLanguage.Chinese;
+  form.format = TextToSpeechFormat.Wav;
+  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
   form.text = '';
+  form.modelParams = {};
+  selectedSpeakerOption.value = null;
+  selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES[0] ?? null;
+  selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
   showClearDialog.value = false;
-  uiStore.notifyInfo('输入文本已清空。', 2200);
+  uiStore.notifyInfo('表单已重置。', 2200);
 };
 
 const cancelClearText = () => {
@@ -646,9 +659,8 @@ onMounted(async () => {
 
         <PanelCard title="最近任务" subtitle="展示最近 5 条文本转语音任务，数据来自统一历史记录">
           <template #actions>
-            <BaseButton tone="ghost" size="sm" :disabled="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
-              <BaseLoadingIndicator v-if="isRefreshingHistory" size="sm" tone="muted" />
-              <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
+              <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
             </BaseButton>
           </template>
@@ -691,14 +703,13 @@ onMounted(async () => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <BaseButton :disabled="!canGenerate" @click="generateAudio">
-                <BaseLoadingIndicator v-if="isGenerating" size="sm" tone="muted" />
-                <SparklesIcon v-else class="h-4 w-4" aria-hidden="true" />
+              <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="generateAudio">
+                <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="requestClearText">
-                <XMarkIcon class="h-4 w-4" aria-hidden="true" />
-                <span>清空文本</span>
+                <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
+                <span>重置表单</span>
               </BaseButton>
             </div>
           </div>
@@ -706,14 +717,14 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <BaseDialog :open="showClearDialog" title="清空文本" @close="cancelClearText">
-      <p class="text-sm leading-6 text-slate-700">当前输入的文本会被清空，但不会删除已经生成的结果记录。确定继续吗？</p>
+    <BaseDialog :open="showClearDialog" title="重置表单" @close="cancelClearText">
+      <p class="text-sm leading-6 text-slate-700">表单将重置到默认状态，包括所有参数设置。已生成的结果记录不会被删除。确定继续吗？</p>
       <template #footer>
         <BaseButton tone="ghost" @click="cancelClearText">
           <span>取消</span>
         </BaseButton>
         <BaseButton @click="confirmClearText">
-          <span>确认清空</span>
+          <span>确认重置</span>
         </BaseButton>
       </template>
     </BaseDialog>

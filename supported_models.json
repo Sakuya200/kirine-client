@@ -39,7 +39,34 @@
     {
       "baseModel": "gpt_sovits_cpufast",
       "modelName": "GPT-SoVITS-CPUFast",
-      "modelScale": "v2pp",
+      "modelScale": "V1",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelScale": "V2",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelScale": "V2Pro",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelScale": "V2ProPlus",
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],

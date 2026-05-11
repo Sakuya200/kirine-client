@@ -16,7 +16,6 @@ import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
@@ -791,9 +790,8 @@ onBeforeUnmount(() => {
 
         <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型微调任务，数据来自统一历史记录">
           <template #actions>
-            <BaseButton tone="ghost" size="sm" :disabled="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
-              <BaseLoadingIndicator v-if="isRefreshingHistory" size="sm" tone="muted" />
-              <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
+              <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
             </BaseButton>
           </template>
@@ -870,18 +868,17 @@ onBeforeUnmount(() => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex items-center justify-center gap-2">
-              <BaseButton :disabled="!canStartTraining" @click="startTraining">
-                <BaseLoadingIndicator v-if="isStarting" size="sm" tone="muted" />
-                <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
+              <BaseButton :loading="isStarting" :disabled="!canStartTraining" @click="startTraining">
+                <CpuChipIcon v-if="!isStarting" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isStarting ? '创建中...' : '开始微调' }}</span>
               </BaseButton>
               <BaseButton
                 tone="quiet"
+                :loading="isCancelling"
                 :disabled="isCancelling || !activeTrainingTask || ![TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
                 @click="cancelActiveTrainingTask"
               >
-                <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
-                <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isCancelling ? '终止中...' : '终止微调' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">

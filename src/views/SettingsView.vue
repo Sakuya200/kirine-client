@@ -6,7 +6,6 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
@@ -169,9 +168,8 @@ onMounted(async () => {
               <span class="mb-1 block text-xs text-stone-500">API Token</span>
               <input v-model="form.apiToken" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入访问令牌" />
             </label>
-            <BaseButton :disabled="!canSaveConnection" @click="saveSettings('connection')">
-              <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />
-              <CheckBadgeIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton :loading="isSaving" :disabled="!canSaveConnection" @click="saveSettings('connection')">
+              <CheckBadgeIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isSaving ? '保存中...' : '保存连接配置' }}</span>
             </BaseButton>
           </TabPanel>
@@ -196,9 +194,8 @@ onMounted(async () => {
               label="注意力实现"
               :options="attnImplementationOptions"
             />
-            <BaseButton tone="ghost" :disabled="!canSaveModel" @click="saveSettings('model')">
-              <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />
-              <FolderIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" :loading="isSaving" :disabled="!canSaveModel" @click="saveSettings('model')">
+              <FolderIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isSaving ? '保存中...' : '保存资源配置' }}</span>
             </BaseButton>
           </TabPanel>
@@ -226,9 +223,8 @@ onMounted(async () => {
                 />
               </label>
             </section>
-            <BaseButton tone="ghost" :disabled="!canSaveCache" @click="saveSettings('cache')">
-              <BaseLoadingIndicator v-if="isSaving" size="sm" tone="muted" />
-              <FolderIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" :loading="isSaving" :disabled="!canSaveCache" @click="saveSettings('cache')">
+              <FolderIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isSaving ? '保存中...' : '保存缓存配置' }}</span>
             </BaseButton>
           </TabPanel>

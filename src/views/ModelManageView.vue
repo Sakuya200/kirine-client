@@ -5,7 +5,6 @@ import { computed, onMounted, ref } from 'vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
@@ -13,6 +12,8 @@ import { useModelStore } from '@/stores/models';
 
 const modelStore = useModelStore();
 const isMutating = ref(false);
+const mutatingModelId = ref<number | null>(null);
+const mutatingAction = ref<'install' | 'uninstall' | null>(null);
 const uninstallTargetId = ref<number | null>(null);
 
 const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
@@ -41,10 +42,14 @@ const refreshModels = async () => {
 
 const handleInstall = async (modelId: number) => {
   isMutating.value = true;
+  mutatingModelId.value = modelId;
+  mutatingAction.value = 'install';
   try {
     await modelStore.installModel(modelId);
   } finally {
     isMutating.value = false;
+    mutatingModelId.value = null;
+    mutatingAction.value = null;
   }
 };
 
@@ -62,11 +67,15 @@ const confirmUninstall = async () => {
   }
 
   isMutating.value = true;
+  mutatingModelId.value = uninstallTarget.value.id;
+  mutatingAction.value = 'uninstall';
   try {
     await modelStore.uninstallModel(uninstallTarget.value.id);
     closeUninstallDialog();
   } finally {
     isMutating.value = false;
+    mutatingModelId.value = null;
+    mutatingAction.value = null;
   }
 };
 
@@ -83,9 +92,8 @@ onMounted(async () => {
 
     <PanelCard title="模型列表" subtitle="状态来自本地数据库中的 model_info.downloaded 字段。">
       <template #actions>
-        <BaseButton tone="ghost" :disabled="modelStore.isLoading || isMutating" @click="refreshModels">
-          <BaseLoadingIndicator v-if="modelStore.isLoading" size="sm" tone="muted" />
-          <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+        <BaseButton tone="ghost" :loading="modelStore.isLoading" :disabled="isMutating" @click="refreshModels">
+          <ArrowPathIcon v-if="!modelStore.isLoading" class="h-4 w-4" aria-hidden="true" />
           <span>{{ modelStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
         </BaseButton>
       </template>
@@ -130,9 +138,15 @@ onMounted(async () => {
               </td>
               <td class="py-3 align-middle">
                 <div class="flex flex-wrap items-center gap-2">
-                  <BaseButton tone="ghost" size="sm" :disabled="isMutating" @click="handleInstall(item.id)">
-                    <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
-                    <span>{{ item.downloaded ? '重装' : '安装' }}</span>
+                  <BaseButton
+                    tone="ghost"
+                    size="sm"
+                    :loading="mutatingAction === 'install' && mutatingModelId === item.id"
+                    :disabled="isMutating"
+                    @click="handleInstall(item.id)"
+                  >
+                    <ArrowDownTrayIcon v-if="!(mutatingAction === 'install' && mutatingModelId === item.id)" class="h-4 w-4" aria-hidden="true" />
+                    <span>{{ mutatingAction === 'install' && mutatingModelId === item.id ? '处理中...' : item.downloaded ? '重装' : '安装' }}</span>
                   </BaseButton>
                   <BaseButton tone="quiet" size="sm" :disabled="isMutating || !item.downloaded" @click="requestUninstall(item.id)">
                     <TrashIcon class="h-4 w-4" aria-hidden="true" />
@@ -161,8 +175,7 @@ onMounted(async () => {
         <BaseButton tone="ghost" @click="closeUninstallDialog">
           <span>取消</span>
         </BaseButton>
-        <BaseButton tone="quiet" :disabled="!uninstallTarget || isMutating" @click="confirmUninstall">
-          <BaseLoadingIndicator v-if="isMutating" size="sm" tone="muted" />
+        <BaseButton tone="quiet" :loading="isMutating" :disabled="!uninstallTarget || isMutating" @click="confirmUninstall">
           <span>{{ isMutating ? '卸载中...' : '确认卸载' }}</span>
         </BaseButton>
       </template>

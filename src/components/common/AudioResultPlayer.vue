@@ -3,7 +3,6 @@ import { ArrowDownTrayIcon, PauseIcon, PlayIcon } from '@heroicons/vue/24/outlin
 import { computed, ref, watch } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import { TaskStatus } from '@/enums/status';
 import { useTaskAudioPlayer } from '@/hooks/useTaskAudioPlayer';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
@@ -125,9 +124,8 @@ watch(
         <component :is="isPlaying ? PauseIcon : PlayIcon" class="h-4 w-4" aria-hidden="true" />
         <span>{{ playbackActionLabel }}</span>
       </BaseButton>
-      <BaseButton v-if="showDownload" :tone="downloadTone" :disabled="isDownloading || !downloadAudio" @click="handleDownload">
-        <BaseLoadingIndicator v-if="isDownloading" size="sm" tone="muted" />
-        <ArrowDownTrayIcon v-else class="h-4 w-4" aria-hidden="true" />
+      <BaseButton v-if="showDownload" :tone="downloadTone" :loading="isDownloading" :disabled="!downloadAudio" @click="handleDownload">
+        <ArrowDownTrayIcon v-if="!isDownloading" class="h-4 w-4" aria-hidden="true" />
         <span>{{ isDownloading ? '处理中...' : downloadLabel }}</span>
       </BaseButton>
     </div>

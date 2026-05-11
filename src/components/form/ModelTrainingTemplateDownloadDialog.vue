@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { DocumentArrowDownIcon, DocumentTextIcon, TableCellsIcon } from '@heroicons/vue/24/outline';
+import { ref } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
@@ -19,8 +20,10 @@ const emit = defineEmits<{
 }>();
 
 const uiStore = useUiStore();
+const downloadingFormat = ref<ModelTrainingAnnotationFormat | null>(null);
 
 const downloadTemplate = async (format: ModelTrainingAnnotationFormat) => {
+  downloadingFormat.value = format;
   try {
     const saved = await invoke<boolean>('save_model_training_template_as', {
       templateFormat: format
@@ -31,6 +34,8 @@ const downloadTemplate = async (format: ModelTrainingAnnotationFormat) => {
     }
   } catch (error) {
     uiStore.notifyError(formatErrorMessage('保存模板文件失败', error));
+  } finally {
+    downloadingFormat.value = null;
   }
 };
 
@@ -79,9 +84,21 @@ const templateCards = [
             </div>
           </div>
 
-          <BaseButton class="mt-4 min-h-[42px]" block @click="downloadTemplate(card.format)">
+          <BaseButton
+            class="mt-4 min-h-[42px]"
+            block
+            :loading="downloadingFormat === card.format"
+            :disabled="downloadingFormat !== null && downloadingFormat !== card.format"
+            @click="downloadTemplate(card.format)"
+          >
             <DocumentArrowDownIcon class="h-4 w-4" aria-hidden="true" />
-            <span>{{ card.format === ModelTrainingAnnotationFormat.Xlsx ? '下载Excel模板' : `下载 ${card.title} 模板` }}</span>
+            <span>{{
+              downloadingFormat === card.format
+                ? '下载中...'
+                : card.format === ModelTrainingAnnotationFormat.Xlsx
+                  ? '下载Excel模板'
+                  : `下载 ${card.title} 模板`
+            }}</span>
           </BaseButton>
         </article>
       </div>

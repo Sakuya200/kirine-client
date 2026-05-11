@@ -4,7 +4,6 @@ import { computed, ref, useSlots } from 'vue';
 
 import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
@@ -82,9 +81,8 @@ defineExpose({
           <p class="mt-1 text-xs text-stone-500">{{ metaText }}</p>
         </div>
         <div class="flex items-center gap-2">
-          <BaseButton v-if="canViewDetail" tone="ghost" size="sm" :disabled="isDetailLoading" @click="openDetail">
-            <BaseLoadingIndicator v-if="isDetailLoading" size="sm" tone="muted" />
-            <EyeIcon v-else class="h-4 w-4" aria-hidden="true" />
+          <BaseButton v-if="canViewDetail" tone="ghost" size="sm" :loading="isDetailLoading" @click="openDetail">
+            <EyeIcon v-if="!isDetailLoading" class="h-4 w-4" aria-hidden="true" />
             <span>{{ isDetailLoading ? '载入中...' : '查看详情' }}</span>
           </BaseButton>
           <StatusPill :status="result.status" />

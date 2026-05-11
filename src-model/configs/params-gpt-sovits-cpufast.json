@@ -191,38 +191,6 @@
     "base-model": "gpt_sovits_cpufast",
     "params": [
       {
-        "name": "refAudioPath",
-        "type": "string",
-        "componentType": "input-audio-file",
-        "componentProps": {
-          "label": "参考音频",
-          "helpText": "选择用于声音克隆的参考音频。",
-          "placeholder": "尚未选择参考音频",
-          "dialogTitle": "选择参考音频",
-          "buttonText": "选择参考音频",
-          "extensions": ["wav", "mp3", "flac", "m4a", "ogg"]
-        },
-        "required": true,
-        "defaultValue": "",
-        "description": "GPT-SoVITS-CPUFast 声音克隆所需的参考音频路径。"
-      },
-      {
-        "name": "refTextPath",
-        "type": "string",
-        "componentType": "input-text-file",
-        "componentProps": {
-          "label": "参考文本文件",
-          "helpText": "上传参考音频对应的文本文件。",
-          "placeholder": "尚未选择参考文本文件",
-          "dialogTitle": "选择参考文本文件",
-          "buttonText": "上传参考文本",
-          "extensions": ["txt", "md", "text"]
-        },
-        "required": true,
-        "defaultValue": "",
-        "description": "参考音频对应的文本文件路径。"
-      },
-      {
         "name": "promptLang",
         "type": "string",
         "componentType": "select",
