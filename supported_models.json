@@ -25,7 +25,7 @@
       "downloadType": "HF-Like",
       "requiredModelNameList": ["VoxCPM2"],
       "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "lora"]
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
     },
     {
       "baseModel": "moss_tts_local",

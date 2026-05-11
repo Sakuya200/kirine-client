@@ -13,12 +13,9 @@ import type { ParamDefinition, SelectOption, TaskParamConfig } from '@/types/uiC
 interface Props {
   modelValue: Record<string, unknown>;
   taskConfig: TaskParamConfig | null;
-  supportsLora?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  supportsLora: true
-});
+const props = defineProps<Props>();
 
 const emit = defineEmits<{
   'update:modelValue': [value: Record<string, unknown>];
@@ -31,15 +28,11 @@ const isVisibleWhenMatched = (param: ParamDefinition) => {
     return true;
   }
 
-  const currentValue = rule.field === 'useLora' && !props.supportsLora ? false : props.modelValue[rule.field];
+  const currentValue = props.modelValue[rule.field];
   return JSON.stringify(currentValue) === JSON.stringify(rule.equals);
 };
 
 const shouldRenderParam = (param: ParamDefinition) => {
-  if (param.name === 'useLora' && !props.supportsLora) {
-    return false;
-  }
-
   return isVisibleWhenMatched(param);
 };
 
@@ -60,10 +53,6 @@ const updateModelValue = (name: string, value: unknown) => {
 };
 
 const getFieldValue = (param: ParamDefinition) => {
-  if (param.name === 'useLora' && !props.supportsLora) {
-    return false;
-  }
-
   return props.modelValue[param.name];
 };
 

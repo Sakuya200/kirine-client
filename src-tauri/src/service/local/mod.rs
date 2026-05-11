@@ -11,6 +11,7 @@ mod voice_clone;
 use std::{
     collections::HashMap,
     env::current_dir,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -22,7 +23,11 @@ use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    config::{resolve_storage_dir, BaseModel, EnvConfig},
+    common::local_paths::{resolve_task_path, serialize_task_path},
+    config::{
+        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, UiComponentType,
+        UiConfigCatalog, UiTaskKind,
+    },
     migration,
     service::{
         models::{
@@ -49,6 +54,7 @@ pub struct LocalService {
     runtime_config: Arc<RwLock<EnvConfig>>,
     orm: DatabaseConnection,
     active_training_controls: Arc<RwLock<HashMap<i64, watch::Sender<bool>>>>,
+    ui_config: Arc<UiConfigCatalog>,
 }
 
 #[async_trait]
@@ -200,15 +206,12 @@ impl LocalService {
             runtime_config: Arc::new(RwLock::new(runtime_config)),
             orm,
             active_training_controls: Arc::new(RwLock::new(HashMap::new())),
+            ui_config: Arc::new(load_ui_configs().unwrap_or_default()),
         };
         Ok(service)
     }
 
-    pub(crate) fn start_tts_inference(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
+    pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
         let service = self.clone();
         let pipeline = resolve_model_task_pipeline(&base_model)?;
 
@@ -389,6 +392,85 @@ impl LocalService {
 
         Ok(())
     }
+
+    pub(crate) fn ui_config(&self) -> &UiConfigCatalog {
+        &self.ui_config
+    }
+}
+
+/// Copies any model-specific file-picker param values (componentType: input-audio-file or
+/// input-text-file) into the task's sample directory and rewrites the corresponding entries in
+/// `model_params` to the serialized (relative) destination paths.
+///
+/// If no matching `TaskParamConfig` exists for the given `base_model`/`task_kind`, this is a
+/// no-op and returns `Ok(())`.
+pub(crate) fn copy_model_param_files(
+    base_model: &str,
+    task_kind: UiTaskKind,
+    model_params: &mut serde_json::Value,
+    sample_dir: &Path,
+    data_dir: &Path,
+    ui_config: &UiConfigCatalog,
+) -> crate::Result<()> {
+    use anyhow::Context as _;
+
+    let task_config = ui_config
+        .task_configs
+        .iter()
+        .find(|c| c.base_model == base_model && c.task == task_kind);
+
+    let task_config = match task_config {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    for param in &task_config.params {
+        if param.component_type != UiComponentType::InputAudioFile
+            && param.component_type != UiComponentType::InputTextFile
+        {
+            continue;
+        }
+
+        let raw_value = match model_params.get(&param.name).and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.to_string(),
+            _ => continue,
+        };
+
+        let src_path = resolve_task_path(data_dir, &raw_value);
+        if !src_path.exists() {
+            tracing::warn!(
+                param = %param.name,
+                path = %src_path.display(),
+                "model param file not found, skipping copy"
+            );
+            continue;
+        }
+
+        let ext = src_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|e| !e.trim().is_empty())
+            .map(|e| format!(".{}", e))
+            .unwrap_or_default();
+        let dest_name = format!("{}{}", param.name, ext);
+        let dest_path = sample_dir.join(&dest_name);
+
+        fs::copy(&src_path, &dest_path).with_context(|| {
+            format!(
+                "failed to copy model param file '{}' from {} to {}",
+                param.name,
+                src_path.display(),
+                dest_path.display()
+            )
+        })?;
+
+        let serialized = serialize_task_path(data_dir, &dest_path);
+        if let Some(obj) = model_params.as_object_mut() {
+            obj.insert(param.name.clone(), serde_json::Value::String(serialized));
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn build_task_title(

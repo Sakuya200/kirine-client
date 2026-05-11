@@ -71,8 +71,6 @@ interface ModelTrainingTaskResultPayload {
   createTime: string;
   status: TaskStatus;
 }
-const LORA_FEATURE = 'lora';
-
 const uiConfigStore = useUiConfigStore();
 
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
@@ -126,7 +124,6 @@ const modelOptions = computed(() =>
 );
 const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
-const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -844,12 +841,7 @@ onBeforeUnmount(() => {
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
           <p class="mt-1 text-xs leading-5 text-stone-500">当选择不同的基础模型时，可配置的微调参数会有所不同，请参考不同模型的官方文档。</p>
-          <GenericTaskParamsForm
-            class="mt-4"
-            v-model="form.modelParams"
-            :task-config="activeTrainingTaskConfig"
-            :supports-lora="supportsSelectedModelLora"
-          />
+          <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTrainingTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">

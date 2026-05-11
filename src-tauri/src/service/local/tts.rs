@@ -10,6 +10,7 @@ use crate::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -54,7 +55,7 @@ impl LocalService {
         };
         let text = payload.text.trim().to_string();
         let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_tts");
-        let model_params = payload.model_params.clone();
+        let mut model_params = payload.model_params.clone();
         let char_count = text.chars().count();
         let title = if speaker_id.is_some() {
             super::build_task_title("文本转语音", Some(&speaker_label), &create_time)
@@ -79,10 +80,18 @@ impl LocalService {
         .insert(&txn)
         .await?;
         let task_id = task_history.id;
-        ensure_task_sample_dir(
+        let sample_dir = ensure_task_sample_dir(
             Path::new(self.data_dir()),
             HistoryTaskType::TextToSpeech,
             task_id,
+        )?;
+        super::copy_model_param_files(
+            &base_model,
+            UiTaskKind::Tts,
+            &mut model_params,
+            &sample_dir,
+            Path::new(self.data_dir()),
+            self.ui_config(),
         )?;
         let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
