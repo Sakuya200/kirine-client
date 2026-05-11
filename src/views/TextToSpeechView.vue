@@ -78,7 +78,7 @@ interface TextToSpeechAudioAssetPayload {
   bytes: number[];
 }
 
-const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_v2pp', 'gpt_sovits_cpufast']);
+const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_cpufast']);
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();

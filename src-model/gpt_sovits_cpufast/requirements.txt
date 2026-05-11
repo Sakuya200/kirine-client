@@ -1,2 +1,4 @@
-# GPT-SoVITS-CPUFast currently reuses the gpt_sovits_v2pp runtime wrapper implementation.
-# Keep this file intentionally minimal until the custom installer is finalized.
+# Runtime dependency reminder:
+# - gpt_sovits_cpufast package itself is CLI glue and relies on the downloaded
+#   GPT-SoVITS-CPUFast checkout under src-model/base-models/<base-model>/.
+# - The bridge imports soundfile at runtime through the package environment.

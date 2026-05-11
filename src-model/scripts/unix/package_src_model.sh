@@ -6,7 +6,7 @@ SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
 OUTPUT_FILE=${1:-"$SRC_MODEL_ROOT/../src-tauri/resources/src-model-runtime.tar"}
 
 SOURCE_DIRECTORIES="scripts configs"
-MODEL_DIRECTORIES="qwen3_tts vox_cpm2 moss_tts_local gpt_sovits_v2pp gpt_sovits_cpufast"
+MODEL_DIRECTORIES="qwen3_tts vox_cpm2 moss_tts_local gpt_sovits_cpufast"
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
