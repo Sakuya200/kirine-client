@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::*;
 
+use crate::migration::column_exists;
+
 pub struct Migration;
 
 impl MigrationName for Migration {
@@ -11,6 +13,10 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if !column_exists(manager.get_connection(), "task_history", "error_message").await? {
+            return Ok(());
+        }
+
         manager
             .alter_table(
                 Table::alter()
@@ -22,6 +28,10 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if column_exists(manager.get_connection(), "task_history", "error_message").await? {
+            return Ok(());
+        }
+
         manager
             .alter_table(
                 Table::alter()

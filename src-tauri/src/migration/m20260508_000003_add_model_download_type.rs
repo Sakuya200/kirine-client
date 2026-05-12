@@ -1,4 +1,7 @@
+use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use sea_orm_migration::prelude::*;
+
+use crate::migration::column_exists;
 
 pub struct Migration;
 
@@ -11,28 +14,23 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if column_exists(manager.get_connection(), "model_info", "download_type").await? {
+            return Ok(());
+        }
+
         manager
-            .alter_table(
-                Table::alter()
-                    .table(ModelInfo::Table)
-                    .add_column(
-                        ColumnDef::new(ModelInfo::DownloadType)
-                            .string()
-                            .not_null()
-                            .default("HF-Like"),
-                    )
-                    .to_owned(),
-            )
-            .await
+            .get_connection()
+            .execute(Statement::from_string(
+                DbBackend::Sqlite,
+                "ALTER TABLE model_info ADD COLUMN download_type TEXT NOT NULL DEFAULT 'HF-Like'"
+                    .to_string(),
+            ))
+            .await?;
+
+        Ok(())
     }
 
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         Ok(())
     }
-}
-
-#[derive(DeriveIden)]
-enum ModelInfo {
-    Table,
-    DownloadType,
 }

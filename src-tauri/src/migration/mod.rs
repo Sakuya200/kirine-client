@@ -48,3 +48,48 @@ pub(crate) async fn run_local_migrations(db: &DatabaseConnection) -> Result<()> 
 
     Ok(())
 }
+
+async fn column_exists(
+    db: &impl ConnectionTrait,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, DbErr> {
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Sqlite,
+            format!("PRAGMA table_info('{table_name}')"),
+        ))
+        .await?;
+
+    for row in rows {
+        let name: String = row.try_get("", "name")?;
+        if name == column_name {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+async fn rename_column_if_needed(
+    manager: &SchemaManager<'_>,
+    table_name: &str,
+    old_column: &str,
+    new_column: &str,
+) -> Result<(), DbErr> {
+    let db = manager.get_connection();
+    let has_old = column_exists(db, table_name, old_column).await?;
+    let has_new = column_exists(db, table_name, new_column).await?;
+
+    if !has_old || has_new {
+        return Ok(());
+    }
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        format!("ALTER TABLE {table_name} RENAME COLUMN {old_column} TO {new_column}"),
+    ))
+    .await?;
+
+    Ok(())
+}
