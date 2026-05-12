@@ -30,6 +30,7 @@ wordsegment
 ToJyutping
 g2pk2
 ko_pron
+pyopenjtalk
 opencc
 einops
 pytorch-lightning
