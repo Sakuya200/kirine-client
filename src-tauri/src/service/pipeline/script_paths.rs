@@ -33,6 +33,13 @@ impl ScriptPlatform {
         }
     }
 
+    pub(crate) const fn ensure_torch_runtime_relative_path(self) -> &'static str {
+        match self {
+            Self::Windows => "scripts/windows/ensure_torch_runtime.ps1",
+            Self::Unix => "scripts/unix/ensure_torch_runtime.sh",
+        }
+    }
+
     pub(crate) const fn transcode_audio_relative_path(self) -> &'static str {
         match self {
             Self::Windows => "scripts/windows/transcode_audio.ps1",

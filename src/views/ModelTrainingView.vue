@@ -16,12 +16,11 @@ import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
-import { getTrainingModelRegistryEntry } from '@/components/form/modelTrainingRegistry';
+import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import { AppLanguage } from '@/enums/language';
 import {
@@ -38,8 +37,11 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
+import { useSpeakerStore } from '@/stores/speakers';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
+import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
 type LocalFileKind = 'audio' | 'archive' | 'annotation';
 
@@ -62,25 +64,27 @@ interface ImportedSampleItem {
 interface ModelTrainingTaskResultPayload {
   taskId: number;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   modelName: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
   status: TaskStatus;
 }
-const LORA_FEATURE = 'lora';
+const uiConfigStore = useUiConfigStore();
 
-const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  getTrainingModelRegistryEntry(baseModel).normalizeParams(modelParams);
+const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'training');
+  return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
+};
 
 const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   modelName: 'speaker_a_custom',
   description: '',
-  modelParams: getTrainingModelRegistryEntry('').createDefaultParams() as Record<string, unknown>,
+  modelParams: {} as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
   singleTranscript: '',
   datasetArchiveFile: null as SelectedLocalFile | null,
@@ -95,6 +99,7 @@ const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const isTemplateDialogOpen = ref(false);
 const modelStore = useModelStore();
+const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -117,10 +122,8 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const activeTrainingModelConfig = computed(() => getTrainingModelRegistryEntry(form.baseModel));
-const supportsSelectedModelLora = computed(() => modelStore.supportsModelFeature(form.baseModel, form.modelScale, LORA_FEATURE));
-const activeTrainingParamsComponent = computed(() => activeTrainingModelConfig.value.paramsComponent);
+const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -129,6 +132,9 @@ const canStartTraining = computed(() => {
   const batchSize = Number(form.modelParams.batchSize ?? 0);
   const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
 
+  // 判断模型特有参数是否正确填写
+  const modelParamsValid = activeTrainingTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'training', form.modelParams) : true;
+
   return (
     form.modelName.trim().length > 0 &&
     form.description.trim().length > 0 &&
@@ -136,8 +142,9 @@ const canStartTraining = computed(() => {
     epochCount > 0 &&
     batchSize > 0 &&
     gradientAccumulationSteps > 0 &&
+    modelParamsValid &&
     !isStarting.value &&
-    !!form.modelScale
+    !!form.modelVersion
   );
 });
 
@@ -148,13 +155,11 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.modelName,
-    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelScale}`,
+    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelVersion}`,
     status: item.status
   }))
 );
 
-const baseModelSummary = computed(() => activeTrainingModelConfig.value.baseSummary);
-const modelSpecificSummaryLines = computed(() => activeTrainingModelConfig.value.buildSummaryLines(form.modelParams));
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
     return '正在创建模型微调任务，请稍候';
@@ -186,15 +191,15 @@ watch(
 );
 
 watch(
-  modelScaleOptions,
+  modelVersionOptions,
   options => {
     if (options.length === 0) {
-      form.modelScale = '';
+      form.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === form.modelScale)) {
-      form.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === form.modelVersion)) {
+      form.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -251,7 +256,7 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
   return {
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
-    modelScale: trainingRecord.detail.modelScale,
+    modelVersion: trainingRecord.detail.modelVersion,
     modelName: trainingRecord.detail.modelName,
     modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
@@ -354,7 +359,7 @@ const removeImportedSample = (sampleId: number) => {
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
-  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '');
+  form.modelVersion = String(modelVersionOptions.value[0]?.value ?? '');
   form.modelName = 'speaker_a_custom';
   form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
@@ -390,7 +395,7 @@ const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): Im
 const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
-  form.modelScale = record.detail.modelScale;
+  form.modelVersion = record.detail.modelVersion;
   form.modelName = record.detail.modelName;
   form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
@@ -497,6 +502,10 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 };
 
+const syncSpeakerStore = async () => {
+  await speakerStore.refreshSpeakers({ silent: true });
+};
+
 const refreshActiveTaskStatus = async () => {
   if (
     !activeTrainingTask.value ||
@@ -514,6 +523,7 @@ const refreshActiveTaskStatus = async () => {
 
   isActiveTaskRefreshInFlight = true;
   const currentTaskId = activeTrainingTask.value.taskId;
+  const previousStatus = activeTrainingTask.value.status;
 
   try {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId: currentTaskId });
@@ -527,6 +537,10 @@ const refreshActiveTaskStatus = async () => {
     recentTrainingHistory.value = recentTrainingHistory.value.map(item =>
       item.id === currentTaskId ? ({ ...item, status: updatedTask.status } as ModelTrainingHistoryRecord) : item
     );
+
+    if (updatedTask.status !== previousStatus) {
+      await syncSpeakerStore();
+    }
 
     if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Cancelled || updatedTask.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
@@ -578,7 +592,7 @@ const startTraining = async () => {
       payload: {
         language: form.language,
         baseModel: form.baseModel,
-        modelScale: form.modelScale,
+        modelVersion: form.modelVersion,
         modelName: form.modelName.trim(),
         description: form.description.trim(),
         modelParams: form.modelParams,
@@ -597,10 +611,11 @@ const startTraining = async () => {
     activeTrainingTask.value = payload;
     syncActiveTaskStatusRefresh();
     setSelectedHistoryTaskId(payload.taskId, true);
+    await syncSpeakerStore();
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
+      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -611,6 +626,7 @@ const startTraining = async () => {
 };
 
 onMounted(async () => {
+  await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   await loadRecentTasks({ silentOnError: true });
   await hydrateReplayTaskFromRoute();
@@ -771,9 +787,8 @@ onBeforeUnmount(() => {
 
         <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型微调任务，数据来自统一历史记录">
           <template #actions>
-            <BaseButton tone="ghost" size="sm" :disabled="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
-              <BaseLoadingIndicator v-if="isRefreshingHistory" size="sm" tone="muted" />
-              <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
+              <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
             </BaseButton>
           </template>
@@ -801,7 +816,7 @@ onBeforeUnmount(() => {
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           </div>
           <div class="xl:col-span-1">
-            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+            <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           </div>
           <div class="md:col-span-2 xl:col-span-1">
             <BaseListbox
@@ -826,16 +841,16 @@ onBeforeUnmount(() => {
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
           <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
           <p class="mt-1 text-xs leading-5 text-stone-500">当选择不同的基础模型时，可配置的微调参数会有所不同，请参考不同模型的官方文档。</p>
-          <component :is="activeTrainingParamsComponent" class="mt-4" v-model="form.modelParams" :supports-lora="supportsSelectedModelLora" />
+          <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTrainingTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。{{ baseModelSummary }}</p>
+            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelVersion }}。</p>
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
-            <p v-for="line in modelSpecificSummaryLines" :key="line" class="mt-1">{{ line }}</p>
+            <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">
               当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
@@ -845,33 +860,23 @@ onBeforeUnmount(() => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex items-center justify-center gap-2">
-              <BaseButton :disabled="!canStartTraining" @click="startTraining">
-                <BaseLoadingIndicator v-if="isStarting" size="sm" tone="muted" />
-                <CpuChipIcon v-else class="h-4 w-4" aria-hidden="true" />
+              <BaseButton :loading="isStarting" :disabled="!canStartTraining" @click="startTraining">
+                <CpuChipIcon v-if="!isStarting" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isStarting ? '创建中...' : '开始微调' }}</span>
               </BaseButton>
               <BaseButton
                 tone="quiet"
+                :loading="isCancelling"
                 :disabled="isCancelling || !activeTrainingTask || ![TaskStatus.Pending, TaskStatus.Running].includes(activeTrainingTask.status)"
                 @click="cancelActiveTrainingTask"
               >
-                <BaseLoadingIndicator v-if="isCancelling" size="sm" tone="muted" />
-                <StopCircleIcon v-else class="h-4 w-4" aria-hidden="true" />
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isCancelling ? '终止中...' : '终止微调' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
                 <span>重置表单</span>
               </BaseButton>
-            </div>
-
-            <div v-if="activeTrainingTask" class="mt-4 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
-              <p>当前活动任务</p>
-              <p class="mt-1">
-                任务 {{ activeTrainingTask.taskId }}，状态 {{ activeTrainingTask.status }}，模型
-                {{ modelStore.getModelLabel(activeTrainingTask.baseModel) }} {{ activeTrainingTask.modelScale }}。
-              </p>
-              <p class="mt-1">创建时间 {{ activeTrainingTask.createTime }}，共 {{ activeTrainingTask.sampleCount }} 项导入样本。</p>
             </div>
           </div>
         </div>

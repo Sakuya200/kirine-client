@@ -9,7 +9,10 @@ use std::{
 use tracing::{error, info};
 
 use crate::{
-    config::{resolve_base_log_dir, AttentionImplementation, HardwareType, StorageMode},
+    config::{
+        resolve_base_log_dir, AttentionImplementation, HardwareType, StorageMode,
+        ROOT_RELATIVE_PATHS,
+    },
     Result,
 };
 
@@ -153,38 +156,27 @@ pub fn supported_models_path() -> Result<std::path::PathBuf> {
 }
 
 fn resolve_root_file_path(file_name: &str) -> Result<std::path::PathBuf> {
-    let current_path = current_dir().context("无法获取当前工作目录")?;
-    let primary_path = current_path.join(file_name);
-    if primary_path.exists() {
-        println!(
-            "[startup] 找到项目根目录下的文件: {}",
-            primary_path.display()
-        );
-        return Ok(primary_path);
-    }
-
-    let fallback_path = current_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from(".."))
-        .join(file_name);
-    if fallback_path.exists() {
-        println!(
-            "[startup] 当前目录下未找到 {file_name}，已回退到上一级目录文件: {}",
-            fallback_path.display()
-        );
-        return Ok(fallback_path);
+    for relative_root_path in ROOT_RELATIVE_PATHS {
+        let candidate_path = Path::new(relative_root_path).join(file_name);
+        if candidate_path.exists() {
+            println!("[startup] 找到文件: {}", candidate_path.display(),);
+            return Ok(candidate_path);
+        }
     }
 
     eprintln!(
         "[startup] 未找到文件: {file_name}, 当前目录: {}",
-        current_path.display()
+        current_dir()?.display()
     );
-    Err(io::Error::new(io::ErrorKind::NotFound, format!("未找到文件: {file_name}")).into())
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("当前根目录未找到文件: {file_name}"),
+    )
+    .into())
 }
 
 pub fn load_configs() -> Result<EnvConfig> {
-    let config_path = config_path().context("解析配置文件路径失败")?;
+    let config_path = config_path()?;
     load_configs_from_path(&config_path)
 }
 

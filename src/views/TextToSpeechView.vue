@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -8,12 +8,11 @@ import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import GeneratedAudioResultCard from '@/components/common/GeneratedAudioResultCard.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
-import { getTextToSpeechModelRegistryEntry } from '@/components/form/textToSpeechRegistry';
+import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
@@ -27,17 +26,19 @@ import {
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
+import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
+import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
 interface TtsResult {
   taskId: number;
   fileName: string;
-  speakerId: number;
+  speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
@@ -54,10 +55,10 @@ interface TtsResult {
 interface TextToSpeechTaskResultPayload {
   taskId: number;
   fileName: string;
-  speakerId: number;
+  speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
@@ -75,20 +76,26 @@ interface TextToSpeechAudioAssetPayload {
   contentType: string;
   bytes: number[];
 }
+
+const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_cpufast']);
 const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
-const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) =>
-  getTextToSpeechModelRegistryEntry(baseModel).normalizeParams(modelParams);
+const uiConfigStore = useUiConfigStore();
+
+const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'tts');
+  return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
+};
 
 const form = reactive({
   speakerId: null as number | null,
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
   text: '',
-  modelParams: getTextToSpeechModelRegistryEntry('').createDefaultParams() as Record<string, unknown>
+  modelParams: {} as Record<string, unknown>
 });
 
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
@@ -113,49 +120,58 @@ let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 let skipHistoryTaskSelectionReload = false;
 
+const isDynamicReferenceModel = computed(() => DYNAMIC_REFERENCE_BASE_MODELS.has(form.baseModel));
+const dynamicRefAudioPath = computed(() => String(form.modelParams.refAudioPath ?? '').trim());
+const dynamicRefTextPath = computed(() => String(form.modelParams.refTextPath ?? '').trim());
+
 const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
     label: item.modelName,
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
-const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() =>
-  speakerStore.speakers
+const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
+const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
+  {
+    value: null,
+    label: '自动选择',
+    description: '不指定说话人，后端会按当前模型使用默认推理说话人或模型内默认配置。'
+  },
+  ...speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
     .map(speaker => ({
       value: speaker.id,
       label: speaker.name,
       description: speaker.description || '该说话人暂无备注。'
     }))
-);
+]);
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
-const activeTextToSpeechConfig = computed(() => getTextToSpeechModelRegistryEntry(form.baseModel));
-const activeTextToSpeechParamsComponent = computed(() => activeTextToSpeechConfig.value.paramsComponent);
-const canGenerate = computed(
-  () => form.speakerId !== null && Boolean(form.language) && charCount.value > 0 && !isGenerating.value && !!form.modelScale
-);
-const generationTips = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
-  `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
-  `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`,
-  ...activeTextToSpeechConfig.value.buildGenerationSummaryLines(form.modelParams)
-]);
-const activeResultSummaryLines = computed(() => {
-  if (!activeResult.value) {
-    return [];
-  }
+const canGenerate = computed(() => {
+  const modelParamsValid = activeTextToSpeechTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'tts', form.modelParams) : true;
 
-  return getTextToSpeechModelRegistryEntry(activeResult.value.baseModel).buildResultSummaryLines(activeResult.value.modelParams);
+  return (
+    Boolean(form.language) &&
+    charCount.value > 0 &&
+    modelParamsValid &&
+    !isGenerating.value &&
+    !!form.modelVersion &&
+    (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
+  );
 });
+const generationTips = computed(() => [
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
+  isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
+  `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
     return '';
   }
 
-  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelScale} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
+  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -192,15 +208,15 @@ watch(
 );
 
 watch(
-  modelScaleOptions,
+  modelVersionOptions,
   options => {
     if (options.length === 0) {
-      form.modelScale = '';
+      form.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === form.modelScale)) {
-      form.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === form.modelVersion)) {
+      form.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -215,8 +231,8 @@ watch(
       return;
     }
 
-    const matched = options.find(option => option.value === form.speakerId) ?? options[0];
-    form.speakerId = typeof matched.value === 'number' ? matched.value : Number(matched.value);
+    const matched = options.find(option => option.value === form.speakerId) ?? options[0] ?? null;
+    form.speakerId = typeof matched?.value === 'number' ? matched.value : null;
     selectedSpeakerOption.value = matched;
   },
   { immediate: true }
@@ -268,7 +284,7 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   speakerId: payload.speakerId,
   speakerLabel: payload.speakerLabel,
   baseModel: payload.baseModel,
-  modelScale: payload.modelScale,
+  modelVersion: payload.modelVersion,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
@@ -293,7 +309,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     speakerId: record.detail.speakerId,
     speakerLabel: record.speaker,
     baseModel: record.detail.baseModel,
-    modelScale: record.detail.modelScale,
+    modelVersion: record.detail.modelVersion,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
@@ -315,7 +331,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   activeResult.value = setAsActiveResult ? item : null;
   form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.baseModel = item.baseModel;
-  form.modelScale = item.modelScale;
+  form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;
   form.exportAudioName = item.exportAudioName;
@@ -485,9 +501,9 @@ const generateAudio = async () => {
   try {
     const payload = await invoke<TextToSpeechTaskResultPayload>('create_text_to_speech_task', {
       payload: {
-        speakerId: form.speakerId ?? 0,
+        speakerId: isDynamicReferenceModel.value ? null : form.speakerId,
         baseModel: form.baseModel,
-        modelScale: form.modelScale,
+        modelVersion: form.modelVersion,
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
@@ -510,9 +526,15 @@ const generateAudio = async () => {
 };
 
 const requestClearText = () => {
-  if (!trimmedText.value) {
-    form.text = '';
-    uiStore.notifyInfo('输入文本已清空。', 2200);
+  const hasChanges =
+    trimmedText.value ||
+    form.speakerId ||
+    form.baseModel ||
+    form.language !== AppLanguage.Chinese ||
+    form.format !== TextToSpeechFormat.Wav ||
+    JSON.stringify(form.modelParams) !== '{}';
+  if (!hasChanges) {
+    uiStore.notifyInfo('表单已为默认状态。', 2200);
     return;
   }
 
@@ -520,9 +542,17 @@ const requestClearText = () => {
 };
 
 const confirmClearText = () => {
+  form.speakerId = null;
+  form.language = AppLanguage.Chinese;
+  form.format = TextToSpeechFormat.Wav;
+  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
   form.text = '';
+  form.modelParams = {};
+  selectedSpeakerOption.value = null;
+  selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES[0] ?? null;
+  selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
   showClearDialog.value = false;
-  uiStore.notifyInfo('输入文本已清空。', 2200);
+  uiStore.notifyInfo('表单已重置。', 2200);
 };
 
 const cancelClearText = () => {
@@ -558,10 +588,9 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
+  await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
-  if (!speakerStore.initialized) {
-    await speakerStore.loadSpeakers();
-  }
+  await speakerStore.ensureLoaded({ force: true });
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });
@@ -569,7 +598,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="文本转语音" description="选择说话人和模型，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
+    <PageHeader title="文本转语音" description="选择模型，可选说话人，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
@@ -581,11 +610,16 @@ onMounted(async () => {
             v-model:selected-option="selectedSpeakerOption"
             label="说话人"
             :options="speakerOptions"
-            :placeholder="speakerOptions.length > 0 ? '请选择说话人' : '暂无可用说话人'"
+            placeholder="可选，不指定时自动选择"
           />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="语言" :options="TEXT_TO_SPEECH_LANGUAGES" />
+          <BaseListbox
+            v-model="form.language"
+            v-model:selected-option="selectedLanguageOption"
+            label="输出语言"
+            :options="TEXT_TO_SPEECH_LANGUAGES"
+          />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
           <label class="block text-sm text-slate-700">
             <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
@@ -595,45 +629,6 @@ onMounted(async () => {
               placeholder="例如 news_broadcast"
             />
           </label>
-        </div>
-
-        <div class="mt-4">
-          <label class="block text-sm text-slate-700">
-            <span class="mb-1 block text-xs text-stone-500">输入文本</span>
-            <textarea
-              v-model="form.text"
-              rows="8"
-              class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2"
-              placeholder="请输入要合成的文本内容..."
-            />
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-              <span>字符数 {{ charCount }}，段落数 {{ paragraphCount }}</span>
-            </div>
-          </label>
-        </div>
-
-        <div class="mt-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
-          <component :is="activeTextToSpeechParamsComponent" class="mt-4" v-model="form.modelParams" />
-        </div>
-
-        <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-xs text-stone-600">
-          <p class="font-semibold text-slate-700">生成摘要</p>
-          <ul class="mt-2 space-y-1.5">
-            <li v-for="tip in generationTips" :key="tip">{{ tip }}</li>
-          </ul>
-        </div>
-
-        <div class="mt-4 flex flex-wrap gap-2">
-          <BaseButton :disabled="!canGenerate" @click="generateAudio">
-            <BaseLoadingIndicator v-if="isGenerating" size="sm" tone="muted" />
-            <SparklesIcon v-else class="h-4 w-4" aria-hidden="true" />
-            <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
-          </BaseButton>
-          <BaseButton tone="ghost" @click="requestClearText">
-            <XMarkIcon class="h-4 w-4" aria-hidden="true" />
-            <span>清空文本</span>
-          </BaseButton>
         </div>
       </PanelCard>
 
@@ -651,7 +646,6 @@ onMounted(async () => {
               <p>任务 ID：{{ activeResult.taskId }}</p>
               <p>生成时间：{{ activeResult.createdAt }}</p>
               <p>导出名称：{{ activeResult.exportAudioName }}</p>
-              <p v-for="line in activeResultSummaryLines" :key="line">{{ line }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
           </template>
@@ -665,9 +659,8 @@ onMounted(async () => {
 
         <PanelCard title="最近任务" subtitle="展示最近 5 条文本转语音任务，数据来自统一历史记录">
           <template #actions>
-            <BaseButton tone="ghost" size="sm" :disabled="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
-              <BaseLoadingIndicator v-if="isRefreshingHistory" size="sm" tone="muted" />
-              <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+            <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
+              <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
               <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
             </BaseButton>
           </template>
@@ -682,14 +675,56 @@ onMounted(async () => {
       </div>
     </div>
 
-    <BaseDialog :open="showClearDialog" title="清空文本" @close="cancelClearText">
-      <p class="text-sm leading-6 text-slate-700">当前输入的文本会被清空，但不会删除已经生成的结果记录。确定继续吗？</p>
+    <PanelCard class="z-20" title="生成参数" subtitle="输入文本并配置模型特定参数后生成目标音频。">
+      <div class="space-y-5 text-sm text-slate-700">
+        <label class="block text-sm text-slate-700">
+          <span class="mb-1 block text-xs text-stone-500">输入文本</span>
+          <textarea
+            v-model="form.text"
+            rows="8"
+            class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2"
+            placeholder="请输入要合成的文本内容..."
+          />
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+            <span>字符数 {{ charCount }}，段落数 {{ paragraphCount }}</span>
+          </div>
+        </label>
+
+        <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTextToSpeechTaskConfig" />
+        </section>
+
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+          <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
+            <p>生成摘要</p>
+            <p v-for="tip in generationTips" :key="tip" class="mt-1">{{ tip }}</p>
+          </div>
+
+          <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="generateAudio">
+                <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              </BaseButton>
+              <BaseButton tone="ghost" @click="requestClearText">
+                <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
+                <span>重置表单</span>
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      </div>
+    </PanelCard>
+
+    <BaseDialog :open="showClearDialog" title="重置表单" @close="cancelClearText">
+      <p class="text-sm leading-6 text-slate-700">表单将重置到默认状态，包括所有参数设置。已生成的结果记录不会被删除。确定继续吗？</p>
       <template #footer>
         <BaseButton tone="ghost" @click="cancelClearText">
           <span>取消</span>
         </BaseButton>
         <BaseButton @click="confirmClearText">
-          <span>确认清空</span>
+          <span>确认重置</span>
         </BaseButton>
       </template>
     </BaseDialog>

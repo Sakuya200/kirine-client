@@ -1,0 +1,41 @@
+# Runtime dependency reminder:
+# - gpt_sovits_cpufast package itself is CLI glue and relies on the downloaded
+#   GPT-SoVITS-CPUFast checkout under src-model/base-models/<base-model>/.
+# - The bridge imports soundfile at runtime through the package environment.
+# - Keep this list aligned with CPUFast inference-time imports (TTS.py, TextPreprocessor,
+#   LangSegmenter, chinese/chinese2), not full WebUI-only dependencies.
+soundfile==0.13.1
+ffmpy==0.6.1
+tqdm==4.67.1
+numpy<2.0
+scipy
+librosa==0.10.2
+numba
+ffmpeg-python
+cn2an
+pypinyin
+g2p_en
+tokenizers
+onnxruntime
+transformers==4.57.3
+peft<0.18.0
+chardet
+PyYAML==6.0.3
+psutil
+jieba_fast
+jieba
+split-lang
+fast_langdetect>=0.3.1
+wordsegment
+ToJyutping
+g2pk2
+ko_pron
+pyopenjtalk
+opencc
+einops
+pytorch-lightning
+pydantic
+inflect
+unidecode
+omegaconf
+hydra-core

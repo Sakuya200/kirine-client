@@ -2,32 +2,13 @@ from __future__ import annotations
 
 from argparse import Namespace
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
-
-@dataclass
-class CommonTaskArgs:
-    model_root_path: str | None
-    speaker_dir_name: str | None
-    model_params_json: dict[str, object]
+from moss_tts_local.params_entity import CommonTaskArgs, ParamsEntity, RuntimeOptions
 
 
 MOSS_MODEL_NAME = "MOSS-TTS-Local-Transformer"
 MOSS_AUDIO_TOKENIZER_NAME = "MOSS-Audio-Tokenizer"
-
-
-@dataclass
-class MossGenerationRuntimeOptions:
-    device: str
-    logging_dir: str
-    attn_implementation: str
-
-
-@dataclass
-class MossTrainingRuntimeOptions:
-    device: str
-    logging_dir: str
 
 
 @dataclass
@@ -52,7 +33,7 @@ class MossTrainingParams:
     prep_n_vq: int | None
     channelwise_loss_weight: str
     lr_scheduler_type: str
-    runtime: MossTrainingRuntimeOptions
+    runtime: RuntimeOptions
 
     def to_namespace(self) -> Namespace:
         return Namespace(
@@ -77,6 +58,7 @@ class MossTrainingParams:
             channelwise_loss_weight=self.channelwise_loss_weight,
             lr_scheduler_type=self.lr_scheduler_type,
             logging_dir=self.runtime.logging_dir,
+            attn_implementation=self.runtime.attn_implementation,
         )
 
 
@@ -88,7 +70,7 @@ class MossTtsParams:
     language: str
     n_vq_for_inference: int
     output_path: str
-    runtime: MossGenerationRuntimeOptions
+    runtime: RuntimeOptions
 
     def to_namespace(self) -> Namespace:
         return Namespace(
@@ -114,7 +96,7 @@ class MossVoiceCloneParams:
     output_path: str
     ref_audio_path: str
     ref_text: str
-    runtime: MossGenerationRuntimeOptions
+    runtime: RuntimeOptions
 
     def to_namespace(self) -> Namespace:
         return Namespace(
@@ -130,44 +112,6 @@ class MossVoiceCloneParams:
             attn_implementation=self.runtime.attn_implementation,
             max_new_tokens=8192,
         )
-
-
-def _load_json(path: str | Path) -> dict[str, object]:
-    params_path = Path(path).expanduser().resolve()
-    if not params_path.exists():
-        raise FileNotFoundError(f"MOSS params file not found: {params_path}")
-
-    with params_path.open("r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def _extract_task_args(payload: dict[str, object], task_name: str) -> dict[str, object]:
-    raw_args = payload.get("args") or {}
-    if not isinstance(raw_args, dict):
-        raise TypeError("Malformed MOSS params payload: args must be an object")
-
-    nested_args = raw_args.get(task_name)
-    if not isinstance(nested_args, dict):
-        raise TypeError(f"Malformed MOSS params payload: args.{task_name} must be an object")
-    return nested_args
-
-
-def _parse_common_task_args(args: dict[str, object]) -> CommonTaskArgs:
-    raw_model_params = args.get("model_params_json")
-    if raw_model_params is None:
-        model_params_json: dict[str, object] = {}
-    elif isinstance(raw_model_params, dict):
-        model_params_json = raw_model_params
-    else:
-        raise TypeError("Malformed MOSS params payload: model_params_json must be an object")
-
-    return CommonTaskArgs(
-        model_root_path=str(args["model_root_path"]) if args.get("model_root_path") is not None else None,
-        speaker_dir_name=str(args["speaker_dir_name"]) if args.get("speaker_dir_name") is not None else None,
-        model_params_json=model_params_json,
-    )
-
-
 def _resolve_locator_candidate(
     common: CommonTaskArgs,
     default_leaf_name: str,
@@ -181,6 +125,8 @@ def _resolve_locator_candidate(
     leaf_name = default_leaf_name
     if prefer_speaker_dir_name and common.speaker_dir_name:
         leaf_name = common.speaker_dir_name
+        if leaf_name.strip().casefold() == "base-models":
+            leaf_name = default_leaf_name
     return str((root_path / leaf_name).resolve())
 
 
@@ -195,8 +141,12 @@ def _resolve_moss_inference_root(common: CommonTaskArgs) -> Path:
         raise ValueError("MOSS params payload is missing a resolvable inference model path")
 
     root_path = Path(common.model_root_path).expanduser().resolve()
-    if common.speaker_dir_name:
-        speaker_root = (root_path / common.speaker_dir_name).resolve()
+    speaker_dir_name = common.speaker_dir_name
+    if speaker_dir_name and speaker_dir_name.strip().casefold() == "base-models":
+        speaker_dir_name = None
+
+    if speaker_dir_name:
+        speaker_root = (root_path / speaker_dir_name).resolve()
         bundled_root = (speaker_root / MOSS_MODEL_NAME).resolve()
         if bundled_root.is_dir():
             return bundled_root
@@ -237,151 +187,102 @@ def _parse_float_with_default(value: str | None, default: float) -> float:
     return float(value)
 
 
-def _model_param(common: CommonTaskArgs, key: str):
-    return common.model_params_json.get(key)
+def _normalize_generation_runtime(runtime: RuntimeOptions) -> RuntimeOptions:
+    return RuntimeOptions(
+        device=runtime.device or "cuda:0",
+        logging_dir=runtime.logging_dir or "",
+        attn_implementation=runtime.attn_implementation or "auto",
+    )
 
 
-def _model_param_str(common: CommonTaskArgs, key: str, fallback: str | None) -> str | None:
-    value = _model_param(common, key)
-    if value is None:
-        return fallback
-    return str(value)
-
-
-def _model_param_int(common: CommonTaskArgs, key: str, fallback: int | None) -> int | None:
-    value = _model_param(common, key)
-    if value is None:
-        return fallback
-    return int(value)
-
-
-def _model_param_bool(common: CommonTaskArgs, key: str, fallback: bool) -> bool:
-    value = _model_param(common, key)
-    if value is None:
-        return fallback
-    return bool(value)
+def _normalize_training_runtime(runtime: RuntimeOptions) -> RuntimeOptions:
+    return RuntimeOptions(
+        device=runtime.device or "cuda:0",
+        logging_dir=runtime.logging_dir or "",
+        attn_implementation=runtime.attn_implementation or "auto",
+    )
 
 
 def load_training_params(path: str | Path) -> MossTrainingParams:
-    payload = _load_json(path)
-    if payload.get("kind") != "Training":
-        raise ValueError(f"Expected Training params payload, got: {payload.get('kind')}")
-
-    runtime = payload.get("runtime") or {}
-    args = _extract_task_args(payload, "Training")
-    if not isinstance(runtime, dict) or not isinstance(args, dict):
-        raise TypeError("Malformed MOSS training params payload")
-
-    common = _parse_common_task_args(args)
-    learning_rate = _model_param_str(common, "learningRate", args.get("lr"))
-    weight_decay = _model_param_str(common, "weightDecay", None)
-    warmup_ratio = _model_param_str(common, "warmupRatio", None)
-    max_grad_norm = _model_param_str(common, "maxGradNorm", None)
-    mixed_precision = _model_param_str(common, "mixedPrecision", None)
-    channelwise_loss_weight = _model_param_str(
-        common,
+    params = ParamsEntity.from_file(path)
+    args = params.training_args()
+    learning_rate = params.model_param_str("learningRate", args.lr)
+    weight_decay = params.model_param_str("weightDecay", None)
+    warmup_ratio = params.model_param_str("warmupRatio", None)
+    max_grad_norm = params.model_param_str("maxGradNorm", None)
+    mixed_precision = params.model_param_str("mixedPrecision", None)
+    channelwise_loss_weight = params.model_param_str(
         "channelwiseLossWeight",
         None,
     )
-    lr_scheduler_type = _model_param_str(common, "lrSchedulerType", None)
+    lr_scheduler_type = params.model_param_str("lrSchedulerType", None)
 
     return MossTrainingParams(
-        common=common,
-        init_model_path=_resolve_training_model_path(common),
-        codec_path=_resolve_codec_path(common),
-        input_jsonl=str(args["input_jsonl"]),
-        output_model_path=str(args["output_model_path"]),
-        batch_size=int(args["batch_size"]),
-        gradient_accumulation_steps=int(args["gradient_accumulation_steps"]),
-        num_epochs=int(args["num_epochs"]),
+        common=args.common,
+        init_model_path=_resolve_training_model_path(args.common),
+        codec_path=_resolve_codec_path(args.common),
+        input_jsonl=args.input_jsonl,
+        output_model_path=args.output_model_path,
+        batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_epochs=args.num_epochs,
         learning_rate=_parse_float_with_default(learning_rate, 1e-5),
         weight_decay=_parse_float_with_default(weight_decay, 0.1),
         warmup_ratio=_parse_float_with_default(warmup_ratio, 0.03),
-        warmup_steps=int(_model_param_int(common, "warmupSteps", None) or 0),
+        warmup_steps=int(params.model_param_int("warmupSteps", None) or 0),
         max_grad_norm=_parse_float_with_default(max_grad_norm, 1.0),
         mixed_precision=str(mixed_precision or "bf16"),
-        enable_gradient_checkpointing=_model_param_bool(
-            common,
+        enable_gradient_checkpointing=params.model_param_bool(
             "enableGradientCheckpointing",
-            bool(args.get("enable_gradient_checkpointing", True)),
+            args.enable_gradient_checkpointing,
         ),
-        skip_reference_audio_codes=_model_param_bool(
-            common,
+        skip_reference_audio_codes=params.model_param_bool(
             "skipReferenceAudioCodes",
             True,
         ),
-        prep_batch_size=int(_model_param_int(common, "prepBatchSize", None) or 16),
-        prep_n_vq=_model_param_int(common, "prepNVq", None),
+        prep_batch_size=int(params.model_param_int("prepBatchSize", None) or 16),
+        prep_n_vq=params.model_param_int("prepNVq", None),
         channelwise_loss_weight=str(channelwise_loss_weight or "1,32"),
         lr_scheduler_type=str(lr_scheduler_type or "cosine"),
-        runtime=MossTrainingRuntimeOptions(
-            device=str(runtime.get("device") or "cuda:0"),
-            logging_dir=str(runtime.get("logging_dir") or ""),
-        ),
+        runtime=_normalize_training_runtime(params.runtime),
     )
 
 
 def load_tts_params(path: str | Path) -> MossTtsParams:
-    payload = _load_json(path)
-    if payload.get("kind") != "TextToSpeech":
-        raise ValueError(f"Expected TextToSpeech params payload, got: {payload.get('kind')}")
-
-    runtime = payload.get("runtime") or {}
-    args = _extract_task_args(payload, "TextToSpeech")
-    if not isinstance(runtime, dict) or not isinstance(args, dict):
-        raise TypeError("Malformed MOSS tts params payload")
-
-    common = _parse_common_task_args(args)
-    n_vq_for_inference = _model_param_int(
-        common,
+    params = ParamsEntity.from_file(path)
+    args = params.tts_args()
+    n_vq_for_inference = params.model_param_int(
         "nVqForInference",
         None,
     )
 
     return MossTtsParams(
-        common=common,
-        init_model_path=_resolve_inference_model_path(common),
-        text=str(args["text"]),
-        language=str(args.get("language") or "auto"),
+        common=args.common,
+        init_model_path=_resolve_inference_model_path(args.common),
+        text=args.text,
+        language=args.language or "auto",
         n_vq_for_inference=int(n_vq_for_inference or 8),
-        output_path=str(args["output_path"]),
-        runtime=MossGenerationRuntimeOptions(
-            device=str(runtime.get("device") or "cuda:0"),
-            logging_dir=str(runtime.get("logging_dir") or ""),
-            attn_implementation=str(runtime.get("attn_implementation") or "auto"),
-        ),
+        output_path=args.output_path,
+        runtime=_normalize_generation_runtime(params.runtime),
     )
 
 
 def load_voice_clone_params(path: str | Path) -> MossVoiceCloneParams:
-    payload = _load_json(path)
-    if payload.get("kind") != "VoiceClone":
-        raise ValueError(f"Expected VoiceClone params payload, got: {payload.get('kind')}")
-
-    runtime = payload.get("runtime") or {}
-    args = _extract_task_args(payload, "VoiceClone")
-    if not isinstance(runtime, dict) or not isinstance(args, dict):
-        raise TypeError("Malformed MOSS voice clone params payload")
-
-    common = _parse_common_task_args(args)
-    n_vq_for_inference = _model_param_int(
-        common,
+    params = ParamsEntity.from_file(path)
+    args = params.voice_clone_args()
+    n_vq_for_inference = params.model_param_int(
         "nVqForInference",
         None,
     )
 
     return MossVoiceCloneParams(
-        common=common,
-        init_model_path=_resolve_inference_model_path(common),
-        text=str(args["text"]),
-        language=str(args.get("language") or "auto"),
+        common=args.common,
+        init_model_path=_resolve_inference_model_path(args.common),
+        text=args.text,
+        language=args.language or "auto",
         n_vq_for_inference=int(n_vq_for_inference or 8),
-        output_path=str(args["output_path"]),
-        ref_audio_path=str(args["ref_audio_path"]),
-        ref_text=str(args.get("ref_text") or ""),
-        runtime=MossGenerationRuntimeOptions(
-            device=str(runtime.get("device") or "cuda:0"),
-            logging_dir=str(runtime.get("logging_dir") or ""),
-            attn_implementation=str(runtime.get("attn_implementation") or "auto"),
-        ),
+        output_path=args.output_path,
+        ref_audio_path=args.ref_audio_path,
+        ref_text=args.ref_text or "",
+        runtime=_normalize_generation_runtime(params.runtime),
     )

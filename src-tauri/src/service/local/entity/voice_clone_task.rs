@@ -7,7 +7,7 @@ pub struct Model {
     pub id: i64,
     pub history_id: i64,
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: String,
     pub format: String,
     pub export_audio_name: String,

@@ -21,26 +21,6 @@ pub(crate) struct PythonScriptRuntimeOptions {
     pub attn_implementation: Option<String>,
 }
 
-pub(crate) fn split_model_locator(model_path: &Path) -> (String, Option<String>) {
-    let model_root_path = model_path
-        .parent()
-        .unwrap_or(model_path)
-        .to_string_lossy()
-        .to_string();
-    let speaker_dir_name = model_path.parent().and_then(|parent| {
-        let parent_name = parent.file_name()?.to_str()?;
-        if parent_name.eq_ignore_ascii_case("base-models") {
-            None
-        } else {
-            model_path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-        }
-    });
-
-    (model_root_path, speaker_dir_name)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TrainingArgs {
     pub model_root_path: String,
@@ -98,7 +78,7 @@ pub(crate) enum PythonScriptTaskArgs {
 pub(crate) struct PythonScriptInvocationSpec {
     pub version: String,
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub kind: PythonScriptTaskKind,
     pub runtime: PythonScriptRuntimeOptions,
     pub args: PythonScriptTaskArgs,

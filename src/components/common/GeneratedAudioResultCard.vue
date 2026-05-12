@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
 import { EyeIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, useSlots } from 'vue';
 
 import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { TaskStatus } from '@/enums/status';
-import { formatErrorMessage } from '@/hooks/useErrorMessage';
-import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
 
 interface AudioAssetPayload {
   fileName: string;
@@ -29,30 +24,24 @@ interface GeneratedAudioResultCardTask {
 interface Props {
   result: GeneratedAudioResultCardTask | null;
   metaText: string;
-  summaryLines?: string[];
   emptyText: string;
   title?: string;
   subtitle?: string;
-  previewText?: string;
-  previewClass?: string;
   loadAudioAsset: (taskId: number) => Promise<AudioAssetPayload>;
   downloadAudio?: (taskId: number) => Promise<boolean>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '生成结果',
-  subtitle: '展示最近一次任务的返回结果和输出文件信息',
-  summaryLines: () => [],
-  previewText: '',
-  previewClass: 'mt-2 line-clamp-4 text-slate-700'
+  subtitle: '展示最近一次任务的返回结果和输出文件信息'
 });
 
 const slots = useSlots();
-const uiStore = useUiStore();
-const detailRecord = ref<HistoryRecord | null>(null);
+const detailRecordId = ref<number | null>(null);
+const detailReloadToken = ref(0);
 const isDetailLoading = ref(false);
 
-const canViewDetail = computed(() => props.result?.status === TaskStatus.Failed);
+const canViewDetail = computed(() => Boolean(props.result));
 const hasActionsSlot = computed(() => Boolean(slots.actions));
 
 const openDetail = async () => {
@@ -61,34 +50,21 @@ const openDetail = async () => {
   }
 
   isDetailLoading.value = true;
-
-  try {
-    detailRecord.value = await invoke<HistoryRecord>('get_history_record', {
-      historyId: props.result.taskId
-    });
-  } catch (error) {
-    uiStore.notifyError(formatErrorMessage('读取任务详情失败，请检查历史记录是否仍然存在', error));
-  } finally {
-    isDetailLoading.value = false;
-  }
+  detailRecordId.value = props.result.taskId;
+  detailReloadToken.value += 1;
+  isDetailLoading.value = false;
 };
 
 const closeDetail = () => {
-  detailRecord.value = null;
+  detailRecordId.value = null;
 };
 
 const refreshDetailRecord = async () => {
-  if (!detailRecord.value) {
+  if (detailRecordId.value === null) {
     return;
   }
 
-  try {
-    detailRecord.value = await invoke<HistoryRecord>('get_history_record', {
-      historyId: detailRecord.value.id
-    });
-  } catch (error) {
-    uiStore.notifyError(formatErrorMessage('刷新任务详情失败，请检查历史记录是否仍然存在', error));
-  }
+  detailReloadToken.value += 1;
 };
 
 defineExpose({
@@ -105,9 +81,8 @@ defineExpose({
           <p class="mt-1 text-xs text-stone-500">{{ metaText }}</p>
         </div>
         <div class="flex items-center gap-2">
-          <BaseButton v-if="canViewDetail" tone="ghost" size="sm" :disabled="isDetailLoading" @click="openDetail">
-            <BaseLoadingIndicator v-if="isDetailLoading" size="sm" tone="muted" />
-            <EyeIcon v-else class="h-4 w-4" aria-hidden="true" />
+          <BaseButton v-if="canViewDetail" tone="ghost" size="sm" :loading="isDetailLoading" @click="openDetail">
+            <EyeIcon v-if="!isDetailLoading" class="h-4 w-4" aria-hidden="true" />
             <span>{{ isDetailLoading ? '载入中...' : '查看详情' }}</span>
           </BaseButton>
           <StatusPill :status="result.status" />
@@ -127,8 +102,6 @@ defineExpose({
       <div class="mt-3 rounded-2xl border border-brand-200 bg-white/80 p-3 text-xs text-stone-600">
         <slot name="details">
           <p>任务 ID：{{ result.taskId }}</p>
-          <p v-for="line in summaryLines" :key="line" class="mt-1">{{ line }}</p>
-          <p v-if="previewText" :class="previewClass">{{ previewText }}</p>
         </slot>
       </div>
 
@@ -141,6 +114,6 @@ defineExpose({
       {{ emptyText }}
     </div>
 
-    <HistoryTaskDetailDialog :open="detailRecord !== null" :record="detailRecord" @close="closeDetail" />
+    <HistoryTaskDetailDialog :open="detailRecordId !== null" :record-id="detailRecordId" :reload-token="detailReloadToken" @close="closeDetail" />
   </PanelCard>
 </template>

@@ -43,6 +43,9 @@ const selectedStatus = ref<StatusFilterValue>(statusOptions[0].value);
 const isEditDialogOpen = ref(false);
 const isImportDialogOpen = ref(false);
 const isDeleteDialogOpen = ref(false);
+const isSavingSpeaker = ref(false);
+const isImportingSpeaker = ref(false);
+const isDeletingSpeaker = ref(false);
 const editForm = reactive({
   id: null as number | null,
   name: '',
@@ -50,7 +53,7 @@ const editForm = reactive({
 });
 const importForm = reactive({
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   sourceModelDirPath: '',
   name: '',
   description: '',
@@ -63,7 +66,7 @@ const importableModelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const importModelScaleOptions = computed(() => modelStore.getModelScaleOptions(importForm.baseModel));
+const importModelVersionOptions = computed(() => modelStore.getModelVersionOptions(importForm.baseModel));
 const importLanguageOptions: Array<{ value: AppLanguage; label: string }> = [
   { value: AppLanguage.Chinese, label: '中文' },
   { value: AppLanguage.English, label: '英文' },
@@ -77,7 +80,7 @@ const canSaveSpeaker = computed(() => editForm.name.trim().length > 0 && editFor
 const canImportSpeaker = computed(
   () =>
     importForm.baseModel.trim().length > 0 &&
-    importForm.modelScale.trim().length > 0 &&
+    importForm.modelVersion.trim().length > 0 &&
     importForm.sourceModelDirPath.trim().length > 0 &&
     importForm.name.trim().length > 0 &&
     importForm.description.trim().length > 0
@@ -136,7 +139,7 @@ const closeEditDialog = () => {
 
 const resetImportForm = () => {
   importForm.baseModel = String(importableModelOptions.value[0]?.value ?? '');
-  importForm.modelScale = String(importModelScaleOptions.value[0]?.value ?? '');
+  importForm.modelVersion = String(importModelVersionOptions.value[0]?.value ?? '');
   importForm.sourceModelDirPath = '';
   importForm.name = '';
   importForm.description = '';
@@ -169,14 +172,16 @@ const submitImportSpeaker = async () => {
     return;
   }
 
+  isImportingSpeaker.value = true;
   const imported = await speakerStore.importSpeaker({
     baseModel: importForm.baseModel,
-    modelScale: importForm.modelScale,
+    modelVersion: importForm.modelVersion,
     sourceModelDirPath: importForm.sourceModelDirPath.trim(),
     name: importForm.name.trim(),
     description: importForm.description.trim(),
     language: importForm.language
   });
+  isImportingSpeaker.value = false;
 
   if (imported) {
     closeImportDialog();
@@ -192,11 +197,13 @@ const saveSpeaker = async () => {
     return;
   }
 
+  isSavingSpeaker.value = true;
   const updated = await speakerStore.updateSpeaker({
     id: editForm.id,
     name: editForm.name,
     description: editForm.description
   });
+  isSavingSpeaker.value = false;
 
   if (updated) {
     closeEditDialog();
@@ -219,7 +226,9 @@ const confirmDelete = async () => {
   }
 
   const removedId = deleteTarget.value.id;
+  isDeletingSpeaker.value = true;
   const removed = await speakerStore.removeSpeaker(removedId);
+  isDeletingSpeaker.value = false;
 
   if (removed && selectedSpeakerId.value === removedId) {
     closeDetail();
@@ -246,15 +255,15 @@ watch(
 );
 
 watch(
-  importModelScaleOptions,
+  importModelVersionOptions,
   options => {
     if (options.length === 0) {
-      importForm.modelScale = '';
+      importForm.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === importForm.modelScale)) {
-      importForm.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === importForm.modelVersion)) {
+      importForm.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -265,9 +274,7 @@ onMounted(async () => {
     await modelStore.loadModels();
   }
 
-  if (!speakerStore.initialized) {
-    await speakerStore.loadSpeakers();
-  }
+  await speakerStore.ensureLoaded({ force: true });
 });
 </script>
 
@@ -301,8 +308,8 @@ onMounted(async () => {
             <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
             <span>导入模型</span>
           </BaseButton>
-          <BaseButton tone="ghost" :disabled="speakerStore.isLoading" @click="speakerStore.refreshSpeakers()">
-            <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
+          <BaseButton tone="ghost" :loading="speakerStore.isLoading" @click="speakerStore.refreshSpeakers()">
+            <ArrowPathIcon v-if="!speakerStore.isLoading" class="h-4 w-4" aria-hidden="true" />
             <span>{{ speakerStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
           </BaseButton>
         </div>
@@ -406,9 +413,9 @@ onMounted(async () => {
           <XMarkIcon class="h-4 w-4" aria-hidden="true" />
           <span>取消</span>
         </BaseButton>
-        <BaseButton :disabled="!canSaveSpeaker" @click="saveSpeaker">
-          <PencilSquareIcon class="h-4 w-4" aria-hidden="true" />
-          <span>保存修改</span>
+        <BaseButton :loading="isSavingSpeaker" :disabled="!canSaveSpeaker" @click="saveSpeaker">
+          <PencilSquareIcon v-if="!isSavingSpeaker" class="h-4 w-4" aria-hidden="true" />
+          <span>{{ isSavingSpeaker ? '保存中...' : '保存修改' }}</span>
         </BaseButton>
       </template>
     </BaseDialog>
@@ -420,8 +427,8 @@ onMounted(async () => {
           <BaseListbox v-model="importForm.baseModel" :options="importableModelOptions" />
         </label>
         <label class="block text-sm text-slate-700">
-          <span class="mb-1 block text-xs text-stone-500">模型参数大小</span>
-          <BaseListbox v-model="importForm.modelScale" :options="importModelScaleOptions" />
+          <span class="mb-1 block text-xs text-stone-500">模型版本</span>
+          <BaseListbox v-model="importForm.modelVersion" :options="importModelVersionOptions" />
         </label>
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">语言</span>
@@ -461,9 +468,9 @@ onMounted(async () => {
           <XMarkIcon class="h-4 w-4" aria-hidden="true" />
           <span>取消</span>
         </BaseButton>
-        <BaseButton :disabled="!canImportSpeaker" @click="submitImportSpeaker">
-          <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
-          <span>确认导入</span>
+        <BaseButton :loading="isImportingSpeaker" :disabled="!canImportSpeaker" @click="submitImportSpeaker">
+          <ArrowDownTrayIcon v-if="!isImportingSpeaker" class="h-4 w-4" aria-hidden="true" />
+          <span>{{ isImportingSpeaker ? '导入中...' : '确认导入' }}</span>
         </BaseButton>
       </template>
     </BaseDialog>
@@ -478,9 +485,9 @@ onMounted(async () => {
           <XMarkIcon class="h-4 w-4" aria-hidden="true" />
           <span>取消</span>
         </BaseButton>
-        <BaseButton tone="quiet" :disabled="!deleteTarget" @click="confirmDelete">
-          <TrashIcon class="h-4 w-4" aria-hidden="true" />
-          <span>确认删除</span>
+        <BaseButton tone="quiet" :loading="isDeletingSpeaker" :disabled="!deleteTarget || isDeletingSpeaker" @click="confirmDelete">
+          <TrashIcon v-if="!isDeletingSpeaker" class="h-4 w-4" aria-hidden="true" />
+          <span>{{ isDeletingSpeaker ? '删除中...' : '确认删除' }}</span>
         </BaseButton>
       </template>
     </BaseDialog>

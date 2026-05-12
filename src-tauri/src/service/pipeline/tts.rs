@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 use crate::{
     common::{
-        local_paths::{resolve_local_log_dir, resolve_runtime_model_path, resolve_task_path},
+        local_paths::{resolve_local_log_dir, resolve_task_path},
         task_paths::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir, tts_params_json_path,
         },
@@ -15,26 +15,28 @@ use crate::{
     config::BaseModel,
     service::{
         local::{
-            entity::{task_history as task_history_entity, tts_task as tts_task_entity},
+            entity::{
+                speaker as speaker_entity, task_history as task_history_entity,
+                tts_task as tts_task_entity,
+            },
             LocalService,
         },
-        models::{HistoryTaskType, TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload},
+        models::{
+            HistoryTaskType, SpeakerSource, TaskStatus, TextToSpeechFormat, UpdateTaskStatusPayload,
+        },
         pipeline::{
             api::{
-                split_model_locator, PythonScriptInvocationSpec, PythonScriptRuntimeOptions,
-                PythonScriptTaskArgs, PythonScriptTaskKind, TTSArgs,
+                PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
+                PythonScriptTaskKind, TTSArgs,
             },
-            model_artifacts::{
-                build_model_download_script_args, resolve_model_download_paths,
-                validate_model_artifact_paths,
-            },
+            model_artifacts::MODEL_ARTIFACTS_DIR,
+            model_paths::speaker_model_dir,
             run_pipeline_stage_shell_script, run_python_params_file_invocation,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
             },
-            validate_and_download, validate_and_init, CommonRuntimeOptions, PipelineBootstrapPaths,
-            TtsPipelineRequest, DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
+            CommonRuntimeOptions, TtsPipelineRequest,
         },
     },
     utils::{
@@ -60,13 +62,13 @@ pub(crate) struct CommonTtsModelParams {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTtsTaskParams {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_root_path: String,
     pub speaker_dir_name: Option<String>,
     pub language: String,
     pub format: TextToSpeechFormat,
     pub text: String,
-    pub speaker_name: String,
+    pub speaker_name: Option<String>,
     pub output_file_path: String,
     pub model_params_json: Value,
 }
@@ -74,11 +76,10 @@ pub(crate) struct LoadedTtsTaskParams {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTtsPaths {
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub src_model_root: PathBuf,
     pub venv_python_path: PathBuf,
-    pub init_task_runtime_script_path: PathBuf,
-    pub download_models_script_path: PathBuf,
+    pub ensure_torch_runtime_script_path: PathBuf,
     pub tts_python_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
     pub params_json_path: PathBuf,
@@ -97,7 +98,7 @@ pub(crate) fn build_shared_tts_invocation(
     PythonScriptInvocationSpec {
         version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
-        model_scale: context.params.model_scale.clone(),
+        model_version: context.params.model_version.clone(),
         kind: PythonScriptTaskKind::TextToSpeech,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.device().to_string()),
@@ -110,7 +111,7 @@ pub(crate) fn build_shared_tts_invocation(
             model_params_json: context.params.model_params_json.clone(),
             text: context.params.text.clone(),
             language: context.params.language.clone(),
-            speaker: context.params.speaker_name.clone(),
+            speaker: context.params.speaker_name.clone().unwrap_or_default(),
             output_path: resolve_temp_wav_path(
                 &context.params.output_file_path,
                 context.params.format,
@@ -119,6 +120,16 @@ pub(crate) fn build_shared_tts_invocation(
             .to_string(),
         }),
     }
+}
+
+fn resolve_default_model_root_path(src_model_root: &Path, base_model: &str) -> String {
+    let artifact_root = src_model_root.join(MODEL_ARTIFACTS_DIR);
+    let dedicated_root = artifact_root.join(base_model);
+    if dedicated_root.exists() {
+        return dedicated_root.to_string_lossy().to_string();
+    }
+
+    artifact_root.to_string_lossy().to_string()
 }
 
 pub(crate) async fn run_common_tts_pipeline(
@@ -134,8 +145,8 @@ pub(crate) async fn run_common_tts_pipeline(
 
         let runtime_config = service.runtime_config()?;
         let runtime = CommonRuntimeOptions::from_env_config(&runtime_config);
-        let log_dir = resolve_local_log_dir()?;
-        let params = load_tts_task_params(service, task_id, request.speaker_id).await?;
+        let log_dir = resolve_local_log_dir(&runtime_config)?;
+        let params = load_tts_task_params(service, task_id).await?;
         if params.base_model.trim() != base_model {
             bail!(
                 "TTS task base model mismatch: expected {}, got {}",
@@ -143,16 +154,15 @@ pub(crate) async fn run_common_tts_pipeline(
                 params.base_model
             );
         }
-        let paths = resolve_tts_paths(service, task_id, base_model, &params.model_scale)?;
+        let paths = resolve_tts_paths(service, task_id, base_model, &params.model_version)?;
 
         prepare_tts_model_env(
             service,
             &paths.base_model,
-            &paths.model_scale,
+            &paths.model_version,
             &paths.src_model_root,
             &paths.venv_python_path,
-            &paths.init_task_runtime_script_path,
-            &paths.download_models_script_path,
+            &paths.ensure_torch_runtime_script_path,
             task_id,
             &log_dir,
             runtime.is_cpu(),
@@ -209,10 +219,7 @@ pub(crate) async fn run_common_tts_pipeline(
 
     if let Err(err) = result {
         let duration_seconds = started_at.elapsed().as_secs() as i64;
-        let error_message = err.to_string();
-        if let Err(update_err) =
-            mark_tts_failed_state(service, task_id, duration_seconds, &error_message).await
-        {
+        if let Err(update_err) = mark_tts_failed_state(service, task_id, duration_seconds).await {
             error!(
                 error = %update_err,
                 task_id,
@@ -229,11 +236,9 @@ pub(crate) async fn run_common_tts_pipeline(
 pub(crate) async fn load_tts_task_params(
     service: &LocalService,
     task_id: i64,
-    speaker_id: i64,
 ) -> Result<LoadedTtsTaskParams> {
     let task_query = tts_task_entity::Entity::find()
         .filter(tts_task_entity::Column::HistoryId.eq(task_id))
-        .filter(tts_task_entity::Column::SpeakerId.eq(speaker_id))
         .filter(tts_task_entity::Column::Deleted.eq(0));
 
     let task_detail = task_query
@@ -243,7 +248,6 @@ pub(crate) async fn load_tts_task_params(
         .ok_or_else(|| anyhow::anyhow!("未找到 TTS 任务执行参数: {}", task_id))?;
 
     let task_history = task_history_entity::Entity::find_by_id(task_id)
-        .filter(task_history_entity::Column::SpeakerId.eq(speaker_id))
         .filter(task_history_entity::Column::Deleted.eq(0))
         .one(service.orm())
         .await
@@ -252,16 +256,58 @@ pub(crate) async fn load_tts_task_params(
 
     let src_model_root = resolve_src_model_root(service.app_dir())?;
     let model_params = parse_common_tts_model_params(&task_detail.model_params_json)?;
-    let resolved_model_path = resolve_runtime_model_path(
-        Path::new(service.model_dir()),
-        &src_model_root,
-        &task_detail.model_path.unwrap_or_default(),
-    )?;
-    let (model_root_path, speaker_dir_name) = split_model_locator(&resolved_model_path);
+    let selected_speaker_name = task_history.speaker_name_snapshot.trim().to_string();
+    let (model_root_path, speaker_dir_name, speaker_name) =
+        if let Some(speaker_id) = task_detail.speaker_id {
+            let speaker = speaker_entity::Entity::find_by_id(speaker_id)
+                .filter(speaker_entity::Column::Deleted.eq(0))
+                .one(service.orm())
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to load speaker {} for tts task {}",
+                        speaker_id, task_id
+                    )
+                })?
+                .ok_or_else(|| anyhow::anyhow!("未找到 TTS 说话人记录: {}", speaker_id))?;
+
+            if speaker.base_model.trim() != task_detail.base_model.trim() {
+                bail!(
+                    "TTS speaker base model mismatch: expected {}, got {}",
+                    task_detail.base_model,
+                    speaker.base_model
+                );
+            }
+
+            if speaker.source == SpeakerSource::Preset.as_str() {
+                (
+                    src_model_root
+                        .join(MODEL_ARTIFACTS_DIR)
+                        .to_string_lossy()
+                        .to_string(),
+                    None,
+                    (!selected_speaker_name.is_empty()).then_some(selected_speaker_name),
+                )
+            } else {
+                (
+                    Path::new(service.model_dir()).to_string_lossy().to_string(),
+                    speaker_model_dir(Path::new(service.model_dir()), speaker_id)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string()),
+                    (!selected_speaker_name.is_empty()).then_some(selected_speaker_name),
+                )
+            }
+        } else {
+            (
+                resolve_default_model_root_path(&src_model_root, task_detail.base_model.trim()),
+                None,
+                None,
+            )
+        };
 
     Ok(LoadedTtsTaskParams {
         base_model: task_detail.base_model,
-        model_scale: task_detail.model_scale.trim().to_string(),
+        model_version: task_detail.model_version.trim().to_string(),
         model_root_path,
         speaker_dir_name,
         language: task_detail.language,
@@ -270,7 +316,7 @@ pub(crate) async fn load_tts_task_params(
             .parse()
             .map_err(|err: String| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         text: task_detail.text,
-        speaker_name: task_history.speaker_name_snapshot.trim().to_string(),
+        speaker_name,
         output_file_path: resolve_task_path(
             Path::new(service.data_dir()),
             &task_detail.output_file_path.unwrap_or_default(),
@@ -296,7 +342,6 @@ pub(crate) async fn mark_tts_running_state(service: &LocalService, task_id: i64)
             task_id,
             status: TaskStatus::Running,
             duration_seconds: None,
-            error_message: None,
         })
         .await?;
     Ok(())
@@ -312,7 +357,6 @@ pub(crate) async fn mark_tts_completed_state(
             task_id,
             status: TaskStatus::Completed,
             duration_seconds: Some(duration_seconds),
-            error_message: None,
         })
         .await?;
     Ok(())
@@ -322,14 +366,12 @@ pub(crate) async fn mark_tts_failed_state(
     service: &LocalService,
     task_id: i64,
     duration_seconds: i64,
-    error_message: &str,
 ) -> Result<()> {
     service
         .update_task_status_impl(UpdateTaskStatusPayload {
             task_id,
             status: TaskStatus::Failed,
             duration_seconds: Some(duration_seconds),
-            error_message: Some(error_message.trim().to_string()),
         })
         .await?;
     Ok(())
@@ -338,73 +380,64 @@ pub(crate) async fn mark_tts_failed_state(
 pub(crate) async fn prepare_tts_model_env(
     service: &LocalService,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: &Path,
     venv_python_path: &Path,
-    init_task_runtime_script_path: &Path,
-    download_models_script_path: &Path,
+    ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
     use_cpu_mode: bool,
 ) -> Result<()> {
-    let bootstrap_paths = PipelineBootstrapPaths {
-        base_model,
-        model_scale,
-        src_model_root,
-        venv_python_path,
-        init_task_runtime_script_path,
-        download_models_script_path,
-    };
-    let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
+    let model_downloaded = service
+        .model_downloaded_impl(base_model, model_version)
         .await?;
-    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
+    if !model_downloaded {
+        bail!(
+            "模型 {}:{} 未安装，请先在模型管理页安装后再执行任务",
+            base_model,
+            model_version
+        );
+    }
 
-    validate_and_init(
-        bootstrap_paths,
+    let mut script_args = vec!["--base-model".to_string(), base_model.to_string()];
+    if use_cpu_mode {
+        script_args.push("--cpu-mode".to_string());
+    }
+
+    run_pipeline_stage_shell_script(
+        ensure_torch_runtime_script_path,
+        src_model_root,
+        HistoryTaskType::TextToSpeech,
         task_id,
         log_dir,
-        use_cpu_mode,
-        INIT_MODEL_RUNTIME_LABEL,
-        |script_path, working_dir, task_id, log_dir, script_args, label| async move {
-            run_pipeline_stage_shell_script(
-                &script_path,
-                &working_dir,
-                HistoryTaskType::TextToSpeech,
-                task_id,
-                &log_dir,
-                label,
-                "tts command completed successfully",
-                script_args,
-            )
-            .await
-        },
+        "校验并切换 Torch 运行时",
+        "tts command completed successfully",
+        script_args,
     )
     .await?;
 
-    validate_and_download(
-        service,
-        bootstrap_paths,
-        task_id,
-        log_dir,
-        build_model_download_script_args(src_model_root, &model_info)?,
-        DOWNLOAD_MODEL_ARTIFACTS_LABEL,
-        |script_path, working_dir, task_id, log_dir, script_args, label| async move {
-            run_pipeline_stage_shell_script(
-                &script_path,
-                &working_dir,
-                HistoryTaskType::TextToSpeech,
-                task_id,
-                &log_dir,
-                label,
-                "tts command completed successfully",
-                script_args,
-            )
-            .await
-        },
-        || validate_model_artifact_paths(base_model, model_scale, &download_paths),
-    )
-    .await
+    ensure_required_tts_runtime_files(venv_python_path, ensure_torch_runtime_script_path)
+}
+
+fn ensure_required_tts_runtime_files(
+    venv_python_path: &Path,
+    ensure_torch_runtime_script_path: &Path,
+) -> Result<()> {
+    if !venv_python_path.exists() {
+        bail!(
+            "TTS 运行时未准备完成，缺少 Python 虚拟环境: {}。请在模型管理页重新安装模型。",
+            venv_python_path.display()
+        );
+    }
+
+    if !ensure_torch_runtime_script_path.exists() {
+        bail!(
+            "TTS Torch 运行时校验脚本不存在: {}",
+            ensure_torch_runtime_script_path.display()
+        );
+    }
+
+    Ok(())
 }
 
 pub(crate) fn validate_tts_environment(
@@ -415,12 +448,8 @@ pub(crate) fn validate_tts_environment(
     for (label, path) in [
         ("TTS venv python", paths.venv_python_path.as_path()),
         (
-            "TTS init-task-runtime script",
-            paths.init_task_runtime_script_path.as_path(),
-        ),
-        (
-            "TTS download-models script",
-            paths.download_models_script_path.as_path(),
+            "TTS ensure-torch-runtime script",
+            paths.ensure_torch_runtime_script_path.as_path(),
         ),
         ("TTS python script", paths.tts_python_script_path.as_path()),
         (
@@ -454,14 +483,13 @@ pub(crate) fn resolve_tts_paths_base(
     service: &LocalService,
     task_id: i64,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: PathBuf,
 ) -> Result<ResolvedTtsPaths> {
     let platform = ScriptPlatform::current();
     let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
-    let init_task_runtime_script_path =
-        src_model_root.join(platform.init_task_runtime_relative_path());
-    let download_models_script_path = src_model_root.join(platform.download_models_relative_path());
+    let ensure_torch_runtime_script_path =
+        src_model_root.join(platform.ensure_torch_runtime_relative_path());
     let tts_python_script_path =
         src_model_model_python_script_path(&src_model_root, base_model, "tts.py")?;
     let transcode_script_path = src_model_transcode_script_path(&src_model_root);
@@ -474,11 +502,10 @@ pub(crate) fn resolve_tts_paths_base(
 
     Ok(ResolvedTtsPaths {
         base_model: base_model.to_string(),
-        model_scale: model_scale.to_string(),
+        model_version: model_version.to_string(),
         src_model_root,
         venv_python_path,
-        init_task_runtime_script_path,
-        download_models_script_path,
+        ensure_torch_runtime_script_path,
         tts_python_script_path,
         transcode_script_path,
         params_json_path,
@@ -489,10 +516,10 @@ pub(crate) fn resolve_tts_paths(
     service: &LocalService,
     task_id: i64,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
 ) -> Result<ResolvedTtsPaths> {
     let src_model_root = resolve_src_model_root(service.app_dir())?;
-    resolve_tts_paths_base(service, task_id, base_model, model_scale, src_model_root)
+    resolve_tts_paths_base(service, task_id, base_model, model_version, src_model_root)
 }
 
 pub(crate) async fn run_tts_python_command(

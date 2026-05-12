@@ -15,10 +15,16 @@ interface NoticeItem {
   tone: NoticeTone;
 }
 
+interface NoticeTimerState {
+  timerId: number | null;
+  startedAt: number | null;
+  remainingMs: number;
+}
+
 export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(false);
   const notices = ref<NoticeItem[]>([]);
-  const timers = new Map<number, number>();
+  const timers = new Map<number, NoticeTimerState>();
   let noticeSeed = 0;
 
   const sidebarWidth = computed(() => (sidebarCollapsed.value ? 72 : 276));
@@ -31,12 +37,46 @@ export const useUiStore = defineStore('ui', () => {
   const removeNotice = (id: number) => {
     notices.value = notices.value.filter(item => item.id !== id);
 
-    const timer = timers.get(id);
+    const timerState = timers.get(id);
 
-    if (timer) {
-      window.clearTimeout(timer);
+    if (timerState?.timerId !== null && timerState?.timerId !== undefined) {
+      window.clearTimeout(timerState.timerId);
       timers.delete(id);
     }
+  };
+
+  const pauseNotice = (id: number) => {
+    const timerState = timers.get(id);
+
+    if (!timerState || timerState.timerId === null || timerState.startedAt === null) {
+      return;
+    }
+
+    window.clearTimeout(timerState.timerId);
+    const elapsedMs = Math.max(0, Date.now() - timerState.startedAt);
+    timerState.remainingMs = Math.max(0, timerState.remainingMs - elapsedMs);
+    timerState.timerId = null;
+    timerState.startedAt = null;
+
+    if (timerState.remainingMs <= 0) {
+      removeNotice(id);
+    }
+  };
+
+  const resumeNotice = (id: number) => {
+    const timerState = timers.get(id);
+
+    if (!timerState || timerState.timerId !== null) {
+      return;
+    }
+
+    if (timerState.remainingMs <= 0) {
+      removeNotice(id);
+      return;
+    }
+
+    timerState.startedAt = Date.now();
+    timerState.timerId = window.setTimeout(() => removeNotice(id), timerState.remainingMs);
   };
 
   const notify = ({ message, tone = 'info', duration = 3600 }: NoticeInput) => {
@@ -53,8 +93,12 @@ export const useUiStore = defineStore('ui', () => {
     notices.value = nextItems.slice(0, 4);
     overflowItems.forEach(item => removeNotice(item.id));
 
-    const timer = window.setTimeout(() => removeNotice(id), duration);
-    timers.set(id, timer);
+    const timerId = window.setTimeout(() => removeNotice(id), duration);
+    timers.set(id, {
+      timerId,
+      startedAt: Date.now(),
+      remainingMs: duration
+    });
   };
 
   const notifySuccess = (message: string, duration?: number) => notify({ message, tone: 'success', duration });
@@ -72,7 +116,9 @@ export const useUiStore = defineStore('ui', () => {
     notifyInfo,
     notifySuccess,
     notifyWarning,
+    pauseNotice,
     removeNotice,
+    resumeNotice,
     toggleSidebar
   };
 });

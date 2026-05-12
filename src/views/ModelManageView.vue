@@ -5,7 +5,6 @@ import { computed, onMounted, ref } from 'vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
@@ -13,6 +12,8 @@ import { useModelStore } from '@/stores/models';
 
 const modelStore = useModelStore();
 const isMutating = ref(false);
+const mutatingModelId = ref<number | null>(null);
+const mutatingAction = ref<'install' | 'uninstall' | 'reinstall' | null>(null);
 const uninstallTargetId = ref<number | null>(null);
 
 const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
@@ -40,11 +41,21 @@ const refreshModels = async () => {
 };
 
 const handleInstall = async (modelId: number) => {
+  const target = modelStore.items.find(item => item.id === modelId);
   isMutating.value = true;
+  mutatingModelId.value = modelId;
+  mutatingAction.value = target?.downloaded ? 'reinstall' : 'install';
   try {
+    if (target?.downloaded) {
+      await modelStore.reinstallModel(modelId);
+      return;
+    }
+
     await modelStore.installModel(modelId);
   } finally {
     isMutating.value = false;
+    mutatingModelId.value = null;
+    mutatingAction.value = null;
   }
 };
 
@@ -62,11 +73,15 @@ const confirmUninstall = async () => {
   }
 
   isMutating.value = true;
+  mutatingModelId.value = uninstallTarget.value.id;
+  mutatingAction.value = 'uninstall';
   try {
     await modelStore.uninstallModel(uninstallTarget.value.id);
     closeUninstallDialog();
   } finally {
     isMutating.value = false;
+    mutatingModelId.value = null;
+    mutatingAction.value = null;
   }
 };
 
@@ -79,13 +94,12 @@ onMounted(async () => {
   <div class="space-y-5">
     <PageHeader title="模型管理" description="查看系统支持的基础模型、功能支持情况和当前安装状态，并执行安装或卸载。" eyebrow="Model Management" />
 
-    <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" />
+    <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" :show-history-link="false" />
 
     <PanelCard title="模型列表" subtitle="状态来自本地数据库中的 model_info.downloaded 字段。">
       <template #actions>
-        <BaseButton tone="ghost" :disabled="modelStore.isLoading || isMutating" @click="refreshModels">
-          <BaseLoadingIndicator v-if="modelStore.isLoading" size="sm" tone="muted" />
-          <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+        <BaseButton tone="ghost" :loading="modelStore.isLoading" :disabled="isMutating" @click="refreshModels">
+          <ArrowPathIcon v-if="!modelStore.isLoading" class="h-4 w-4" aria-hidden="true" />
           <span>{{ modelStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
         </BaseButton>
       </template>
@@ -95,7 +109,7 @@ onMounted(async () => {
           <thead>
             <tr class="border-b border-brand-100 text-xs uppercase tracking-wide text-stone-500">
               <th class="py-3 align-middle">模型</th>
-              <th class="py-3 align-middle">规模</th>
+              <th class="py-3 align-middle">版本</th>
               <th class="py-3 align-middle">支持功能</th>
               <th class="py-3 align-middle">依赖</th>
               <th class="py-3 align-middle">状态</th>
@@ -105,7 +119,7 @@ onMounted(async () => {
           <tbody>
             <tr v-for="item in modelStore.items" :key="item.id" class="border-b border-brand-50 text-slate-700 align-middle">
               <td class="py-3 align-middle font-medium text-slate-900">{{ item.modelName }}</td>
-              <td class="py-3 align-middle">{{ item.modelScale }}</td>
+              <td class="py-3 align-middle">{{ item.modelVersion }}</td>
               <td class="py-3 align-middle">
                 <div class="flex flex-wrap gap-1.5">
                   <span
@@ -130,9 +144,29 @@ onMounted(async () => {
               </td>
               <td class="py-3 align-middle">
                 <div class="flex flex-wrap items-center gap-2">
-                  <BaseButton tone="ghost" size="sm" :disabled="isMutating" @click="handleInstall(item.id)">
-                    <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
-                    <span>{{ item.downloaded ? '重装' : '安装' }}</span>
+                  <BaseButton
+                    tone="ghost"
+                    size="sm"
+                    :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
+                    :disabled="isMutating"
+                    @click="handleInstall(item.id)"
+                  >
+                    <ArrowDownTrayIcon
+                      v-if="!((mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id)"
+                      class="h-4 w-4"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {{
+                        mutatingModelId === item.id && mutatingAction === 'reinstall'
+                          ? '重装中...'
+                          : mutatingModelId === item.id && mutatingAction === 'install'
+                            ? '安装中...'
+                            : item.downloaded
+                              ? '重装'
+                              : '安装'
+                      }}
+                    </span>
                   </BaseButton>
                   <BaseButton tone="quiet" size="sm" :disabled="isMutating || !item.downloaded" @click="requestUninstall(item.id)">
                     <TrashIcon class="h-4 w-4" aria-hidden="true" />
@@ -153,7 +187,7 @@ onMounted(async () => {
     <BaseDialog :open="uninstallTarget !== null" title="卸载模型" @close="closeUninstallDialog">
       <p class="text-sm text-slate-600">
         <template v-if="uninstallTarget">
-          将卸载模型“{{ uninstallTarget.modelName }} {{ uninstallTarget.modelScale }}”的专属权重文件，并把状态改为未安装。共享依赖会保留。
+          将卸载模型“{{ uninstallTarget.modelName }} {{ uninstallTarget.modelVersion }}”的专属权重文件，并把状态改为未安装。共享依赖会保留。
         </template>
         <template v-else>未找到要卸载的模型。</template>
       </p>
@@ -161,8 +195,7 @@ onMounted(async () => {
         <BaseButton tone="ghost" @click="closeUninstallDialog">
           <span>取消</span>
         </BaseButton>
-        <BaseButton tone="quiet" :disabled="!uninstallTarget || isMutating" @click="confirmUninstall">
-          <BaseLoadingIndicator v-if="isMutating" size="sm" tone="muted" />
+        <BaseButton tone="quiet" :loading="isMutating" :disabled="!uninstallTarget || isMutating" @click="confirmUninstall">
           <span>{{ isMutating ? '卸载中...' : '确认卸载' }}</span>
         </BaseButton>
       </template>

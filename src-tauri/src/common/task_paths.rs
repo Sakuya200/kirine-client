@@ -17,7 +17,7 @@ const TRAINING_OUTPUT_JSONL_NAME: &str = "train.jsonl";
 const TRAINING_PARAMS_JSON_NAME: &str = "training.params.json";
 const TTS_PARAMS_JSON_NAME: &str = "tts.params.json";
 const VOICE_CLONE_PARAMS_JSON_NAME: &str = "voice_clone.params.json";
-const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_radio";
+const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_audio";
 
 pub(crate) fn task_sample_dir(
     data_dir: &Path,

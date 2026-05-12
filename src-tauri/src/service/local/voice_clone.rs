@@ -10,6 +10,7 @@ use crate::{
         local_paths::{ensure_child_dir, resolve_task_path, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::UiTaskKind,
     service::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
@@ -54,7 +55,8 @@ impl LocalService {
         } else {
             payload.ref_audio_name.trim().to_string()
         };
-        let model_scale = payload.model_scale.trim().to_string();
+        let model_version = payload.model_version.trim().to_string();
+        let mut model_params = payload.model_params.clone();
         let export_audio_name =
             super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
         let char_count = text.chars().count();
@@ -73,7 +75,6 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
-            error_message: Set(None),
             deleted: Set(0),
         }
         .insert(&txn)
@@ -97,13 +98,21 @@ impl LocalService {
         })?;
         let serialized_ref_audio_path =
             serialize_task_path(Path::new(self.data_dir()), &ref_audio_target_path);
+        super::copy_model_param_files(
+            &base_model,
+            UiTaskKind::VoiceClone,
+            &mut model_params,
+            &sample_dir,
+            Path::new(self.data_dir()),
+            self.ui_config(),
+        )?;
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
 
         voice_clone_task_entity::Entity::insert(voice_clone_task_entity::ActiveModel {
             id: NotSet,
             history_id: Set(task_id),
             base_model: Set(base_model.clone()),
-            model_scale: Set(model_scale.clone()),
+            model_version: Set(model_version.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
             export_audio_name: Set(export_audio_name.clone()),
@@ -111,7 +120,7 @@ impl LocalService {
             ref_audio_path: Set(serialized_ref_audio_path.clone()),
             ref_text: Set(ref_text.clone()),
             text: Set(text.clone()),
-            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
+            model_params_json: Set(serde_json::to_string(&model_params)?),
             char_count: Set(char_count as i64),
             file_name: Set(file_name.clone()),
             output_file_path: Set(Some(serialized_output_path.clone())),
@@ -130,14 +139,14 @@ impl LocalService {
             file_name,
             ref_audio_name,
             base_model,
-            model_scale,
+            model_version,
             language: payload.language,
             format: payload.format,
             export_audio_name,
             duration_seconds: 0,
             ref_text,
             text,
-            model_params: payload.model_params,
+            model_params,
             created_at: create_time,
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,

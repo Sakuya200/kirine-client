@@ -6,10 +6,10 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub history_id: i64,
-    pub speaker_id: i64,
+    pub speaker_id: Option<i64>,
     pub model_path: Option<String>,
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: String,
     pub format: String,
     pub export_audio_name: String,

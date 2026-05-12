@@ -11,7 +11,7 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   id: typeof item.id === 'number' ? item.id : 0,
   baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
   modelName: item.modelName?.trim() || 'Unknown Model',
-  modelScale: typeof item.modelScale === 'string' ? item.modelScale.trim() : '',
+  modelVersion: typeof item.modelVersion === 'string' ? item.modelVersion.trim() : '',
   requiredModelNameList: Array.isArray(item.requiredModelNameList) ? item.requiredModelNameList.filter(name => typeof name === 'string') : [],
   requiredModelRepoIdList: Array.isArray(item.requiredModelRepoIdList) ? item.requiredModelRepoIdList.filter(name => typeof name === 'string') : [],
   supportedFeatureList: Array.isArray(item.supportedFeatureList)
@@ -74,7 +74,7 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       replaceModel(normalized.model);
-      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelScale} 已安装。`, 3200);
+      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已安装。`, 3200);
       return normalized;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('安装模型失败', error));
@@ -90,12 +90,27 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       replaceModel(normalized.model);
-      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelScale} 已卸载。`, 3200);
+      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已卸载。`, 3200);
       return normalized;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('卸载模型失败', error));
       return null;
     }
+  };
+
+  const reinstallModel = async (modelId: number) => {
+    const uninstalled = await uninstallModel(modelId);
+    if (!uninstalled) {
+      return null;
+    }
+
+    const installed = await installModel(modelId);
+    if (!installed) {
+      uiStore.notifyWarning('模型已卸载，但重装失败，请重试安装。', 4200);
+      return null;
+    }
+
+    return installed;
   };
 
   const ensureLoaded = async () => {
@@ -109,15 +124,15 @@ export const useModelStore = defineStore('models', () => {
       .map(variants => variants.find(item => item.supportedFeatureList.includes(feature)))
       .filter((item): item is ModelInfo => Boolean(item));
 
-  const supportsModelFeature = (baseModel: BaseModel, modelScale: string, feature: string) =>
-    (byBaseModel.value.get(baseModel) ?? []).some(item => item.modelScale === modelScale && item.supportedFeatureList.includes(feature));
+  const supportsModelFeature = (baseModel: BaseModel, modelVersion: string, feature: string) =>
+    (byBaseModel.value.get(baseModel) ?? []).some(item => item.modelVersion === modelVersion && item.supportedFeatureList.includes(feature));
 
   const getModelLabel = (baseModel: BaseModel) => byBaseModel.value.get(baseModel)?.[0]?.modelName ?? baseModel;
 
-  const getModelScaleOptions = (baseModel: BaseModel) =>
+  const getModelVersionOptions = (baseModel: BaseModel) =>
     (byBaseModel.value.get(baseModel) ?? []).map(item => ({
-      label: item.modelScale,
-      value: item.modelScale
+      label: item.modelVersion,
+      value: item.modelVersion
     }));
 
   return {
@@ -128,9 +143,10 @@ export const useModelStore = defineStore('models', () => {
     loadModels,
     ensureLoaded,
     installModel,
+    reinstallModel,
     getModelsByFeature,
     getModelLabel,
-    getModelScaleOptions,
+    getModelVersionOptions,
     uninstallModel,
     supportsModelFeature
   };

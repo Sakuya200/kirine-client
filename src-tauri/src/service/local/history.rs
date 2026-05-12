@@ -6,7 +6,8 @@ use sea_orm::{
 };
 
 use crate::{
-    common::local_paths::resolve_task_path,
+    common::{local_paths::resolve_task_path, task_paths::task_log_file_path},
+    config::resolve_base_log_dir,
     service::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
@@ -22,6 +23,35 @@ use crate::{
     utils::{audio::content_type_for_format, time::now_string},
     Result,
 };
+
+impl LocalService {
+    async fn load_task_error_log_impl(
+        &self,
+        history_id: i64,
+        task_type: HistoryTaskType,
+    ) -> Result<Option<String>> {
+        let runtime_config = self.runtime_config()?;
+        let log_dir = resolve_base_log_dir(runtime_config.log_dir())?;
+        let task_log_path = task_log_file_path(&log_dir, task_type, history_id);
+
+        match tokio::fs::read_to_string(&task_log_path).await {
+            Ok(content) => {
+                let trimmed = content.trim();
+                if trimmed.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(trimmed.to_string()))
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(io::Error::new(
+                err.kind(),
+                format!("读取任务日志失败: {}", task_log_path.display()),
+            )
+            .into()),
+        }
+    }
+}
 
 impl LocalService {
     async fn load_history_detail(
@@ -59,7 +89,7 @@ impl LocalService {
                 duration_seconds: row.duration_seconds,
                 create_time: row.create_time,
                 modify_time: row.modify_time,
-                error_message: row.error_message,
+                task_log: None,
                 detail,
             });
         }
@@ -143,11 +173,6 @@ impl LocalService {
         } else {
             None
         };
-        let error_message = payload
-            .error_message
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
 
         let history = task_history_entity::Entity::find_by_id(payload.task_id)
             .filter(task_history_entity::Column::Deleted.eq(0))
@@ -165,7 +190,6 @@ impl LocalService {
         }
         active.modify_time = sea_orm::ActiveValue::Set(modify_time);
         active.finished_time = sea_orm::ActiveValue::Set(finished_time);
-        active.error_message = sea_orm::ActiveValue::Set(error_message.map(ToString::to_string));
         active.update(self.orm()).await?;
 
         self.get_history_record_impl(payload.task_id).await
@@ -190,7 +214,7 @@ impl LocalService {
             duration_seconds: row.duration_seconds,
             create_time: row.create_time,
             modify_time: row.modify_time,
-            error_message: row.error_message,
+            task_log: self.load_task_error_log_impl(row.id, task_type).await?,
             detail,
         })
     }
@@ -334,7 +358,7 @@ impl LocalService {
         Ok(serde_json::to_value(TextToSpeechTaskDetail {
             speaker_id: row.speaker_id,
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             language: row
                 .language
                 .parse()
@@ -372,7 +396,7 @@ impl LocalService {
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             model_name: row.model_name,
             description: row.description,
             model_params: serde_json::from_str(&row.model_params_json)?,
@@ -395,7 +419,7 @@ impl LocalService {
 
         Ok(serde_json::to_value(VoiceCloneTaskDetail {
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             language: row
                 .language
                 .parse()

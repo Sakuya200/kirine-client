@@ -5,6 +5,7 @@ interface Props {
   type?: 'button' | 'submit' | 'reset';
   block?: boolean;
   disabled?: boolean;
+  loading?: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
@@ -12,6 +13,7 @@ withDefaults(defineProps<Props>(), {
   size: 'md',
   block: false,
   disabled: false,
+  loading: false,
   type: 'button'
 });
 </script>
@@ -19,7 +21,8 @@ withDefaults(defineProps<Props>(), {
 <template>
   <button
     :type="type"
-    :disabled="disabled"
+    :disabled="disabled || loading"
+    :aria-busy="loading"
     class="inline-flex items-center justify-center gap-1 rounded-xl font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-200 focus-visible:ring-offset-2"
     :class="[
       tone === 'solid'
@@ -29,9 +32,27 @@ withDefaults(defineProps<Props>(), {
           : 'border border-transparent bg-brand-100/75 text-stone-700 hover:bg-brand-200/80',
       size === 'sm' ? 'px-2.5 py-1.5 text-xs' : size === 'lg' ? 'px-4 py-2.5 text-sm' : 'px-3.5 py-2 text-sm',
       block ? 'w-full' : '',
-      disabled ? 'cursor-not-allowed opacity-55 hover:translate-y-0 hover:bg-inherit' : ''
+      disabled || loading ? 'cursor-not-allowed opacity-55 hover:translate-y-0 hover:bg-inherit' : ''
     ]"
   >
+    <span v-if="loading" class="base-button-spinner" aria-hidden="true" />
     <slot />
   </button>
 </template>
+
+<style scoped>
+.base-button-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: base-button-spin 0.7s linear infinite;
+}
+
+@keyframes base-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

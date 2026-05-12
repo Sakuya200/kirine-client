@@ -30,13 +30,13 @@ export interface HistoryRecordBase {
   durationSeconds: number;
   createTime: string;
   modifyTime: string;
-  errorMessage?: string | null;
+  taskLog?: string | null;
 }
 
 export interface ModelTrainingTaskDetail {
   language: AppLanguage;
   baseModel: BaseModel;
-  modelScale: string;
+  modelVersion: string;
   modelName: string;
   description: string;
   modelParams: Record<string, unknown>;
@@ -62,9 +62,9 @@ export interface ModelTrainingSampleDetail {
 }
 
 export interface TextToSpeechTaskDetail {
-  speakerId: number;
+  speakerId: number | null;
   baseModel: BaseModel;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
@@ -77,7 +77,7 @@ export interface TextToSpeechTaskDetail {
 
 export interface VoiceCloneTaskDetail {
   baseModel: BaseModel;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
@@ -95,7 +95,7 @@ export interface ModelInfo {
   id: number;
   baseModel: BaseModel;
   modelName: string;
-  modelScale: string;
+  modelVersion: string;
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];

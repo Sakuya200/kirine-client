@@ -131,7 +131,6 @@ async fn create_task_history_node(manager: &SchemaManager<'_>) -> Result<(), DbE
                 .col(ColumnDef::new(TaskHistory::CreateTime).string().not_null())
                 .col(ColumnDef::new(TaskHistory::ModifyTime).string().not_null())
                 .col(ColumnDef::new(TaskHistory::FinishedTime).string())
-                .col(ColumnDef::new(TaskHistory::ErrorMessage).text())
                 .col(
                     ColumnDef::new(TaskHistory::Deleted)
                         .integer()
@@ -158,7 +157,13 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                 )
                 .col(ColumnDef::new(ModelInfo::BaseModel).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModelName).string().not_null())
-                .col(ColumnDef::new(ModelInfo::ModelScale).string().not_null())
+                .col(ColumnDef::new(ModelInfo::ModelVersion).string().not_null())
+                .col(
+                    ColumnDef::new(ModelInfo::DownloadType)
+                        .string()
+                        .not_null()
+                        .default("HF-Like"),
+                )
                 .col(
                     ColumnDef::new(ModelInfo::RequiredModelNameListJson)
                         .text()
@@ -207,10 +212,10 @@ async fn create_tts_tasks_node(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                         .primary_key(),
                 )
                 .col(ColumnDef::new(TtsTasks::HistoryId).integer().not_null())
-                .col(ColumnDef::new(TtsTasks::SpeakerId).integer().not_null())
+                .col(ColumnDef::new(TtsTasks::SpeakerId).integer())
                 .col(ColumnDef::new(TtsTasks::ModelPath).text())
                 .col(ColumnDef::new(TtsTasks::BaseModel).string().not_null())
-                .col(ColumnDef::new(TtsTasks::ModelScale).string().not_null())
+                .col(ColumnDef::new(TtsTasks::ModelVersion).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Language).string().not_null())
                 .col(ColumnDef::new(TtsTasks::Format).string().not_null())
                 .col(
@@ -283,7 +288,7 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .not_null(),
                 )
                 .col(
-                    ColumnDef::new(ModelTrainingTasks::ModelScale)
+                    ColumnDef::new(ModelTrainingTasks::ModelVersion)
                         .string()
                         .not_null(),
                 )
@@ -382,7 +387,7 @@ async fn create_voice_clone_tasks_node(manager: &SchemaManager<'_>) -> Result<()
                         .not_null(),
                 )
                 .col(
-                    ColumnDef::new(VoiceCloneTasks::ModelScale)
+                    ColumnDef::new(VoiceCloneTasks::ModelVersion)
                         .string()
                         .not_null(),
                 )
@@ -466,7 +471,7 @@ async fn create_indexes_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .name("idx_model_info_base_model")
                 .table(ModelInfo::Table)
                 .col(ModelInfo::BaseModel)
-                .col(ModelInfo::ModelScale)
+                .col(ModelInfo::ModelVersion)
                 .unique()
                 .if_not_exists()
                 .to_owned(),
@@ -650,7 +655,6 @@ enum TaskHistory {
     CreateTime,
     ModifyTime,
     FinishedTime,
-    ErrorMessage,
     Deleted,
 }
 
@@ -660,7 +664,8 @@ enum ModelInfo {
     Id,
     BaseModel,
     ModelName,
-    ModelScale,
+    ModelVersion,
+    DownloadType,
     RequiredModelNameListJson,
     RequiredModelRepoIdListJson,
     SupportedFeatureListJson,
@@ -678,7 +683,7 @@ enum TtsTasks {
     SpeakerId,
     ModelPath,
     BaseModel,
-    ModelScale,
+    ModelVersion,
     Language,
     Format,
     ExportAudioName,
@@ -699,7 +704,7 @@ enum ModelTrainingTasks {
     HistoryId,
     Language,
     BaseModel,
-    ModelScale,
+    ModelVersion,
     ModelName,
     ModelParamsJson,
     SampleCount,
@@ -718,7 +723,7 @@ enum VoiceCloneTasks {
     Id,
     HistoryId,
     BaseModel,
-    ModelScale,
+    ModelVersion,
     Language,
     Format,
     ExportAudioName,

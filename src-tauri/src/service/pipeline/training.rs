@@ -36,15 +36,12 @@ use super::{
         PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
         PythonScriptTaskKind, TrainingArgs,
     },
-    model_artifacts::{build_model_download_script_args, resolve_model_download_paths},
     model_paths::speaker_model_dir,
     run_pipeline_stage_shell_script, run_python_params_file_invocation_cancellable,
     script_paths::{
         resolve_src_model_root, src_model_model_python_script_path,
         src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
     },
-    validate_and_download, validate_and_init, PipelineBootstrapPaths,
-    DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
 };
 
 #[derive(Debug, Clone)]
@@ -60,7 +57,7 @@ pub(crate) struct CommonTrainingModelParams {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTrainingTaskParams {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_params_json: Value,
     pub batch_size: i64,
     pub epoch_count: i64,
@@ -74,8 +71,7 @@ pub(crate) struct CommonTrainingPaths {
     pub src_model_root: PathBuf,
     pub model_root_path: PathBuf,
     pub venv_python_path: PathBuf,
-    pub init_task_runtime_script_path: PathBuf,
-    pub download_models_script_path: PathBuf,
+    pub ensure_torch_runtime_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
     pub train_python_script_path: PathBuf,
     pub sample_root: PathBuf,
@@ -88,12 +84,11 @@ pub(crate) struct CommonTrainingPaths {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTrainingPaths {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub src_model_root: PathBuf,
     pub model_root_path: PathBuf,
     pub venv_python_path: PathBuf,
-    pub init_task_runtime_script_path: PathBuf,
-    pub download_models_script_path: PathBuf,
+    pub ensure_torch_runtime_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
     pub train_python_script_path: PathBuf,
     pub sample_root: PathBuf,
@@ -162,7 +157,7 @@ pub(crate) fn build_shared_training_invocation(
     Ok(PythonScriptInvocationSpec {
         version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
-        model_scale: context.paths.model_scale.clone(),
+        model_version: context.paths.model_version.clone(),
         kind: PythonScriptTaskKind::Training,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.training_device().to_string()),
@@ -213,26 +208,24 @@ pub(crate) async fn run_common_training_pipeline(
             speaker_id,
             &speaker_name,
             &params.base_model,
-            &params.model_scale,
+            &params.model_version,
         )?;
-        let log_dir = resolve_local_log_dir()?;
+        let log_dir = resolve_local_log_dir(&runtime_config)?;
 
         info!(
             src_model_root = %paths.src_model_root.display(),
-            init_script = %paths.init_task_runtime_script_path.display(),
-            download_script = %paths.download_models_script_path.display(),
+            ensure_torch_runtime_script = %paths.ensure_torch_runtime_script_path.display(),
             training_mode = %runtime.mode_label(&paths.base_model)?,
-            "preparing local model environment via required init-task-runtime and optional download-models stages"
+            "preparing local model environment via torch runtime ensure stage"
         );
 
         prepare_training_model_env_for_paths(
             service,
             &paths.base_model,
-            &paths.model_scale,
+            &paths.model_version,
             &paths.src_model_root,
             &paths.venv_python_path,
-            &paths.init_task_runtime_script_path,
-            &paths.download_models_script_path,
+            &paths.ensure_torch_runtime_script_path,
             task_id,
             &log_dir,
             runtime.clone(),
@@ -314,15 +307,8 @@ pub(crate) async fn run_common_training_pipeline(
         }
         Err(err) => {
             let duration_seconds = started_at.elapsed().as_secs() as i64;
-            let error_message = err.to_string();
-            if let Err(update_err) = mark_training_failed_state(
-                service,
-                task_id,
-                speaker_id,
-                duration_seconds,
-                &error_message,
-            )
-            .await
+            if let Err(update_err) =
+                mark_training_failed_state(service, task_id, speaker_id, duration_seconds).await
             {
                 error!(
                     error = %update_err,
@@ -361,7 +347,7 @@ pub(crate) async fn load_training_task_params(
 
     Ok(LoadedTrainingTaskParams {
         base_model: row.base_model,
-        model_scale: row.model_scale.trim().to_string(),
+        model_version: row.model_version.trim().to_string(),
         model_params_json: params.model_params_json,
         batch_size: params.batch_size,
         epoch_count: params.epoch_count,
@@ -385,7 +371,7 @@ pub(crate) fn resolve_training_paths_base(
     speaker_id: i64,
     speaker_name: &str,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
 ) -> Result<ResolvedTrainingPaths> {
     let common_paths = resolve_common_training_paths(
         service,
@@ -396,12 +382,11 @@ pub(crate) fn resolve_training_paths_base(
 
     Ok(ResolvedTrainingPaths {
         base_model: base_model.to_string(),
-        model_scale: model_scale.to_string(),
+        model_version: model_version.to_string(),
         src_model_root: common_paths.src_model_root,
         model_root_path: common_paths.model_root_path,
         venv_python_path: common_paths.venv_python_path,
-        init_task_runtime_script_path: common_paths.init_task_runtime_script_path,
-        download_models_script_path: common_paths.download_models_script_path,
+        ensure_torch_runtime_script_path: common_paths.ensure_torch_runtime_script_path,
         transcode_script_path: common_paths.transcode_script_path,
         train_python_script_path: common_paths.train_python_script_path,
         sample_root: common_paths.sample_root,
@@ -422,9 +407,8 @@ pub(crate) fn resolve_common_training_paths(
     let src_model_root = resolve_src_model_root(service.app_dir())?;
     let model_root_path = src_model_root.join("base-models");
     let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
-    let init_task_runtime_script_path =
-        src_model_root.join(platform.init_task_runtime_relative_path());
-    let download_models_script_path = src_model_root.join(platform.download_models_relative_path());
+    let ensure_torch_runtime_script_path =
+        src_model_root.join(platform.ensure_torch_runtime_relative_path());
     let transcode_script_path = src_model_transcode_script_path(&src_model_root);
     let train_python_script_path =
         src_model_model_python_script_path(&src_model_root, base_model, "training.py")?;
@@ -438,8 +422,10 @@ pub(crate) fn resolve_common_training_paths(
     let params_json_path = crate::common::task_paths::training_params_json_path(&sample_root);
 
     for (label, path) in [
-        ("init-task-runtime script", &init_task_runtime_script_path),
-        ("download-models script", &download_models_script_path),
+        (
+            "ensure-torch-runtime script",
+            &ensure_torch_runtime_script_path,
+        ),
         ("transcode script", &transcode_script_path),
         ("train python script", &train_python_script_path),
     ] {
@@ -461,8 +447,7 @@ pub(crate) fn resolve_common_training_paths(
         src_model_root,
         model_root_path,
         venv_python_path,
-        init_task_runtime_script_path,
-        download_models_script_path,
+        ensure_torch_runtime_script_path,
         transcode_script_path,
         train_python_script_path,
         sample_root,
@@ -496,58 +481,52 @@ pub(crate) async fn run_training_stage_shell_script(
 
 pub(crate) async fn prepare_training_model_env(
     service: &LocalService,
-    bootstrap_paths: PipelineBootstrapPaths<'_>,
+    base_model: &str,
+    model_version: &str,
+    src_model_root: &Path,
+    venv_python_path: &Path,
+    ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
     use_cpu_mode: bool,
-    download_script_args: Vec<String>,
-    download_paths: &[PathBuf],
 ) -> Result<()> {
-    validate_and_init(
-        bootstrap_paths,
-        task_id,
-        log_dir,
-        use_cpu_mode,
-        INIT_MODEL_RUNTIME_LABEL,
-        |script_path, working_dir, task_id, log_dir, script_args, label| async move {
-            run_training_stage_shell_script(
-                &script_path,
-                &working_dir,
-                task_id,
-                &log_dir,
-                script_args,
-                label,
-            )
-            .await
-        },
-    )
-    .await?;
+    let model_downloaded = service
+        .model_downloaded_impl(base_model, model_version)
+        .await?;
+    if !model_downloaded {
+        anyhow::bail!(
+            "模型 {}:{} 未安装，请先在模型管理页安装后再执行任务",
+            base_model,
+            model_version
+        );
+    }
 
-    validate_and_download(
-        service,
-        bootstrap_paths,
+    if !venv_python_path.exists() {
+        anyhow::bail!(
+            "训练运行时未准备完成，缺少 Python 虚拟环境: {}。请在模型管理页重新安装模型。",
+            venv_python_path.display()
+        );
+    }
+
+    if !ensure_torch_runtime_script_path.exists() {
+        anyhow::bail!(
+            "训练 Torch 运行时校验脚本不存在: {}",
+            ensure_torch_runtime_script_path.display()
+        );
+    }
+
+    let mut script_args = vec!["--base-model".to_string(), base_model.to_string()];
+    if use_cpu_mode {
+        script_args.push("--cpu-mode".to_string());
+    }
+
+    run_training_stage_shell_script(
+        ensure_torch_runtime_script_path,
+        src_model_root,
         task_id,
         log_dir,
-        download_script_args,
-        DOWNLOAD_MODEL_ARTIFACTS_LABEL,
-        |script_path, working_dir, task_id, log_dir, script_args, label| async move {
-            run_training_stage_shell_script(
-                &script_path,
-                &working_dir,
-                task_id,
-                &log_dir,
-                script_args,
-                label,
-            )
-            .await
-        },
-        || {
-            super::model_artifacts::validate_model_artifact_paths(
-                bootstrap_paths.base_model,
-                bootstrap_paths.model_scale,
-                download_paths,
-            )
-        },
+        script_args,
+        "校验并切换 Torch 运行时",
     )
     .await
 }
@@ -555,36 +534,24 @@ pub(crate) async fn prepare_training_model_env(
 pub(crate) async fn prepare_training_model_env_for_paths(
     service: &LocalService,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: &Path,
     venv_python_path: &Path,
-    init_task_runtime_script_path: &Path,
-    download_models_script_path: &Path,
+    ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
     runtime: TrainingRuntimeOptions,
 ) -> Result<()> {
-    let bootstrap_paths = PipelineBootstrapPaths {
-        base_model,
-        model_scale,
-        src_model_root,
-        venv_python_path,
-        init_task_runtime_script_path,
-        download_models_script_path,
-    };
-    let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
-        .await?;
-    let download_paths = resolve_model_download_paths(src_model_root, &model_info);
-
     prepare_training_model_env(
         service,
-        bootstrap_paths,
+        base_model,
+        model_version,
+        src_model_root,
+        venv_python_path,
+        ensure_torch_runtime_script_path,
         task_id,
         log_dir,
         runtime.is_cpu(),
-        build_model_download_script_args(src_model_root, &model_info)?,
-        &download_paths,
     )
     .await
 }
@@ -882,7 +849,6 @@ pub(crate) async fn mark_training_running_state(
             task_id,
             status: TaskStatus::Running,
             duration_seconds: None,
-            error_message: None,
         })
         .await?;
     update_training_speaker_status(service, speaker_id, SpeakerStatus::Training).await
@@ -899,7 +865,6 @@ pub(crate) async fn mark_training_completed_state(
             task_id,
             status: TaskStatus::Completed,
             duration_seconds: Some(duration_seconds),
-            error_message: None,
         })
         .await?;
     update_training_speaker_status(service, speaker_id, SpeakerStatus::Ready).await
@@ -916,7 +881,6 @@ pub(crate) async fn mark_training_cancelled_state(
             task_id,
             status: TaskStatus::Cancelled,
             duration_seconds: Some(duration_seconds),
-            error_message: Some("模型训练任务已由用户终止。".to_string()),
         })
         .await?;
     let _ = delete_failed_training_speaker(service, speaker_id).await?;
@@ -928,14 +892,12 @@ pub(crate) async fn mark_training_failed_state(
     task_id: i64,
     speaker_id: i64,
     duration_seconds: i64,
-    error_message: &str,
 ) -> Result<()> {
     service
         .update_task_status_impl(UpdateTaskStatusPayload {
             task_id,
             status: TaskStatus::Failed,
             duration_seconds: Some(duration_seconds),
-            error_message: Some(error_message.trim().to_string()),
         })
         .await?;
     let _ = delete_failed_training_speaker(service, speaker_id).await?;

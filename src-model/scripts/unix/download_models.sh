@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-SRC_MODEL_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+SCRIPT_DIR=$(CDPATH='' && cd -- "$(dirname "$0")" && pwd)
+SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
 BASE_MODEL=""
 MODEL_ROOT=""
 VENV_DIR=""

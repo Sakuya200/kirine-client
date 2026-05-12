@@ -8,10 +8,13 @@ async fn voxcpm2_model_info_exposes_lora_feature_flag() -> Result<()> {
         .list_model_infos()
         .await?
         .into_iter()
-        .find(|item| item.base_model == "vox_cpm2" && item.model_scale == "2B")
+        .find(|item| item.base_model == "vox_cpm2" && item.model_version == "2B")
         .expect("expected VoxCPM2 model info to exist");
 
-    assert!(vox.supported_feature_list.iter().any(|feature| feature == "lora"));
+    assert!(vox
+        .supported_feature_list
+        .iter()
+        .any(|feature| feature == "lora"));
 
     harness.shutdown().await
 }
@@ -27,11 +30,30 @@ async fn voxcpm2_training_task_persists_lora_params_into_model_params_json() -> 
         .expect("expected persisted training model params");
     let parsed: serde_json::Value = serde_json::from_str(&stored_model_params)?;
 
-    assert_eq!(parsed.get("useLora").and_then(serde_json::Value::as_bool), Some(true));
-    assert_eq!(parsed.get("trainingMode").and_then(serde_json::Value::as_str), Some("lora"));
-    assert_eq!(parsed.get("loraRank").and_then(serde_json::Value::as_i64), Some(24));
-    assert_eq!(parsed.get("loraAlpha").and_then(serde_json::Value::as_i64), Some(48));
-    assert_eq!(parsed.get("loraDropout").and_then(serde_json::Value::as_str), Some("0.15"));
+    assert_eq!(
+        parsed.get("useLora").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        parsed
+            .get("trainingMode")
+            .and_then(serde_json::Value::as_str),
+        Some("lora")
+    );
+    assert_eq!(
+        parsed.get("loraRank").and_then(serde_json::Value::as_i64),
+        Some(24)
+    );
+    assert_eq!(
+        parsed.get("loraAlpha").and_then(serde_json::Value::as_i64),
+        Some(48)
+    );
+    assert_eq!(
+        parsed
+            .get("loraDropout")
+            .and_then(serde_json::Value::as_str),
+        Some("0.15")
+    );
 
     harness.shutdown().await
 }
@@ -55,11 +77,30 @@ async fn voxcpm2_training_task_accepts_legacy_training_mode_payload() -> Result<
         .expect("expected persisted legacy-compatible model params");
     let parsed: serde_json::Value = serde_json::from_str(&stored_model_params)?;
 
-    assert_eq!(parsed.get("useLora").and_then(serde_json::Value::as_bool), Some(false));
-    assert_eq!(parsed.get("trainingMode").and_then(serde_json::Value::as_str), Some("full"));
-    assert_eq!(parsed.get("loraRank").and_then(serde_json::Value::as_i64), Some(32));
-    assert_eq!(parsed.get("loraAlpha").and_then(serde_json::Value::as_i64), Some(32));
-    assert_eq!(parsed.get("loraDropout").and_then(serde_json::Value::as_str), Some("0.0"));
+    assert_eq!(
+        parsed.get("useLora").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        parsed
+            .get("trainingMode")
+            .and_then(serde_json::Value::as_str),
+        Some("full")
+    );
+    assert_eq!(
+        parsed.get("loraRank").and_then(serde_json::Value::as_i64),
+        Some(32)
+    );
+    assert_eq!(
+        parsed.get("loraAlpha").and_then(serde_json::Value::as_i64),
+        Some(32)
+    );
+    assert_eq!(
+        parsed
+            .get("loraDropout")
+            .and_then(serde_json::Value::as_str),
+        Some("0.0")
+    );
 
     harness.shutdown().await
 }

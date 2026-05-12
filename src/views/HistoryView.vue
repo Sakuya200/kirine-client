@@ -6,7 +6,6 @@ import { computed, onMounted, ref } from 'vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
-import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
@@ -48,7 +47,6 @@ const isLoading = ref(false);
 const isMutating = ref(false);
 const uiStore = useUiStore();
 
-const selectedRecord = computed(() => rows.value.find(row => row.id === selectedRecordId.value) ?? null);
 const deleteTarget = computed(() => rows.value.find(row => row.id === deleteTargetId.value) ?? null);
 const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
 const filteredRows = computed(() =>
@@ -175,9 +173,8 @@ onMounted(async () => {
 
     <PanelCard title="任务列表" subtitle="统一展示模型微调、文本转语音与声音克隆任务，数据来自本地数据库。">
       <template #actions>
-        <BaseButton tone="ghost" :disabled="isLoading" @click="loadHistory">
-          <BaseLoadingIndicator v-if="isLoading" size="sm" tone="muted" />
-          <ArrowPathIcon v-else class="h-4 w-4" aria-hidden="true" />
+        <BaseButton tone="ghost" :loading="isLoading" @click="loadHistory">
+          <ArrowPathIcon v-if="!isLoading" class="h-4 w-4" aria-hidden="true" />
           <span>{{ isLoading ? '刷新中...' : '刷新列表' }}</span>
         </BaseButton>
       </template>
@@ -237,7 +234,7 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <HistoryTaskDetailDialog :open="selectedRecord !== null" :record="selectedRecord" @close="closeDetail" @cancel="cancelTrainingTask" />
+    <HistoryTaskDetailDialog :open="selectedRecordId !== null" :record-id="selectedRecordId" @close="closeDetail" @cancel="cancelTrainingTask" />
 
     <BaseDialog :open="deleteTarget !== null" title="删除历史任务" @close="closeDeleteDialog">
       <p class="text-sm text-slate-600">
@@ -248,8 +245,7 @@ onMounted(async () => {
         <BaseButton tone="ghost" @click="closeDeleteDialog">
           <span>取消</span>
         </BaseButton>
-        <BaseButton tone="quiet" :disabled="!deleteTarget || isMutating" @click="confirmDelete">
-          <BaseLoadingIndicator v-if="isMutating" size="sm" tone="muted" />
+        <BaseButton tone="quiet" :loading="isMutating" :disabled="!deleteTarget || isMutating" @click="confirmDelete">
           <span>{{ isMutating ? '删除中...' : '确认删除' }}</span>
         </BaseButton>
       </template>

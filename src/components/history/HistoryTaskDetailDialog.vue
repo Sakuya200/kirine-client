@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { StopCircleIcon } from '@heroicons/vue/24/outline';
 
@@ -11,15 +12,20 @@ import StatusPill from '@/components/common/StatusPill.vue';
 import ModelTrainingTaskDetailForm from '@/components/form/ModelTrainingTaskDetailForm.vue';
 import TextToSpeechTaskDetailForm from '@/components/form/TextToSpeechTaskDetailForm.vue';
 import VoiceCloneTaskDetailForm from '@/components/form/VoiceCloneTaskDetailForm.vue';
+import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 import { formatDurationClock } from '@/utils/formatDurationClock';
 
 interface Props {
   open: boolean;
-  record: HistoryRecord | null;
+  recordId: number | null;
+  reloadToken?: number;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  reloadToken: 0
+});
 
 const emit = defineEmits<{
   close: [];
@@ -27,10 +33,56 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
+const uiStore = useUiStore();
+const record = ref<HistoryRecord | null>(null);
+const isLoading = ref(false);
+
+const loadDetailRecord = async () => {
+  if (!props.recordId) {
+    record.value = null;
+    return;
+  }
+
+  isLoading.value = true;
+  try {
+    record.value = await invoke<HistoryRecord>('get_history_record', {
+      historyId: props.recordId
+    });
+  } catch (error) {
+    record.value = null;
+    uiStore.notifyError(formatErrorMessage('读取任务详情失败，请检查历史记录是否仍然存在', error));
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+watch(
+  () => [props.open, props.recordId, props.reloadToken],
+  ([open, recordId]) => {
+    if (!open || !recordId) {
+      if (!open) {
+        record.value = null;
+      }
+      return;
+    }
+
+    void loadDetailRecord();
+  },
+  { immediate: true }
+);
+
+const dialogTitle = computed(() => {
+  if (!record.value) {
+    return isLoading.value ? '任务详情加载中' : '任务详情';
+  }
+
+  return `${HISTORY_TASK_TYPE_TEXT[record.value.taskType]}详情`;
+});
+
 const canReplay = computed(() => Boolean(router));
 const canCancel = computed(() =>
   Boolean(
-    props.record && props.record.taskType === HistoryTaskType.ModelTraining && [TaskStatus.Pending, TaskStatus.Running].includes(props.record.status)
+    record.value && record.value.taskType === HistoryTaskType.ModelTraining && [TaskStatus.Pending, TaskStatus.Running].includes(record.value.status)
   )
 );
 
@@ -58,13 +110,8 @@ const requestCancel = (record: HistoryRecord | null) => {
 </script>
 
 <template>
-  <BaseDialog
-    :open="open"
-    :title="record ? `${HISTORY_TASK_TYPE_TEXT[record.taskType]}详情` : '任务详情'"
-    panel-class="max-w-4xl"
-    content-class="max-h-[60vh] overflow-y-auto pr-2"
-    @close="emit('close')"
-  >
+  <BaseDialog :open="open" :title="dialogTitle" panel-class="max-w-4xl" content-class="max-h-[60vh] overflow-y-auto pr-2" @close="emit('close')">
+    <div v-if="isLoading" class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-sm text-stone-600">正在加载任务详情...</div>
     <div v-if="record" class="space-y-4 text-sm text-slate-600">
       <div class="grid gap-3 md:grid-cols-2">
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
@@ -107,10 +154,11 @@ const requestCancel = (record: HistoryRecord | null) => {
         </div>
       </section>
 
-      <section v-if="record.errorMessage" class="rounded-2xl border border-rose-200 bg-rose-50/70 p-4">
-        <p class="text-sm font-semibold text-rose-900">失败原因</p>
-        <div class="mt-3 h-40 overflow-y-auto rounded-xl bg-white/85 px-3 py-3 text-sm leading-6 text-rose-900">
-          {{ record.errorMessage }}
+      <section class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
+        <p class="text-sm font-semibold text-slate-800">任务日志</p>
+        <div class="mt-3 max-h-[22rem] overflow-y-auto rounded-xl bg-white/85 px-3 py-3 text-sm leading-6 text-slate-700">
+          <pre v-if="record.taskLog" class="whitespace-pre-wrap break-words font-sans">{{ record.taskLog }}</pre>
+          <p v-else class="text-sm text-stone-500">暂无任务日志。</p>
         </div>
       </section>
     </div>

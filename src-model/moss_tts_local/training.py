@@ -90,7 +90,7 @@ def build_train_command(args: argparse.Namespace, prepared_jsonl: Path) -> list[
         "--max-grad-norm",
         str(args.max_grad_norm),
         "--attn-implementation",
-        "auto",
+        args.attn_implementation,
     ]
     if args.enable_gradient_checkpointing:
         command.append("--gradient-checkpointing")

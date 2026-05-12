@@ -1,0 +1,277 @@
+[
+  {
+    "task": "training",
+    "base-model": "vox_cpm2",
+    "params": [
+      {
+        "name": "refAudioPath",
+        "type": "string",
+        "componentType": "input-audio-file",
+        "componentProps": {
+          "label": "参考音频",
+          "helpText": "训练前请显式选择一条参考音频，作为 ref_audio 写入训练索引。",
+          "placeholder": "尚未选择参考音频",
+          "dialogTitle": "选择训练参考音频",
+          "buttonText": "选择参考音频",
+          "extensions": ["wav", "mp3", "flac", "m4a", "ogg"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "VoxCPM2 训练所需的参考音频路径。"
+      },
+      {
+        "name": "useLora",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "LoRA 开关",
+          "textOn": "启用 LoRA 微调",
+          "textOff": "使用全量微调"
+        },
+        "required": true,
+        "defaultValue": true,
+        "description": "是否启用 LoRA 微调；关闭后使用全量微调。"
+      },
+      {
+        "name": "loraRank",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Rank",
+          "min": 1,
+          "step": 1,
+          "visibleWhen": {
+            "field": "useLora",
+            "equals": true
+          }
+        },
+        "required": true,
+        "defaultValue": 32,
+        "description": "LoRA rank 参数，仅在启用 LoRA 时展示。"
+      },
+      {
+        "name": "loraAlpha",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Alpha",
+          "min": 1,
+          "step": 1,
+          "visibleWhen": {
+            "field": "useLora",
+            "equals": true
+          }
+        },
+        "required": true,
+        "defaultValue": 32,
+        "description": "LoRA alpha 参数，仅在启用 LoRA 时展示。"
+      },
+      {
+        "name": "loraDropout",
+        "type": "string",
+        "componentType": "input-text",
+        "componentProps": {
+          "label": "Dropout",
+          "inputMode": "decimal",
+          "visibleWhen": {
+            "field": "useLora",
+            "equals": true
+          }
+        },
+        "required": true,
+        "defaultValue": "0.0",
+        "description": "LoRA dropout，当前前端按字符串保存。"
+      },
+      {
+        "name": "epochCount",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "训练轮次",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 2,
+        "description": "模型训练的 epoch 数。"
+      },
+      {
+        "name": "batchSize",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "批次大小",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 4,
+        "description": "每个训练 step 使用的 batch size。"
+      },
+      {
+        "name": "gradientAccumulationSteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "梯度累积步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 1,
+        "description": "训练时的梯度累积步数。"
+      },
+      {
+        "name": "learningRate",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "学习率",
+          "min": 0,
+          "step": 0.000001
+        },
+        "required": true,
+        "defaultValue": "1e-4",
+        "description": "训练学习率，当前前端按字符串保存与透传。"
+      },
+      {
+        "name": "weightDecay",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "权重衰减",
+          "min": 0,
+          "step": 0.01
+        },
+        "required": true,
+        "defaultValue": "0.01",
+        "description": "优化器权重衰减。"
+      },
+      {
+        "name": "warmupSteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "Warmup Steps",
+          "min": 0,
+          "step": 1,
+          "nullable": true,
+          "placeholder": "留空则自动计算"
+        },
+        "required": false,
+        "defaultValue": null,
+        "description": "学习率 warmup 步数。留空时由后端/训练脚本自动计算。"
+      },
+      {
+        "name": "enableGradientCheckpointing",
+        "type": "boolean",
+        "componentType": "switch",
+        "componentProps": {
+          "label": "梯度检查点",
+          "text": "启用梯度检查点"
+        },
+        "required": true,
+        "defaultValue": false,
+        "description": "是否启用 gradient checkpointing。"
+      }
+    ]
+  },
+  {
+    "task": "tts",
+    "base-model": "vox_cpm2",
+    "params": [
+      {
+        "name": "cfgValue",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "CFG 值",
+          "min": 0.1,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "2.0",
+        "description": "Classifier-free guidance 强度，当前前端按字符串保存。"
+      },
+      {
+        "name": "inferenceTimesteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "推理步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 10,
+        "description": "VoxCPM2 推理阶段的采样步数。"
+      }
+    ]
+  },
+  {
+    "task": "voice-clone",
+    "base-model": "vox_cpm2",
+    "params": [
+      {
+        "name": "mode",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "克隆模式",
+          "options": [
+            {
+              "label": "参考音频克隆",
+              "value": "reference"
+            },
+            {
+              "label": "Ultimate 克隆",
+              "value": "ultimate"
+            }
+          ]
+        },
+        "required": true,
+        "defaultValue": "reference",
+        "description": "声音克隆模式。Ultimate 模式会同时把参考音频用于更多控制路径。"
+      },
+      {
+        "name": "stylePrompt",
+        "type": "string",
+        "componentType": "textarea",
+        "componentProps": {
+          "label": "风格提示词",
+          "rows": 3,
+          "placeholder": "例如：稍快一点、情绪更轻快、语气更坚定。"
+        },
+        "required": false,
+        "defaultValue": "",
+        "description": "附加的风格描述文本。"
+      },
+      {
+        "name": "cfgValue",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "CFG 值",
+          "min": 0.1,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "2.0",
+        "description": "Classifier-free guidance 强度，当前前端按字符串保存。"
+      },
+      {
+        "name": "inferenceTimesteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "推理步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 10,
+        "description": "VoxCPM2 声音克隆阶段的采样步数。"
+      }
+    ]
+  }
+]

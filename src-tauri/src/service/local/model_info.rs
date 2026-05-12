@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    fs,
-    path::Path,
-};
+use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Context;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
@@ -13,12 +9,9 @@ use crate::{
     config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
-        models::{ModelInfo, ModelMutationResult},
+        models::{ModelDownloadType, ModelInfo, ModelMutationResult},
         pipeline::{
-            model_artifacts::{
-                build_model_download_script_args, resolve_model_download_paths,
-                validate_model_artifact_paths,
-            },
+            model_artifacts::{resolve_model_download_paths, validate_model_artifact_paths},
             script_paths::{resolve_src_model_root, src_model_venv_python_path, ScriptPlatform},
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
@@ -43,10 +36,10 @@ impl LocalService {
     pub(crate) async fn model_downloaded_impl(
         &self,
         base_model: &str,
-        model_scale: &str,
+        model_version: &str,
     ) -> Result<bool> {
         Ok(self
-            .find_model_info_row(base_model, model_scale)
+            .find_model_info_row(base_model, model_version)
             .await?
             .map(|row| row.downloaded)
             .unwrap_or(false))
@@ -55,10 +48,10 @@ impl LocalService {
     pub(crate) async fn set_model_downloaded_impl(
         &self,
         base_model: &str,
-        model_scale: &str,
+        model_version: &str,
         downloaded: bool,
     ) -> Result<()> {
-        let Some(row) = self.find_model_info_row(base_model, model_scale).await? else {
+        let Some(row) = self.find_model_info_row(base_model, model_version).await? else {
             return Ok(());
         };
 
@@ -73,10 +66,10 @@ impl LocalService {
     pub(crate) async fn get_model_info_by_base_and_scale_impl(
         &self,
         base_model: &str,
-        model_scale: &str,
+        model_version: &str,
     ) -> Result<ModelInfo> {
         let row = self
-            .find_model_info_row(base_model, model_scale)
+            .find_model_info_row(base_model, model_version)
             .await?
             .ok_or_else(|| anyhow::anyhow!("未找到目标模型"))?;
         map_model_info(row)
@@ -85,12 +78,12 @@ impl LocalService {
     async fn find_model_info_row(
         &self,
         base_model: &str,
-        model_scale: &str,
+        model_version: &str,
     ) -> Result<Option<model_info_entity::Model>> {
         model_info_entity::Entity::find()
             .filter(model_info_entity::Column::Deleted.eq(0))
             .filter(model_info_entity::Column::BaseModel.eq(base_model.trim()))
-            .filter(model_info_entity::Column::ModelScale.eq(model_scale.trim()))
+            .filter(model_info_entity::Column::ModelVersion.eq(model_version.trim()))
             .one(self.orm())
             .await
             .map_err(Into::into)
@@ -99,24 +92,25 @@ impl LocalService {
     pub(crate) async fn install_model_impl(&self, model_id: i64) -> Result<ModelMutationResult> {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
+        let runtime_config = self.runtime_config()?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
-        let log_dir = ensure_child_dir(&resolve_local_log_dir()?, "model-management")?;
+        let log_dir = ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "model-management")?;
         let platform = ScriptPlatform::current();
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
-        let use_cpu_mode = self.runtime_config()?.hardware_type() == HardwareType::Cpu;
+        let use_cpu_mode = runtime_config.hardware_type() == HardwareType::Cpu;
         let init_log_path = log_dir.join(format!(
             "install-{}-{}-init.log",
-            model_info.base_model, model_info.model_scale
+            model_info.base_model, model_info.model_version
         ));
         let download_log_path = log_dir.join(format!(
             "install-{}-{}-download.log",
-            model_info.base_model, model_info.model_scale
+            model_info.base_model, model_info.model_version
         ));
         let bootstrap_paths = PipelineBootstrapPaths {
             base_model: &model_info.base_model,
-            model_scale: &model_info.model_scale,
+            model_version: &model_info.model_version,
             src_model_root: &src_model_root,
             venv_python_path: &venv_python_path,
             init_task_runtime_script_path: &init_script_path,
@@ -157,7 +151,7 @@ impl LocalService {
             bootstrap_paths,
             model_id,
             &log_dir,
-            build_model_download_script_args(&src_model_root, &model_info)?,
+            &model_info,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL,
             |script_path, working_dir, _task_id, log_dir, script_args, label| {
                 let log_path = download_log_path.clone();
@@ -182,7 +176,7 @@ impl LocalService {
             || {
                 validate_model_artifact_paths(
                     &model_info.base_model,
-                    &model_info.model_scale,
+                    &model_info.model_version,
                     &resolve_model_download_paths(&src_model_root, &model_info),
                 )
             },
@@ -235,7 +229,7 @@ impl LocalService {
             removed_paths.push(artifact_path.to_string_lossy().to_string());
         }
 
-        self.set_model_downloaded_impl(&model_info.base_model, &model_info.model_scale, false)
+        self.set_model_downloaded_impl(&model_info.base_model, &model_info.model_version, false)
             .await?;
 
         Ok(ModelMutationResult {
@@ -284,7 +278,11 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         id: row.id,
         base_model: row.base_model,
         model_name: row.model_name,
-        model_scale: row.model_scale,
+        model_version: row.model_version,
+        download_type: row
+            .download_type
+            .parse()
+            .unwrap_or(ModelDownloadType::HfLike),
         required_model_name_list: parse_json_field(&row.required_model_name_list_json)?,
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,

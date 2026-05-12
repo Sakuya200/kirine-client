@@ -8,7 +8,7 @@ export enum TextToSpeechFormat {
 
 export interface TextToSpeechOption {
   label: string;
-  value: string | number;
+  value: string | number | null;
 }
 
 export interface TextToSpeechSpeakerOption extends TextToSpeechOption {

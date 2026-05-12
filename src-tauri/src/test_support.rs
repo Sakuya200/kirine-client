@@ -115,9 +115,9 @@ impl LocalServiceHarness {
 
         self.service
             .create_text_to_speech_task(CreateTextToSpeechTaskPayload {
-                speaker_id: speaker.id,
+                speaker_id: Some(speaker.id),
                 base_model: "vox_cpm2".to_string(),
-                model_scale: "2B".to_string(),
+                model_version: "2B".to_string(),
                 language: AppLanguage::Chinese,
                 format: TextToSpeechFormat::Wav,
                 export_audio_name: "vox-preset-test".to_string(),
@@ -161,7 +161,7 @@ impl LocalServiceHarness {
             .create_model_training_task(CreateModelTrainingTaskPayload {
                 language: AppLanguage::Chinese,
                 base_model: "vox_cpm2".to_string(),
-                model_scale: "2B".to_string(),
+                model_version: "2B".to_string(),
                 model_name: "vox_lora_test".to_string(),
                 description: "用于测试的 Vox 训练说话人".to_string(),
                 model_params,
@@ -459,8 +459,8 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
             r#"
             INSERT INTO task_history (
                 id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, error_message, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, create_time, modify_time, finished_time, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(history_id)
@@ -473,7 +473,6 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
         .bind("2026-04-01 10:00:00")
         .bind("2026-04-01 10:00:00")
         .bind(Option::<String>::None)
-        .bind(Option::<String>::None)
         .bind(0_i64)
         .execute(&pool)
         .await?;
@@ -482,7 +481,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO tts_tasks (
-            history_id, speaker_id, model_path, base_model, model_scale, language, format,
+            history_id, speaker_id, model_path, base_model, model_version, language, format,
             export_audio_name, text, model_params_json, char_count, file_name, output_file_path,
             create_time, modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -510,7 +509,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_training_tasks (
-            history_id, language, base_model, model_scale, model_name, model_params_json,
+            history_id, language, base_model, model_version, model_name, model_params_json,
             sample_count, samples_json, notes_json, output_speaker_id, create_time,
             modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -535,7 +534,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO voice_clone_tasks (
-            history_id, base_model, model_scale, language, format, export_audio_name,
+            history_id, base_model, model_version, language, format, export_audio_name,
             ref_audio_name, ref_audio_path, ref_text, text, model_params_json, char_count,
             file_name, output_file_path, create_time, modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -616,7 +615,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             create_time TEXT NOT NULL,
             modify_time TEXT NOT NULL,
             finished_time TEXT,
-            error_message TEXT,
             deleted INTEGER NOT NULL DEFAULT 0
         )
         "#,
@@ -631,6 +629,7 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             base_model TEXT NOT NULL,
             model_name TEXT NOT NULL,
             model_scale_list_json TEXT NOT NULL,
+            download_type TEXT NOT NULL DEFAULT 'HF-Like',
             required_model_name_list_json TEXT NOT NULL,
             required_model_repo_id_list_json TEXT NOT NULL,
             supported_feature_list_json TEXT NOT NULL,
@@ -753,16 +752,17 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_info (
-            id, base_model, model_name, model_scale_list_json,
+            id, base_model, model_name, model_scale_list_json, download_type,
             required_model_name_list_json, required_model_repo_id_list_json,
             supported_feature_list_json, create_time, modify_time, downloaded, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
     .bind("qwen3_tts")
     .bind("Qwen3-TTS")
     .bind(r#"["1.7B","0.6B"]"#)
+    .bind("HF-Like")
     .bind(r#"["Qwen3-TTS-12Hz-1.7B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
     .bind(r#"["Qwen/Qwen3-TTS-12Hz-1.7B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
     .bind(r#"["text_to_speech","voice_clone","model_training"]"#)
@@ -782,8 +782,8 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
             r#"
             INSERT INTO task_history (
                 id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, error_message, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, create_time, modify_time, finished_time, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(history_id)
@@ -795,7 +795,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
         .bind(0_i64)
         .bind("2026-04-01 10:00:00")
         .bind("2026-04-01 10:00:00")
-        .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .bind(0_i64)
         .execute(&pool)

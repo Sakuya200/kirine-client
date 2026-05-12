@@ -1,67 +1,53 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-SRC_MODEL_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-OUTPUT_FILE=${1:-"$SRC_MODEL_ROOT/../src-tauri/resources/src-model-runtime.zip"}
+SCRIPT_DIR=$(CDPATH='' && cd -- "$(dirname "$0")" && pwd)
+SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
+OUTPUT_FILE=${1:-"$SRC_MODEL_ROOT/../src-tauri/resources/src-model-runtime.tar"}
+
+SOURCE_DIRECTORIES="scripts configs"
+MODEL_DIRECTORIES="qwen3_tts vox_cpm2 moss_tts_local gpt_sovits_cpufast"
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
-if command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD=python3
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD=python
-else
-    echo "Python is required to package src-model runtime files." >&2
+if ! command -v tar >/dev/null 2>&1; then
+    echo "tar is required to package src-model runtime files." >&2
     exit 65
 fi
 
-SRC_MODEL_ROOT="$SRC_MODEL_ROOT" OUTPUT_FILE="$OUTPUT_FILE" "$PYTHON_CMD" - <<'PY'
-import os
-from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+for directory_name in $SOURCE_DIRECTORIES $MODEL_DIRECTORIES; do
+    if [ ! -d "$SRC_MODEL_ROOT/$directory_name" ]; then
+        echo "Source directory not found: $SRC_MODEL_ROOT/$directory_name" >&2
+        exit 66
+    fi
+done
 
-src_model_root = Path(os.environ["SRC_MODEL_ROOT"]).resolve()
-output_file = Path(os.environ["OUTPUT_FILE"]).resolve()
+FILE_LIST=$(mktemp)
+cleanup() {
+    rm -f "$FILE_LIST"
+}
+trap cleanup EXIT INT TERM
 
-exclude_directory_names = {"base-models", "tests", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "venv", ".venv"}
-exclude_suffixes = {".pyc", ".pyo"}
-source_directories = ("scripts",)
-model_directories = ("qwen3_tts", "vox_cpm2", "moss_tts_local")
+cd "$SRC_MODEL_ROOT"
 
+for directory_name in $SOURCE_DIRECTORIES $MODEL_DIRECTORIES; do
+    find "$directory_name" \
+        \( -type d \( \
+            -name base-models -o \
+            -name tests -o \
+            -name __pycache__ -o \
+            -name .pytest_cache -o \
+            -name .mypy_cache -o \
+            -name .ruff_cache -o \
+            -name venv -o \
+            -name .venv \
+        \) -prune \) -o \
+        \( -type f ! -name '*.pyc' ! -name '*.pyo' -print \) >> "$FILE_LIST"
+done
 
-def should_exclude(relative_path: Path) -> bool:
-    return any(part in exclude_directory_names for part in relative_path.parts) or relative_path.suffix.lower() in exclude_suffixes
+LC_ALL=C sort -u "$FILE_LIST" -o "$FILE_LIST"
 
+rm -f "$OUTPUT_FILE"
+tar -cf "$OUTPUT_FILE" -T "$FILE_LIST"
 
-def add_directory(archive: ZipFile, directory_path: Path) -> None:
-    for file_path in directory_path.rglob("*"):
-        if not file_path.is_file():
-            continue
-
-        relative_path = file_path.relative_to(src_model_root)
-        if should_exclude(relative_path):
-            continue
-
-        archive.write(file_path, relative_path.as_posix())
-
-output_file.parent.mkdir(parents=True, exist_ok=True)
-if output_file.exists():
-    output_file.unlink()
-
-with ZipFile(output_file, "w", compression=ZIP_DEFLATED) as archive:
-    for directory_name in source_directories:
-        directory_path = src_model_root / directory_name
-        if not directory_path.exists():
-            raise SystemExit(f"Source directory not found: {directory_path}")
-
-        add_directory(archive, directory_path)
-
-    for directory_name in model_directories:
-        directory_path = src_model_root / directory_name
-        if not directory_path.exists():
-            raise SystemExit(f"Source directory not found: {directory_path}")
-
-        add_directory(archive, directory_path)
-print(f"Created model runtime archive: {output_file}")
-PY
+echo "Created model runtime archive: $OUTPUT_FILE"

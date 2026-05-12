@@ -1,6 +1,20 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
 
+const MAX_CLIENT_ERROR_MESSAGE_CHARS: usize = 420;
+
+fn truncate_client_error_message(message: String) -> String {
+    let trimmed = message.trim();
+    let mut chars = trimmed.chars();
+    let head = chars.by_ref().take(MAX_CLIENT_ERROR_MESSAGE_CHARS).collect::<String>();
+
+    if chars.next().is_some() {
+        format!("{}...", head)
+    } else {
+        head
+    }
+}
+
 /// 通用响应结构体
 /// status_code: 状态码
 /// data: 响应数据
@@ -34,7 +48,7 @@ impl<T> CommonResponse<T> {
         CommonResponse {
             code: status_code,
             data: None,
-            message: Some(message),
+            message: Some(truncate_client_error_message(message)),
         }
     }
 

@@ -26,11 +26,16 @@ interface UpdateSpeakerPayload {
 
 interface ImportSpeakerPayload {
   baseModel: BaseModel;
-  modelScale: string;
+  modelVersion: string;
   sourceModelDirPath: string;
   name: string;
   description: string;
   language: AppLanguage;
+}
+
+interface LoadSpeakersOptions {
+  silent?: boolean;
+  force?: boolean;
 }
 
 const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
@@ -61,6 +66,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
   const isLoading = ref(false);
   const initialized = ref(false);
   const uiStore = useUiStore();
+  let loadSpeakersPromise: Promise<void> | null = null;
 
   const speakerCount = computed(() => speakers.value.length);
   const readyCount = computed(() => speakers.value.filter(speaker => speaker.status === SpeakerStatus.Ready).length);
@@ -68,23 +74,41 @@ export const useSpeakerStore = defineStore('speakers', () => {
   const disabledCount = computed(() => speakers.value.filter(speaker => speaker.status === SpeakerStatus.Disabled).length);
   const totalSamples = computed(() => speakers.value.reduce((total, speaker) => total + speaker.samples, 0));
 
-  const loadSpeakers = async () => {
-    isLoading.value = true;
-
-    try {
-      const result = await invoke<SpeakerProfile[]>('list_speaker_infos');
-      speakers.value = Array.isArray(result) ? normalizeSpeakers(result) : [];
-    } catch (error) {
-      speakers.value = [];
-      uiStore.notifyError(formatErrorMessage('加载说话人列表失败', error));
-    } finally {
-      isLoading.value = false;
-      initialized.value = true;
+  const loadSpeakers = async ({ silent = false }: LoadSpeakersOptions = {}) => {
+    if (loadSpeakersPromise) {
+      return loadSpeakersPromise;
     }
+
+    isLoading.value = true;
+    loadSpeakersPromise = (async () => {
+      try {
+        const result = await invoke<SpeakerProfile[]>('list_speaker_infos');
+        speakers.value = Array.isArray(result) ? normalizeSpeakers(result) : [];
+      } catch (error) {
+        speakers.value = [];
+        if (!silent) {
+          uiStore.notifyError(formatErrorMessage('加载说话人列表失败', error));
+        }
+      } finally {
+        isLoading.value = false;
+        initialized.value = true;
+        loadSpeakersPromise = null;
+      }
+    })();
+
+    return loadSpeakersPromise;
   };
 
-  const refreshSpeakers = async () => {
-    await loadSpeakers();
+  const refreshSpeakers = async (options: LoadSpeakersOptions = {}) => {
+    await loadSpeakers(options);
+  };
+
+  const ensureLoaded = async ({ force = false, silent = false }: LoadSpeakersOptions = {}) => {
+    if (initialized.value && !force) {
+      return;
+    }
+
+    await loadSpeakers({ silent });
   };
 
   const createSpeaker = async (payload: CreateSpeakerPayload) => {
@@ -146,7 +170,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('import_model_as_speaker', {
           payload: {
             baseModel: payload.baseModel,
-            modelScale: payload.modelScale,
+            modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
             name: payload.name,
             description: payload.description,
@@ -202,6 +226,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
     disabledCount,
     totalSamples,
     createSpeaker,
+    ensureLoaded,
     loadSpeakers,
     refreshSpeakers,
     updateSpeaker,

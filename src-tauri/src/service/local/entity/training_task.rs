@@ -8,7 +8,7 @@ pub struct Model {
     pub history_id: i64,
     pub language: String,
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_name: String,
     pub description: String,
     pub model_params_json: String,
