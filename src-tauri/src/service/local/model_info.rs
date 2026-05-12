@@ -92,13 +92,14 @@ impl LocalService {
     pub(crate) async fn install_model_impl(&self, model_id: i64) -> Result<ModelMutationResult> {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
+        let runtime_config = self.runtime_config()?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
-        let log_dir = ensure_child_dir(&resolve_local_log_dir()?, "model-management")?;
+        let log_dir = ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "model-management")?;
         let platform = ScriptPlatform::current();
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
-        let use_cpu_mode = self.runtime_config()?.hardware_type() == HardwareType::Cpu;
+        let use_cpu_mode = runtime_config.hardware_type() == HardwareType::Cpu;
         let init_log_path = log_dir.join(format!(
             "install-{}-{}-init.log",
             model_info.base_model, model_info.model_version

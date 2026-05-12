@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -75,6 +76,19 @@ VERSION_INFERENCE_FILES = {
         "pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt",
         "pretrained_models/v2Pro/s2Gv2ProPlus.pth",
     ],
+}
+
+ZIP_VALIDATION_FILES = {
+    "pretrained_models/chinese-hubert-base/pytorch_model.bin",
+    "pretrained_models/chinese-roberta-wwm-ext-large/pytorch_model.bin",
+    "pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
+    "pretrained_models/s2G488k.pth",
+    "pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+    "pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
+    "pretrained_models/s1v3.ckpt",
+    "pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt",
+    "pretrained_models/v2Pro/s2Gv2Pro.pth",
+    "pretrained_models/v2Pro/s2Gv2ProPlus.pth",
 }
 
 MODEL_VERSION_TO_ASSET_VERSION = {
@@ -163,9 +177,36 @@ def _required_asset_files(version: str) -> list[str]:
 def _missing_asset_files(root: Path, version: str) -> list[str]:
     missing = []
     for rel_path in _required_asset_files(version):
-        if not (root / "GPT_SoVITS" / rel_path).exists():
+        absolute_path = root / "GPT_SoVITS" / rel_path
+        if not absolute_path.exists() or not _is_asset_file_valid(absolute_path, rel_path):
             missing.append(rel_path)
     return missing
+
+
+def _is_asset_file_valid(path: Path, rel_path: str) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+
+    try:
+        file_size = path.stat().st_size
+    except OSError:
+        return False
+
+    if file_size <= 0:
+        return False
+
+    if rel_path not in ZIP_VALIDATION_FILES:
+        return True
+
+    try:
+        if not zipfile.is_zipfile(path):
+            return False
+
+        with zipfile.ZipFile(path, "r") as zip_file:
+            # testzip validates CRC for each entry and catches truncated/corrupted archives.
+            return zip_file.testzip() is None
+    except (OSError, zipfile.BadZipFile, RuntimeError):
+        return False
 
 
 def _is_cpufast_runtime_ready(root: Path, version: str = "v2ProPlus") -> bool:
@@ -173,9 +214,9 @@ def _is_cpufast_runtime_ready(root: Path, version: str = "v2ProPlus") -> bool:
     # Must have the core directory structure
     if not _has_gpt_sovits_structure(root):
         return False
-    
-    # Check if all required checkpoints exist
-    missing = _get_missing_checkpoints(root, version)
+
+    # Check if all required inference assets exist and pass basic integrity checks.
+    missing = _missing_asset_files(root, version)
     return len(missing) == 0
 
 

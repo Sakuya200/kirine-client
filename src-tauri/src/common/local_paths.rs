@@ -5,13 +5,11 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::config::{load_configs, resolve_base_log_dir};
+use crate::config::{resolve_base_log_dir, EnvConfig};
 
 const DATA_DIR_PATH_PLACEHOLDER: &str = "%DATA_DIR_PATH%";
 
-pub(crate) fn resolve_local_log_dir() -> Result<PathBuf> {
-    let config =
-        load_configs().context("failed to load config.toml before resolving log directory")?;
+pub(crate) fn resolve_local_log_dir(config: &EnvConfig) -> Result<PathBuf> {
     resolve_base_log_dir(config.log_dir())
 }
 

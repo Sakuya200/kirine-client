@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::{
-    load_configs, resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation,
-    BasicConfig, EnvConfig, HardwareType, RemoteConfig, UiConfigCatalog,
+    resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation, BasicConfig,
+    EnvConfig, HardwareType, RemoteConfig, UiConfigCatalog,
 };
 use crate::service::{ServiceImpl, ServiceState};
 use crate::utils::file_ops::migrate_directory;
@@ -105,7 +105,7 @@ pub fn save_settings_config(
         .write()
         .map_err(|_| "写入配置状态失败".to_string())?;
 
-    let persisted_config = load_configs().unwrap_or_else(|_| config.clone());
+    let persisted_config = config.clone();
     let attn_implementation = payload
         .attn_implementation
         .parse::<AttentionImplementation>()

@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { RouterLink } from 'vue-router';
 
 import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 
 interface Props {
   label: string;
+  showHistoryLink?: boolean;
 }
 
-defineProps<Props>();
-
-const route = useRoute();
-const showHistoryLink = computed(() => route.path !== '/history');
+withDefaults(defineProps<Props>(), {
+  showHistoryLink: true
+});
 </script>
 
 <template>
@@ -26,7 +25,7 @@ const showHistoryLink = computed(() => route.path !== '/history');
           </RouterLink>
           页面随时查询执行结果。
         </template>
-        <template v-else>当前页面会持续展示任务状态与执行结果。</template>
+        <template v-else>当前页面会持续展示任务状态与执行结果，请不要切换页面，耐心等待，不要重复操作。</template>
       </p>
     </div>
   </section>

@@ -13,7 +13,7 @@ import { useModelStore } from '@/stores/models';
 const modelStore = useModelStore();
 const isMutating = ref(false);
 const mutatingModelId = ref<number | null>(null);
-const mutatingAction = ref<'install' | 'uninstall' | null>(null);
+const mutatingAction = ref<'install' | 'uninstall' | 'reinstall' | null>(null);
 const uninstallTargetId = ref<number | null>(null);
 
 const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
@@ -41,10 +41,16 @@ const refreshModels = async () => {
 };
 
 const handleInstall = async (modelId: number) => {
+  const target = modelStore.items.find(item => item.id === modelId);
   isMutating.value = true;
   mutatingModelId.value = modelId;
-  mutatingAction.value = 'install';
+  mutatingAction.value = target?.downloaded ? 'reinstall' : 'install';
   try {
+    if (target?.downloaded) {
+      await modelStore.reinstallModel(modelId);
+      return;
+    }
+
     await modelStore.installModel(modelId);
   } finally {
     isMutating.value = false;
@@ -88,7 +94,7 @@ onMounted(async () => {
   <div class="space-y-5">
     <PageHeader title="模型管理" description="查看系统支持的基础模型、功能支持情况和当前安装状态，并执行安装或卸载。" eyebrow="Model Management" />
 
-    <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" />
+    <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" :show-history-link="false" />
 
     <PanelCard title="模型列表" subtitle="状态来自本地数据库中的 model_info.downloaded 字段。">
       <template #actions>
@@ -141,12 +147,26 @@ onMounted(async () => {
                   <BaseButton
                     tone="ghost"
                     size="sm"
-                    :loading="mutatingAction === 'install' && mutatingModelId === item.id"
+                    :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
                     :disabled="isMutating"
                     @click="handleInstall(item.id)"
                   >
-                    <ArrowDownTrayIcon v-if="!(mutatingAction === 'install' && mutatingModelId === item.id)" class="h-4 w-4" aria-hidden="true" />
-                    <span>{{ mutatingAction === 'install' && mutatingModelId === item.id ? '处理中...' : item.downloaded ? '重装' : '安装' }}</span>
+                    <ArrowDownTrayIcon
+                      v-if="!((mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id)"
+                      class="h-4 w-4"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {{
+                        mutatingModelId === item.id && mutatingAction === 'reinstall'
+                          ? '重装中...'
+                          : mutatingModelId === item.id && mutatingAction === 'install'
+                            ? '安装中...'
+                            : item.downloaded
+                              ? '重装'
+                              : '安装'
+                      }}
+                    </span>
                   </BaseButton>
                   <BaseButton tone="quiet" size="sm" :disabled="isMutating || !item.downloaded" @click="requestUninstall(item.id)">
                     <TrashIcon class="h-4 w-4" aria-hidden="true" />

@@ -98,6 +98,21 @@ export const useModelStore = defineStore('models', () => {
     }
   };
 
+  const reinstallModel = async (modelId: number) => {
+    const uninstalled = await uninstallModel(modelId);
+    if (!uninstalled) {
+      return null;
+    }
+
+    const installed = await installModel(modelId);
+    if (!installed) {
+      uiStore.notifyWarning('模型已卸载，但重装失败，请重试安装。', 4200);
+      return null;
+    }
+
+    return installed;
+  };
+
   const ensureLoaded = async () => {
     if (!initialized.value && !isLoading.value) {
       await loadModels();
@@ -128,6 +143,7 @@ export const useModelStore = defineStore('models', () => {
     loadModels,
     ensureLoaded,
     installModel,
+    reinstallModel,
     getModelsByFeature,
     getModelLabel,
     getModelVersionOptions,
