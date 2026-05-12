@@ -12,7 +12,7 @@ import urllib.request
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-model", dest="base_model", type=str, required=True)
-    parser.add_argument("--model-scale", dest="model_scale", type=str, required=True)
+    parser.add_argument("--model-version", dest="model_version", type=str, required=True)
     parser.add_argument("--target-root-dir", dest="target_root_dir", type=str, required=True)
     parser.add_argument("--log-path", dest="log_path", type=str, required=False)
     parser.add_argument("--task-log-file", dest="task_log_file", type=str, required=False)
@@ -77,7 +77,7 @@ VERSION_INFERENCE_FILES = {
     ],
 }
 
-MODEL_SCALE_TO_ASSET_VERSION = {
+MODEL_VERSION_TO_ASSET_VERSION = {
     "v1": "v1",
     "1": "v1",
     "v2": "v2",
@@ -131,16 +131,16 @@ def _get_missing_checkpoints(root: Path, version: str = "v2ProPlus") -> list[str
     return missing
 
 
-def _resolve_asset_version(asset_version: str | None, model_scale: str) -> str:
+def _resolve_asset_version(asset_version: str | None, model_version: str) -> str:
     if asset_version:
         return asset_version
 
-    normalized_scale = model_scale.strip().lower()
-    mapped = MODEL_SCALE_TO_ASSET_VERSION.get(normalized_scale)
+    normalized_scale = model_version.strip().lower()
+    mapped = MODEL_VERSION_TO_ASSET_VERSION.get(normalized_scale)
     if not mapped:
         raise SystemExit(
-            "❌ Unable to infer asset version from --model-scale. "
-            f"Got: {model_scale}. Supported scales include: V1, V2, V2Pro, V2ProPlus (or aliases like v2pp)."
+            "❌ Unable to infer asset version from --model-version. "
+            f"Got: {model_version}. Supported versions include: V1, V2, V2Pro, V2ProPlus (or aliases like v2pp)."
         )
     return mapped
 
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     target_root = Path(args.target_root_dir).expanduser().resolve()
     target_dir = target_root / args.base_model
-    resolved_asset_version = _resolve_asset_version(args.asset_version, args.model_scale)
+    resolved_asset_version = _resolve_asset_version(args.asset_version, args.model_version)
     target_root.mkdir(parents=True, exist_ok=True)
 
     # Check 1: Already fully ready?

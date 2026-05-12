@@ -358,7 +358,7 @@ impl LocalService {
         Ok(serde_json::to_value(TextToSpeechTaskDetail {
             speaker_id: row.speaker_id,
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             language: row
                 .language
                 .parse()
@@ -396,7 +396,7 @@ impl LocalService {
                 .parse()
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             model_name: row.model_name,
             description: row.description,
             model_params: serde_json::from_str(&row.model_params_json)?,
@@ -419,7 +419,7 @@ impl LocalService {
 
         Ok(serde_json::to_value(VoiceCloneTaskDetail {
             base_model: row.base_model,
-            model_scale: row.model_scale,
+            model_version: row.model_version,
             language: row
                 .language
                 .parse()

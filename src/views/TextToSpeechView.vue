@@ -38,7 +38,7 @@ interface TtsResult {
   speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
@@ -58,7 +58,7 @@ interface TextToSpeechTaskResultPayload {
   speakerId: number | null;
   speakerLabel: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
@@ -90,7 +90,7 @@ const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, 
 const form = reactive({
   speakerId: null as number | null,
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
@@ -130,7 +130,7 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
 const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
   {
@@ -156,12 +156,12 @@ const canGenerate = computed(() => {
     charCount.value > 0 &&
     modelParamsValid &&
     !isGenerating.value &&
-    !!form.modelScale &&
+    !!form.modelVersion &&
     (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
   );
 });
 const generationTips = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
   isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
@@ -171,7 +171,7 @@ const activeResultMetaText = computed(() => {
     return '';
   }
 
-  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelScale} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
+  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -208,15 +208,15 @@ watch(
 );
 
 watch(
-  modelScaleOptions,
+  modelVersionOptions,
   options => {
     if (options.length === 0) {
-      form.modelScale = '';
+      form.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === form.modelScale)) {
-      form.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === form.modelVersion)) {
+      form.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -284,7 +284,7 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   speakerId: payload.speakerId,
   speakerLabel: payload.speakerLabel,
   baseModel: payload.baseModel,
-  modelScale: payload.modelScale,
+  modelVersion: payload.modelVersion,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
@@ -309,7 +309,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     speakerId: record.detail.speakerId,
     speakerLabel: record.speaker,
     baseModel: record.detail.baseModel,
-    modelScale: record.detail.modelScale,
+    modelVersion: record.detail.modelVersion,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
@@ -331,7 +331,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   activeResult.value = setAsActiveResult ? item : null;
   form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.baseModel = item.baseModel;
-  form.modelScale = item.modelScale;
+  form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;
   form.exportAudioName = item.exportAudioName;
@@ -503,7 +503,7 @@ const generateAudio = async () => {
       payload: {
         speakerId: isDynamicReferenceModel.value ? null : form.speakerId,
         baseModel: form.baseModel,
-        modelScale: form.modelScale,
+        modelVersion: form.modelVersion,
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
@@ -619,7 +619,7 @@ onMounted(async () => {
             :options="TEXT_TO_SPEECH_LANGUAGES"
           />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
           <label class="block text-sm text-slate-700">
             <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>

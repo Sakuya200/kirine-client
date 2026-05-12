@@ -65,7 +65,7 @@ pub(crate) struct CommonTtsModelParams {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTtsTaskParams {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_root_path: String,
     pub speaker_dir_name: Option<String>,
     pub language: String,
@@ -79,7 +79,7 @@ pub(crate) struct LoadedTtsTaskParams {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTtsPaths {
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub src_model_root: PathBuf,
     pub venv_python_path: PathBuf,
     pub init_task_runtime_script_path: PathBuf,
@@ -102,7 +102,7 @@ pub(crate) fn build_shared_tts_invocation(
     PythonScriptInvocationSpec {
         version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
-        model_scale: context.params.model_scale.clone(),
+        model_version: context.params.model_version.clone(),
         kind: PythonScriptTaskKind::TextToSpeech,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.device().to_string()),
@@ -158,12 +158,12 @@ pub(crate) async fn run_common_tts_pipeline(
                 params.base_model
             );
         }
-        let paths = resolve_tts_paths(service, task_id, base_model, &params.model_scale)?;
+        let paths = resolve_tts_paths(service, task_id, base_model, &params.model_version)?;
 
         prepare_tts_model_env(
             service,
             &paths.base_model,
-            &paths.model_scale,
+            &paths.model_version,
             &paths.src_model_root,
             &paths.venv_python_path,
             &paths.init_task_runtime_script_path,
@@ -312,7 +312,7 @@ pub(crate) async fn load_tts_task_params(
 
     Ok(LoadedTtsTaskParams {
         base_model: task_detail.base_model,
-        model_scale: task_detail.model_scale.trim().to_string(),
+        model_version: task_detail.model_version.trim().to_string(),
         model_root_path,
         speaker_dir_name,
         language: task_detail.language,
@@ -385,7 +385,7 @@ pub(crate) async fn mark_tts_failed_state(
 pub(crate) async fn prepare_tts_model_env(
     service: &LocalService,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: &Path,
     venv_python_path: &Path,
     init_task_runtime_script_path: &Path,
@@ -396,7 +396,7 @@ pub(crate) async fn prepare_tts_model_env(
 ) -> Result<()> {
     let bootstrap_paths = PipelineBootstrapPaths {
         base_model,
-        model_scale,
+        model_version,
         src_model_root,
         venv_python_path,
         init_task_runtime_script_path,
@@ -426,7 +426,7 @@ pub(crate) async fn prepare_tts_model_env(
     .await?;
 
     let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
+        .get_model_info_by_base_and_scale_impl(base_model, model_version)
         .await?;
     let download_paths = resolve_model_download_paths(src_model_root, &model_info);
 
@@ -450,7 +450,7 @@ pub(crate) async fn prepare_tts_model_env(
             )
             .await
         },
-        || validate_model_artifact_paths(base_model, model_scale, &download_paths),
+        || validate_model_artifact_paths(base_model, model_version, &download_paths),
     )
     .await
 }
@@ -502,7 +502,7 @@ pub(crate) fn resolve_tts_paths_base(
     service: &LocalService,
     task_id: i64,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: PathBuf,
 ) -> Result<ResolvedTtsPaths> {
     let platform = ScriptPlatform::current();
@@ -522,7 +522,7 @@ pub(crate) fn resolve_tts_paths_base(
 
     Ok(ResolvedTtsPaths {
         base_model: base_model.to_string(),
-        model_scale: model_scale.to_string(),
+        model_version: model_version.to_string(),
         src_model_root,
         venv_python_path,
         init_task_runtime_script_path,
@@ -537,10 +537,10 @@ pub(crate) fn resolve_tts_paths(
     service: &LocalService,
     task_id: i64,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
 ) -> Result<ResolvedTtsPaths> {
     let src_model_root = resolve_src_model_root(service.app_dir())?;
-    resolve_tts_paths_base(service, task_id, base_model, model_scale, src_model_root)
+    resolve_tts_paths_base(service, task_id, base_model, model_version, src_model_root)
 }
 
 pub(crate) async fn run_tts_python_command(

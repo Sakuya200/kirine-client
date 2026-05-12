@@ -26,7 +26,7 @@ interface UpdateSpeakerPayload {
 
 interface ImportSpeakerPayload {
   baseModel: BaseModel;
-  modelScale: string;
+  modelVersion: string;
   sourceModelDirPath: string;
   name: string;
   description: string;
@@ -170,7 +170,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('import_model_as_speaker', {
           payload: {
             baseModel: payload.baseModel,
-            modelScale: payload.modelScale,
+            modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
             name: payload.name,
             description: payload.description,

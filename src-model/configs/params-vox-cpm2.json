@@ -4,6 +4,22 @@
     "base-model": "vox_cpm2",
     "params": [
       {
+        "name": "refAudioPath",
+        "type": "string",
+        "componentType": "input-audio-file",
+        "componentProps": {
+          "label": "参考音频",
+          "helpText": "训练前请显式选择一条参考音频，作为 ref_audio 写入训练索引。",
+          "placeholder": "尚未选择参考音频",
+          "dialogTitle": "选择训练参考音频",
+          "buttonText": "选择参考音频",
+          "extensions": ["wav", "mp3", "flac", "m4a", "ogg"]
+        },
+        "required": true,
+        "defaultValue": "",
+        "description": "VoxCPM2 训练所需的参考音频路径。"
+      },
+      {
         "name": "useLora",
         "type": "boolean",
         "componentType": "switch",

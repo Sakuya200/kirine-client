@@ -29,7 +29,7 @@ struct SupportedModelsConfig {
 struct SupportedModelDefinition {
     base_model: String,
     model_name: String,
-    model_scale: String,
+    model_version: String,
     #[serde(default = "default_model_download_type")]
     download_type: ModelDownloadType,
     required_model_name_list: Vec<String>,
@@ -67,7 +67,7 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
         active_model_keys.insert(format!(
             "{}:{}",
             definition.base_model.trim(),
-            definition.model_scale.trim()
+            definition.model_version.trim()
         ));
         upsert_model_definition(&txn, definition, &now).await?;
     }
@@ -84,7 +84,7 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
 
     let existing_models = model_info_entity::Entity::find().all(&txn).await?;
     for row in existing_models {
-        let key = format!("{}:{}", row.base_model.trim(), row.model_scale.trim());
+        let key = format!("{}:{}", row.base_model.trim(), row.model_version.trim());
         if active_model_keys.contains(&key) {
             continue;
         }
@@ -125,7 +125,7 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
         let key = format!(
             "{}:{}",
             definition.base_model.trim(),
-            definition.model_scale.trim()
+            definition.model_version.trim()
         );
         if !model_keys.insert(key.clone()) {
             bail!("supported_models.json 中存在重复模型定义: {key}");
@@ -172,7 +172,7 @@ where
 
     let existing = model_info_entity::Entity::find()
         .filter(model_info_entity::Column::BaseModel.eq(definition.base_model.trim()))
-        .filter(model_info_entity::Column::ModelScale.eq(definition.model_scale.trim()))
+        .filter(model_info_entity::Column::ModelVersion.eq(definition.model_version.trim()))
         .one(connection)
         .await?;
 
@@ -182,7 +182,7 @@ where
         let mut active_model: model_info_entity::ActiveModel = row.into();
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.model_name = Set(definition.model_name.trim().to_string());
-        active_model.model_scale = Set(definition.model_scale.trim().to_string());
+        active_model.model_version = Set(definition.model_version.trim().to_string());
         active_model.download_type = Set(definition.download_type.as_str().to_string());
         active_model.required_model_name_list_json = Set(required_model_name_list_json);
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
@@ -197,7 +197,7 @@ where
             id: sea_orm::ActiveValue::NotSet,
             base_model: Set(definition.base_model.trim().to_string()),
             model_name: Set(definition.model_name.trim().to_string()),
-            model_scale: Set(definition.model_scale.trim().to_string()),
+            model_version: Set(definition.model_version.trim().to_string()),
             download_type: Set(definition.download_type.as_str().to_string()),
             required_model_name_list_json: Set(required_model_name_list_json),
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),

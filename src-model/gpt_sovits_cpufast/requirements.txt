@@ -16,6 +16,7 @@ cn2an
 pypinyin
 g2p_en
 tokenizers
+onnxruntime
 transformers==4.57.3
 peft<0.18.0
 chardet

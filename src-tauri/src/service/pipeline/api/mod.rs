@@ -78,7 +78,7 @@ pub(crate) enum PythonScriptTaskArgs {
 pub(crate) struct PythonScriptInvocationSpec {
     pub version: String,
     pub base_model: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub kind: PythonScriptTaskKind,
     pub runtime: PythonScriptRuntimeOptions,
     pub args: PythonScriptTaskArgs,

@@ -35,7 +35,7 @@ impl LocalService {
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
-        let model_scale = payload.model_scale.trim().to_string();
+        let model_version = payload.model_version.trim().to_string();
         let speaker_label = if let Some(speaker_id) = speaker_id {
             let speaker = speaker_entity::Entity::find_by_id(speaker_id)
                 .filter(speaker_entity::Column::Deleted.eq(0))
@@ -103,12 +103,12 @@ impl LocalService {
             speaker_id: Set(speaker_id),
             model_path: Set(None),
             base_model: Set(base_model.clone()),
-            model_scale: Set(model_scale.clone()),
+            model_version: Set(model_version.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
             export_audio_name: Set(export_audio_name.clone()),
             text: Set(text.clone()),
-            model_params_json: Set(serde_json::to_string(&payload.model_params)?),
+            model_params_json: Set(serde_json::to_string(&model_params)?),
             char_count: Set(char_count as i64),
             file_name: Set(file_name.clone()),
             output_file_path: Set(Some(serialized_output_path.clone())),
@@ -128,7 +128,7 @@ impl LocalService {
             speaker_id,
             speaker_label,
             base_model,
-            model_scale,
+            model_version,
             language: payload.language,
             format: payload.format,
             export_audio_name,

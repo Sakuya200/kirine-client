@@ -31,7 +31,7 @@ interface VoiceCloneResult {
   fileName: string;
   refAudioName: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   languageLabel: string;
   format: TextToSpeechFormat;
@@ -51,7 +51,7 @@ interface VoiceCloneTaskResultPayload {
   fileName: string;
   refAudioName: string;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
@@ -91,7 +91,7 @@ const route = useRoute();
 const router = useRouter();
 const form = reactive({
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
   exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
@@ -138,17 +138,17 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
 const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'voice-clone'));
 const canGenerate = computed(() => {
   const modelParamsValid = activeVoiceCloneTaskConfig.value
     ? uiConfigStore.validateModelParams(form.baseModel, 'voice-clone', form.modelParams)
     : true;
 
-  return Boolean(form.baseModel) && Boolean(form.modelScale) && Boolean(effectiveRefAudioPath.value) && modelParamsValid;
+  return Boolean(form.baseModel) && Boolean(form.modelVersion) && Boolean(effectiveRefAudioPath.value) && modelParamsValid;
 });
 const cloneSummary = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelScale}。`,
+  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
   `导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
@@ -158,7 +158,7 @@ const activeResultMetaText = computed(() => {
     return '';
   }
 
-  return `${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelScale} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
+  return `${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -195,15 +195,15 @@ watch(
 );
 
 watch(
-  modelScaleOptions,
+  modelVersionOptions,
   options => {
     if (options.length === 0) {
-      form.modelScale = '';
+      form.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === form.modelScale)) {
-      form.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === form.modelVersion)) {
+      form.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -235,7 +235,7 @@ const mapResultPayload = (payload: VoiceCloneTaskResultPayload): VoiceCloneResul
   fileName: payload.fileName,
   refAudioName: payload.refAudioName,
   baseModel: payload.baseModel,
-  modelScale: payload.modelScale,
+  modelVersion: payload.modelVersion,
   language: payload.language,
   languageLabel: findLanguageLabel(payload.language),
   format: payload.format,
@@ -260,7 +260,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceCloneResult | nul
     fileName: record.detail.fileName,
     refAudioName: record.detail.refAudioName,
     baseModel: record.detail.baseModel,
-    modelScale: record.detail.modelScale,
+    modelVersion: record.detail.modelVersion,
     language: record.detail.language,
     languageLabel: findLanguageLabel(record.detail.language),
     format: record.detail.format,
@@ -280,7 +280,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   stopActiveTaskStatusRefresh();
   activeResult.value = null;
   form.baseModel = result.baseModel;
-  form.modelScale = result.modelScale;
+  form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
   form.exportAudioName = result.exportAudioName;
@@ -300,7 +300,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   stopActiveTaskStatusRefresh();
   activeResult.value = setAsActiveResult ? result : null;
   form.baseModel = result.baseModel;
-  form.modelScale = result.modelScale;
+  form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
   form.exportAudioName = result.exportAudioName;
@@ -515,7 +515,7 @@ const createTask = async () => {
     const payload = await invoke<VoiceCloneTaskResultPayload>('create_voice_clone_task', {
       payload: {
         baseModel: form.baseModel,
-        modelScale: form.modelScale,
+        modelVersion: form.modelVersion,
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
@@ -552,7 +552,7 @@ const saveResultAudio = (taskId: number) =>
 
 const resetForm = () => {
   form.baseModel = modelOptions.value[0]?.value ?? '';
-  form.modelScale = modelScaleOptions.value[0]?.value ?? '';
+  form.modelVersion = modelVersionOptions.value[0]?.value ?? '';
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
   form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
@@ -588,7 +588,7 @@ onBeforeUnmount(() => {
       <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，任务会使用设置页中的全局硬件类型执行克隆推理。">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">

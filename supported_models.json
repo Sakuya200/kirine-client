@@ -3,7 +3,7 @@
     {
       "baseModel": "qwen3_tts",
       "modelName": "Qwen3-TTS",
-      "modelScale": "1.7B",
+      "modelVersion": "1.7B",
       "downloadType": "HF-Like",
       "requiredModelNameList": ["Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-1.7B-CustomVoice"],
       "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"],
@@ -12,7 +12,7 @@
     {
       "baseModel": "qwen3_tts",
       "modelName": "Qwen3-TTS",
-      "modelScale": "0.6B",
+      "modelVersion": "0.6B",
       "downloadType": "HF-Like",
       "requiredModelNameList": ["Qwen3-TTS-12Hz-0.6B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-0.6B-CustomVoice"],
       "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-0.6B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"],
@@ -21,7 +21,7 @@
     {
       "baseModel": "vox_cpm2",
       "modelName": "VoxCPM2",
-      "modelScale": "2B",
+      "modelVersion": "2B",
       "downloadType": "HF-Like",
       "requiredModelNameList": ["VoxCPM2"],
       "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
@@ -30,7 +30,7 @@
     {
       "baseModel": "moss_tts_local",
       "modelName": "MOSS-TTS Local",
-      "modelScale": "1.7B",
+      "modelVersion": "1.7B",
       "downloadType": "HF-Like",
       "requiredModelNameList": ["MOSS-TTS-Local-Transformer", "MOSS-Audio-Tokenizer"],
       "requiredModelRepoIdList": ["OpenMOSS-Team/MOSS-TTS-Local-Transformer", "OpenMOSS-Team/MOSS-Audio-Tokenizer"],
@@ -39,7 +39,7 @@
     {
       "baseModel": "gpt_sovits_cpufast",
       "modelName": "GPT-SoVITS-CPUFast",
-      "modelScale": "V1",
+      "modelVersion": "V1",
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
@@ -48,7 +48,7 @@
     {
       "baseModel": "gpt_sovits_cpufast",
       "modelName": "GPT-SoVITS-CPUFast",
-      "modelScale": "V2",
+      "modelVersion": "V2",
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
@@ -57,7 +57,7 @@
     {
       "baseModel": "gpt_sovits_cpufast",
       "modelName": "GPT-SoVITS-CPUFast",
-      "modelScale": "V2Pro",
+      "modelVersion": "V2Pro",
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
@@ -66,7 +66,7 @@
     {
       "baseModel": "gpt_sovits_cpufast",
       "modelName": "GPT-SoVITS-CPUFast",
-      "modelScale": "V2ProPlus",
+      "modelVersion": "V2ProPlus",
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],

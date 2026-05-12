@@ -60,7 +60,7 @@ pub(crate) struct CommonTrainingModelParams {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTrainingTaskParams {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_params_json: Value,
     pub batch_size: i64,
     pub epoch_count: i64,
@@ -88,7 +88,7 @@ pub(crate) struct CommonTrainingPaths {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTrainingPaths {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub src_model_root: PathBuf,
     pub model_root_path: PathBuf,
     pub venv_python_path: PathBuf,
@@ -162,7 +162,7 @@ pub(crate) fn build_shared_training_invocation(
     Ok(PythonScriptInvocationSpec {
         version: "1.0.0".to_string(),
         base_model: base_model.to_string(),
-        model_scale: context.paths.model_scale.clone(),
+        model_version: context.paths.model_version.clone(),
         kind: PythonScriptTaskKind::Training,
         runtime: PythonScriptRuntimeOptions {
             device: Some(context.runtime.training_device().to_string()),
@@ -213,7 +213,7 @@ pub(crate) async fn run_common_training_pipeline(
             speaker_id,
             &speaker_name,
             &params.base_model,
-            &params.model_scale,
+            &params.model_version,
         )?;
         let log_dir = resolve_local_log_dir()?;
 
@@ -228,7 +228,7 @@ pub(crate) async fn run_common_training_pipeline(
         prepare_training_model_env_for_paths(
             service,
             &paths.base_model,
-            &paths.model_scale,
+            &paths.model_version,
             &paths.src_model_root,
             &paths.venv_python_path,
             &paths.init_task_runtime_script_path,
@@ -354,7 +354,7 @@ pub(crate) async fn load_training_task_params(
 
     Ok(LoadedTrainingTaskParams {
         base_model: row.base_model,
-        model_scale: row.model_scale.trim().to_string(),
+        model_version: row.model_version.trim().to_string(),
         model_params_json: params.model_params_json,
         batch_size: params.batch_size,
         epoch_count: params.epoch_count,
@@ -378,7 +378,7 @@ pub(crate) fn resolve_training_paths_base(
     speaker_id: i64,
     speaker_name: &str,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
 ) -> Result<ResolvedTrainingPaths> {
     let common_paths = resolve_common_training_paths(
         service,
@@ -389,7 +389,7 @@ pub(crate) fn resolve_training_paths_base(
 
     Ok(ResolvedTrainingPaths {
         base_model: base_model.to_string(),
-        model_scale: model_scale.to_string(),
+        model_version: model_version.to_string(),
         src_model_root: common_paths.src_model_root,
         model_root_path: common_paths.model_root_path,
         venv_python_path: common_paths.venv_python_path,
@@ -537,7 +537,7 @@ pub(crate) async fn prepare_training_model_env(
         || {
             super::model_artifacts::validate_model_artifact_paths(
                 bootstrap_paths.base_model,
-                bootstrap_paths.model_scale,
+                bootstrap_paths.model_version,
                 download_paths,
             )
         },
@@ -548,7 +548,7 @@ pub(crate) async fn prepare_training_model_env(
 pub(crate) async fn prepare_training_model_env_for_paths(
     service: &LocalService,
     base_model: &str,
-    model_scale: &str,
+    model_version: &str,
     src_model_root: &Path,
     venv_python_path: &Path,
     init_task_runtime_script_path: &Path,
@@ -559,14 +559,14 @@ pub(crate) async fn prepare_training_model_env_for_paths(
 ) -> Result<()> {
     let bootstrap_paths = PipelineBootstrapPaths {
         base_model,
-        model_scale,
+        model_version,
         src_model_root,
         venv_python_path,
         init_task_runtime_script_path,
         download_models_script_path,
     };
     let model_info = service
-        .get_model_info_by_base_and_scale_impl(base_model, model_scale)
+        .get_model_info_by_base_and_scale_impl(base_model, model_version)
         .await?;
     let download_paths = resolve_model_download_paths(src_model_root, &model_info);
 

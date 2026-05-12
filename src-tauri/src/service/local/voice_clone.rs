@@ -55,7 +55,7 @@ impl LocalService {
         } else {
             payload.ref_audio_name.trim().to_string()
         };
-        let model_scale = payload.model_scale.trim().to_string();
+        let model_version = payload.model_version.trim().to_string();
         let mut model_params = payload.model_params.clone();
         let export_audio_name =
             super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
@@ -112,7 +112,7 @@ impl LocalService {
             id: NotSet,
             history_id: Set(task_id),
             base_model: Set(base_model.clone()),
-            model_scale: Set(model_scale.clone()),
+            model_version: Set(model_version.clone()),
             language: Set(payload.language.as_str().to_string()),
             format: Set(payload.format.as_str().to_string()),
             export_audio_name: Set(export_audio_name.clone()),
@@ -139,14 +139,14 @@ impl LocalService {
             file_name,
             ref_audio_name,
             base_model,
-            model_scale,
+            model_version,
             language: payload.language,
             format: payload.format,
             export_audio_name,
             duration_seconds: 0,
             ref_text,
             text,
-            model_params: payload.model_params,
+            model_params,
             created_at: create_time,
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,

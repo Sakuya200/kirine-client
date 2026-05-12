@@ -140,7 +140,7 @@ class VoiceCloneArgs:
 class ParamsEntity:
 	version: str
 	base_model: str
-	model_scale: str
+	model_version: str
 	kind: TaskKind
 	runtime: RuntimeOptions
 	args: TextToSpeechArgs | VoiceCloneArgs
@@ -161,7 +161,7 @@ class ParamsEntity:
 		return cls(
 			version=str(payload.get("version") or "1.0.0"),
 			base_model=str(payload.get("base_model") or ""),
-			model_scale=str(payload.get("model_scale") or ""),
+			model_version=str(payload.get("model_version") or ""),
 			kind=kind,
 			runtime=RuntimeOptions.from_mapping(payload.get("runtime")),
 			args=parsed_args,

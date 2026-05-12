@@ -23,7 +23,7 @@ class ParamsEntityParsingTests(unittest.TestCase):
         payload = {
             "version": "1.0.0",
             "base_model": "qwen3_tts",
-            "model_scale": "0.6B",
+            "model_version": "0.6B",
             "kind": "Training",
             "runtime": {
                 "device": "cpu",
@@ -52,7 +52,7 @@ class ParamsEntityParsingTests(unittest.TestCase):
 
         self.assertEqual(params.kind, module.TaskKind.TRAINING)
         self.assertEqual(params.base_model, "qwen3_tts")
-        self.assertEqual(params.model_scale, "0.6B")
+        self.assertEqual(params.model_version, "0.6B")
         self.assertEqual(params.runtime.device, "cpu")
         self.assertEqual(params.model_param_str("learningRate"), "1e-5")
         self.assertEqual(params.training_args().gradient_accumulation_steps, 8)
@@ -70,7 +70,7 @@ class ModelParamsLoaderTests(unittest.TestCase):
             payload = {
                 "version": "1.0.0",
                 "base_model": "qwen3_tts",
-                "model_scale": "0.6B",
+                "model_version": "0.6B",
                 "kind": "TextToSpeech",
                 "runtime": {"device": "cpu"},
                 "args": {
@@ -105,7 +105,7 @@ class ModelParamsLoaderTests(unittest.TestCase):
             payload = {
                 "version": "1.0.0",
                 "base_model": "vox_cpm2",
-                "model_scale": "2B",
+                "model_version": "2B",
                 "kind": "TextToSpeech",
                 "runtime": {},
                 "args": {
@@ -143,7 +143,7 @@ class ModelParamsLoaderTests(unittest.TestCase):
             payload = {
                 "version": "1.0.0",
                 "base_model": "moss_tts_local",
-                "model_scale": "1.7B",
+                "model_version": "1.7B",
                 "kind": "VoiceClone",
                 "runtime": {"device": "cpu"},
                 "args": {
@@ -178,7 +178,7 @@ class ModelParamsLoaderTests(unittest.TestCase):
             payload = {
                 "version": "1.0.0",
                 "base_model": "moss_tts_local",
-                "model_scale": "1.7B",
+                "model_version": "1.7B",
                 "kind": "Training",
                 "runtime": {"device": "cpu", "attn_implementation": "sdpa"},
                 "args": {

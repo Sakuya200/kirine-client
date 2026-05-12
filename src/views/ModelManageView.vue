@@ -103,7 +103,7 @@ onMounted(async () => {
           <thead>
             <tr class="border-b border-brand-100 text-xs uppercase tracking-wide text-stone-500">
               <th class="py-3 align-middle">模型</th>
-              <th class="py-3 align-middle">规模</th>
+              <th class="py-3 align-middle">版本</th>
               <th class="py-3 align-middle">支持功能</th>
               <th class="py-3 align-middle">依赖</th>
               <th class="py-3 align-middle">状态</th>
@@ -113,7 +113,7 @@ onMounted(async () => {
           <tbody>
             <tr v-for="item in modelStore.items" :key="item.id" class="border-b border-brand-50 text-slate-700 align-middle">
               <td class="py-3 align-middle font-medium text-slate-900">{{ item.modelName }}</td>
-              <td class="py-3 align-middle">{{ item.modelScale }}</td>
+              <td class="py-3 align-middle">{{ item.modelVersion }}</td>
               <td class="py-3 align-middle">
                 <div class="flex flex-wrap gap-1.5">
                   <span
@@ -167,7 +167,7 @@ onMounted(async () => {
     <BaseDialog :open="uninstallTarget !== null" title="卸载模型" @close="closeUninstallDialog">
       <p class="text-sm text-slate-600">
         <template v-if="uninstallTarget">
-          将卸载模型“{{ uninstallTarget.modelName }} {{ uninstallTarget.modelScale }}”的专属权重文件，并把状态改为未安装。共享依赖会保留。
+          将卸载模型“{{ uninstallTarget.modelName }} {{ uninstallTarget.modelVersion }}”的专属权重文件，并把状态改为未安装。共享依赖会保留。
         </template>
         <template v-else>未找到要卸载的模型。</template>
       </p>

@@ -392,7 +392,7 @@ pub struct UpdateSpeakerPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ImportModelAsSpeakerPayload {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub source_model_dir_path: String,
     pub name: String,
     pub description: String,
@@ -413,7 +413,7 @@ pub struct ModelInfo {
     pub id: i64,
     pub base_model: BaseModel,
     pub model_name: String,
-    pub model_scale: String,
+    pub model_version: String,
     pub download_type: ModelDownloadType,
     pub required_model_name_list: Vec<String>,
     pub required_model_repo_id_list: Vec<String>,
@@ -436,7 +436,7 @@ pub struct ModelMutationResult {
 pub struct TextToSpeechTaskDetail {
     pub speaker_id: Option<i64>,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
@@ -452,7 +452,7 @@ pub struct TextToSpeechTaskDetail {
 pub struct ModelTrainingTaskDetail {
     pub language: AppLanguage,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_name: String,
     pub description: String,
     pub model_params: Value,
@@ -465,7 +465,7 @@ pub struct ModelTrainingTaskDetail {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceCloneTaskDetail {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
@@ -499,7 +499,7 @@ pub struct HistoryRecord {
 pub struct CreateTextToSpeechTaskPayload {
     pub speaker_id: Option<i64>,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
@@ -515,7 +515,7 @@ pub struct TextToSpeechTaskResult {
     pub speaker_id: Option<i64>,
     pub speaker_label: String,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
@@ -570,7 +570,7 @@ pub struct ModelTrainingSampleInput {
 pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_name: String,
     pub description: String,
     pub model_params: Value,
@@ -581,7 +581,7 @@ pub struct CreateModelTrainingTaskPayload {
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceCloneTaskPayload {
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
@@ -597,7 +597,7 @@ pub struct CreateVoiceCloneTaskPayload {
 pub struct ModelTrainingTaskResult {
     pub task_id: i64,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub model_name: String,
     pub model_params: Value,
     pub sample_count: i64,
@@ -612,7 +612,7 @@ pub struct VoiceCloneTaskResult {
     pub file_name: String,
     pub ref_audio_name: String,
     pub base_model: BaseModel,
-    pub model_scale: String,
+    pub model_version: String,
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,

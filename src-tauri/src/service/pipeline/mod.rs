@@ -85,7 +85,7 @@ impl CommonRuntimeOptions {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PipelineBootstrapPaths<'a> {
     pub base_model: &'a str,
-    pub model_scale: &'a str,
+    pub model_version: &'a str,
     pub src_model_root: &'a Path,
     pub venv_python_path: &'a Path,
     pub init_task_runtime_script_path: &'a Path,
@@ -137,7 +137,7 @@ where
 
     info!(
         base_model = %paths.base_model,
-        model_scale = %paths.model_scale,
+        model_version = %paths.model_version,
         use_cpu_mode,
         init_script = %paths.init_task_runtime_script_path.display(),
         "开始校验并初始化本地模型运行时环境"
@@ -161,7 +161,7 @@ where
     ensure_required_path_exists(paths.venv_python_path, "虚拟环境 Python")?;
     info!(
         base_model = %paths.base_model,
-        model_scale = %paths.model_scale,
+        model_version = %paths.model_version,
         venv_python = %paths.venv_python_path.display(),
         "本地模型运行时环境校验完成"
     );
@@ -185,13 +185,13 @@ where
     Label: Copy + AsRef<str>,
 {
     if service
-        .model_downloaded_impl(paths.base_model, paths.model_scale)
+        .model_downloaded_impl(paths.base_model, paths.model_version)
         .await?
     {
         validate_downloads()?;
         info!(
             base_model = %paths.base_model,
-            model_scale = %paths.model_scale,
+            model_version = %paths.model_version,
             "基础模型权重已存在且校验通过，跳过下载阶段"
         );
         return Ok(());
@@ -199,7 +199,7 @@ where
 
     info!(
         base_model = %paths.base_model,
-        model_scale = %paths.model_scale,
+        model_version = %paths.model_version,
         download_type = %model_info.download_type,
         "当前模型未标记为已下载，开始准备模型运行时产物"
     );
@@ -225,7 +225,7 @@ where
         ModelDownloadType::Custom => {
             let task_log_path = log_dir.join(format!(
                 "{}_{}_download.log",
-                paths.base_model, paths.model_scale
+                paths.base_model, paths.model_version
             ));
             let script_path = self::model_artifacts::resolve_custom_model_download_script_path(
                 paths.src_model_root,
@@ -234,8 +234,8 @@ where
             let script_args = vec![
                 "--base-model".to_string(),
                 paths.base_model.to_string(),
-                "--model-scale".to_string(),
-                paths.model_scale.to_string(),
+                "--model-version".to_string(),
+                paths.model_version.to_string(),
                 "--target-root-dir".to_string(),
                 paths
                     .src_model_root
@@ -263,11 +263,11 @@ where
 
     validate_downloads()?;
     service
-        .set_model_downloaded_impl(paths.base_model, paths.model_scale, true)
+        .set_model_downloaded_impl(paths.base_model, paths.model_version, true)
         .await?;
     info!(
         base_model = %paths.base_model,
-        model_scale = %paths.model_scale,
+        model_version = %paths.model_version,
         "基础模型权重下载完成，并已更新本地下载状态"
     );
     Ok(())

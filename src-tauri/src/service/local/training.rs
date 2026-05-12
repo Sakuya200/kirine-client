@@ -1,5 +1,4 @@
 use std::{
-    cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{BufRead, BufReader},
@@ -25,6 +24,7 @@ use crate::{
         },
     },
     config::HardwareType,
+    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -103,30 +103,6 @@ impl LocalService {
         ))
     }
 
-    fn reference_text_score(text: &str) -> usize {
-        text.chars().filter(|ch| !ch.is_whitespace()).count()
-    }
-
-    fn reference_audio_size(path: &Path) -> u64 {
-        fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
-    }
-
-    fn select_reference_audio(index_records: &[(PathBuf, String)]) -> Result<PathBuf> {
-        index_records
-            .iter()
-            .max_by(|(audio_a, text_a), (audio_b, text_b)| {
-                let text_order =
-                    Self::reference_text_score(text_a).cmp(&Self::reference_text_score(text_b));
-                if text_order != Ordering::Equal {
-                    return text_order;
-                }
-
-                Self::reference_audio_size(audio_a).cmp(&Self::reference_audio_size(audio_b))
-            })
-            .map(|(audio, _)| audio.clone())
-            .ok_or_else(|| anyhow::anyhow!("无法选择参考音频"))
-    }
-
     pub(crate) async fn create_model_training_task_impl(
         &self,
         payload: CreateModelTrainingTaskPayload,
@@ -137,10 +113,10 @@ impl LocalService {
         let speaker_name = payload.model_name.trim().to_string();
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
-        let model_scale = payload.model_scale.trim().to_string();
-        let model_params = payload.model_params.clone();
+        let model_version = payload.model_version.trim().to_string();
+        let mut model_params = payload.model_params.clone();
         let selected_model_info = self
-            .find_supported_model_variant(&base_model, &model_scale)
+            .find_supported_model_variant(&base_model, &model_version)
             .await?;
         let selected_training_mode_text = format!(
             "{} / {}",
@@ -191,7 +167,12 @@ impl LocalService {
         .await?;
         let task_id = task_history.id;
 
-        let prepared = self.prepare_training_data(task_id, &payload.samples)?;
+        let prepared = self.prepare_training_data(
+            task_id,
+            &base_model,
+            &mut model_params,
+            &payload.samples,
+        )?;
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
@@ -279,7 +260,7 @@ impl LocalService {
             history_id: Set(task_id),
             language: Set(payload.language.as_str().to_string()),
             base_model: Set(base_model.clone()),
-            model_scale: Set(model_scale.clone()),
+            model_version: Set(model_version.clone()),
             model_name: Set(speaker_name.clone()),
             description: Set(payload.description.trim().to_string()),
             model_params_json: Set(serde_json::to_string(&model_params)?),
@@ -300,7 +281,7 @@ impl LocalService {
         Ok(ModelTrainingTaskResult {
             task_id,
             base_model,
-            model_scale,
+            model_version,
             model_name: speaker_name,
             model_params,
             sample_count,
@@ -324,6 +305,8 @@ impl LocalService {
     fn prepare_training_data(
         &self,
         task_id: i64,
+        base_model: &str,
+        model_params: &mut serde_json::Value,
         samples: &[ModelTrainingSampleInput],
     ) -> Result<PreparedTrainingData> {
         let sample_root = task_sample_dir(
@@ -353,6 +336,14 @@ impl LocalService {
                 audios_dir.display()
             )
         })?;
+        super::copy_model_param_files(
+            base_model,
+            UiTaskKind::Training,
+            model_params,
+            &sample_root,
+            Path::new(self.data_dir()),
+            self.ui_config(),
+        )?;
 
         let mut used_names = HashSet::new();
         let mut index_records = Vec::new();
@@ -468,8 +459,19 @@ impl LocalService {
             bail!("未整理出可用于训练的样本数据");
         }
 
-        let selected_audio = Self::select_reference_audio(&index_records)?;
-        let ref_audio_source = selected_audio.as_path();
+        let configured_ref_audio = model_params
+            .get("refAudioPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("当前模型训练必须显式选择参考音频"))?;
+        let resolved_ref_audio_path =
+            resolve_task_path(Path::new(self.data_dir()), configured_ref_audio);
+        if !resolved_ref_audio_path.exists() {
+            bail!("训练参考音频文件不存在: {}", configured_ref_audio);
+        }
+
+        let ref_audio_source = resolved_ref_audio_path.as_path();
         let ref_audio_extension = ref_audio_source
             .extension()
             .and_then(|ext| ext.to_str())

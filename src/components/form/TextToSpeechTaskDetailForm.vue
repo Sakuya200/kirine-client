@@ -33,7 +33,7 @@ const voicePrompt = computed(() => String(props.record.detail.modelParams.voiceP
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">基础模型</p>
-        <p class="mt-1 text-sm font-semibold text-slate-800">{{ baseModelLabel }} {{ record.detail.modelScale }}</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ baseModelLabel }} {{ record.detail.modelVersion }}</p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">输出格式</p>

@@ -12,7 +12,7 @@ from gpt_sovits_cpufast.params_entity import ParamsEntity, RuntimeOptions
 
 GPT_SOVITS_CPUFAST_BASE_MODEL = "gpt_sovits_cpufast"
 
-MODEL_SCALE_CHECKPOINTS = {
+MODEL_VERSION_CHECKPOINTS = {
 	"v1": (
 		"GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
 		"GPT_SoVITS/pretrained_models/s2G488k.pth",
@@ -73,21 +73,21 @@ def _resolve_cpufast_root(model_root_path: str | None) -> Path:
 	raise FileNotFoundError(f"GPT-SoVITS-CPUFast root not found under: {root_path}")
 
 
-def _normalize_model_scale(model_scale: str | None) -> str:
-	normalized = (model_scale or "").strip().lower()
-	if normalized in MODEL_SCALE_CHECKPOINTS:
+def _normalize_model_version(model_version: str | None) -> str:
+	normalized = (model_version or "").strip().lower()
+	if normalized in MODEL_VERSION_CHECKPOINTS:
 		return normalized
 	if normalized == "v2pro+":
 		return "v2proplus"
 	raise ValueError(
-		"Unsupported GPT-SoVITS-CPUFast model_scale: "
-		f"{model_scale}. Supported values include V1, V2, V2Pro, V2ProPlus (or v2pp)."
+		"Unsupported GPT-SoVITS-CPUFast model_version: "
+		f"{model_version}. Supported values include V1, V2, V2Pro, V2ProPlus (or v2pp)."
 	)
 
 
-def _resolve_checkpoint_paths(cpufast_root: Path, model_scale: str | None) -> tuple[Path, Path]:
-	scale_key = _normalize_model_scale(model_scale)
-	gpt_rel, sovits_rel = MODEL_SCALE_CHECKPOINTS[scale_key]
+def _resolve_checkpoint_paths(cpufast_root: Path, model_version: str | None) -> tuple[Path, Path]:
+	scale_key = _normalize_model_version(model_version)
+	gpt_rel, sovits_rel = MODEL_VERSION_CHECKPOINTS[scale_key]
 	gpt_path = cpufast_root / gpt_rel
 	sovits_path = cpufast_root / sovits_rel
 
@@ -260,7 +260,7 @@ def load_tts_params(path: str | Path) -> GptSovitsCpufastTtsParams:
 	params = ParamsEntity.from_file(path)
 	args = params.tts_args()
 	cpufast_root = _resolve_cpufast_root(args.common.model_root_path)
-	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_scale)
+	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_version)
 	runtime = _normalize_runtime(params.runtime)
 
 	return GptSovitsCpufastTtsParams(
@@ -292,7 +292,7 @@ def load_voice_clone_params(path: str | Path) -> GptSovitsCpufastVoiceCloneParam
 	params = ParamsEntity.from_file(path)
 	args = params.voice_clone_args()
 	cpufast_root = _resolve_cpufast_root(args.common.model_root_path)
-	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_scale)
+	gpt_model_path, sovits_model_path = _resolve_checkpoint_paths(cpufast_root, params.model_version)
 	runtime = _normalize_runtime(params.runtime)
 
 	return GptSovitsCpufastVoiceCloneParams(

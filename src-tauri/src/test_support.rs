@@ -117,7 +117,7 @@ impl LocalServiceHarness {
             .create_text_to_speech_task(CreateTextToSpeechTaskPayload {
                 speaker_id: Some(speaker.id),
                 base_model: "vox_cpm2".to_string(),
-                model_scale: "2B".to_string(),
+                model_version: "2B".to_string(),
                 language: AppLanguage::Chinese,
                 format: TextToSpeechFormat::Wav,
                 export_audio_name: "vox-preset-test".to_string(),
@@ -161,7 +161,7 @@ impl LocalServiceHarness {
             .create_model_training_task(CreateModelTrainingTaskPayload {
                 language: AppLanguage::Chinese,
                 base_model: "vox_cpm2".to_string(),
-                model_scale: "2B".to_string(),
+                model_version: "2B".to_string(),
                 model_name: "vox_lora_test".to_string(),
                 description: "用于测试的 Vox 训练说话人".to_string(),
                 model_params,
@@ -481,7 +481,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO tts_tasks (
-            history_id, speaker_id, model_path, base_model, model_scale, language, format,
+            history_id, speaker_id, model_path, base_model, model_version, language, format,
             export_audio_name, text, model_params_json, char_count, file_name, output_file_path,
             create_time, modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -509,7 +509,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO model_training_tasks (
-            history_id, language, base_model, model_scale, model_name, model_params_json,
+            history_id, language, base_model, model_version, model_name, model_params_json,
             sample_count, samples_json, notes_json, output_speaker_id, create_time,
             modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -534,7 +534,7 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO voice_clone_tasks (
-            history_id, base_model, model_scale, language, format, export_audio_name,
+            history_id, base_model, model_version, language, format, export_audio_name,
             ref_audio_name, ref_audio_path, ref_text, text, model_params_json, char_count,
             file_name, output_file_path, create_time, modify_time, deleted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

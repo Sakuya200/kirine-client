@@ -113,30 +113,30 @@ def _normalize_runtime(runtime: RuntimeOptions) -> RuntimeOptions:
     )
 
 
-def _infer_qwen3_model_scale(params: ParamsEntity) -> str:
-    raw_model_scale = params.model_scale
-    if raw_model_scale:
-        model_scale = str(raw_model_scale).strip()
-        if model_scale in QWEN3_VARIANT_MODEL_NAMES:
-            return model_scale
+def _infer_qwen3_model_version(params: ParamsEntity) -> str:
+    raw_model_version = params.model_version
+    if raw_model_version:
+        model_version = str(raw_model_version).strip()
+        if model_version in QWEN3_VARIANT_MODEL_NAMES:
+            return model_version
 
-    raw_model_scale = params.model_param_str("modelScale")
-    if raw_model_scale is not None:
-        model_scale = str(raw_model_scale).strip()
-        if model_scale in QWEN3_VARIANT_MODEL_NAMES:
-            return model_scale
+    raw_model_version = params.model_param_str("modelVersion")
+    if raw_model_version is not None:
+        model_version = str(raw_model_version).strip()
+        if model_version in QWEN3_VARIANT_MODEL_NAMES:
+            return model_version
 
-    raise ValueError("Qwen3 params payload is missing a supported modelScale value")
+    raise ValueError("Qwen3 params payload is missing a supported modelVersion value")
 
 
 def _resolve_qwen3_inference_model_path(
     params: ParamsEntity,
 ) -> str:
     common = params.common
-    model_scale = _infer_qwen3_model_scale(params)
+    model_version = _infer_qwen3_model_version(params)
     candidate = _resolve_locator_candidate(
         common,
-        QWEN3_VARIANT_MODEL_NAMES[model_scale]["custom"],
+        QWEN3_VARIANT_MODEL_NAMES[model_version]["custom"],
         prefer_speaker_dir_name=True,
     )
     inference_root = Path(_require_resolved_path(candidate, "inference model path"))
@@ -147,10 +147,10 @@ def _resolve_qwen3_training_model_path(
     params: ParamsEntity,
 ) -> str:
     common = params.common
-    model_scale = _infer_qwen3_model_scale(params)
+    model_version = _infer_qwen3_model_version(params)
     candidate = _resolve_locator_candidate(
         common,
-        QWEN3_VARIANT_MODEL_NAMES[model_scale]["base"],
+        QWEN3_VARIANT_MODEL_NAMES[model_version]["base"],
         prefer_speaker_dir_name=False,
     )
     return _require_resolved_path(candidate, "training model path")

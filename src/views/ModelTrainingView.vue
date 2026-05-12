@@ -64,7 +64,7 @@ interface ImportedSampleItem {
 interface ModelTrainingTaskResultPayload {
   taskId: number;
   baseModel: string;
-  modelScale: string;
+  modelVersion: string;
   modelName: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
@@ -81,7 +81,7 @@ const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<str
 const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
-  modelScale: '',
+  modelVersion: '',
   modelName: 'speaker_a_custom',
   description: '',
   modelParams: {} as Record<string, unknown>,
@@ -122,7 +122,7 @@ const modelOptions = computed(() =>
     value: item.baseModel
   }))
 );
-const modelScaleOptions = computed(() => modelStore.getModelScaleOptions(form.baseModel));
+const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
@@ -144,7 +144,7 @@ const canStartTraining = computed(() => {
     gradientAccumulationSteps > 0 &&
     modelParamsValid &&
     !isStarting.value &&
-    !!form.modelScale
+    !!form.modelVersion
   );
 });
 
@@ -155,7 +155,7 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.modelName,
-    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelScale}`,
+    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelVersion}`,
     status: item.status
   }))
 );
@@ -191,15 +191,15 @@ watch(
 );
 
 watch(
-  modelScaleOptions,
+  modelVersionOptions,
   options => {
     if (options.length === 0) {
-      form.modelScale = '';
+      form.modelVersion = '';
       return;
     }
 
-    if (!options.some(option => option.value === form.modelScale)) {
-      form.modelScale = String(options[0]?.value ?? '');
+    if (!options.some(option => option.value === form.modelVersion)) {
+      form.modelVersion = String(options[0]?.value ?? '');
     }
   },
   { immediate: true }
@@ -256,7 +256,7 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
   return {
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
-    modelScale: trainingRecord.detail.modelScale,
+    modelVersion: trainingRecord.detail.modelVersion,
     modelName: trainingRecord.detail.modelName,
     modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
@@ -359,7 +359,7 @@ const removeImportedSample = (sampleId: number) => {
 const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
-  form.modelScale = String(modelScaleOptions.value[0]?.value ?? '');
+  form.modelVersion = String(modelVersionOptions.value[0]?.value ?? '');
   form.modelName = 'speaker_a_custom';
   form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
@@ -395,7 +395,7 @@ const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): Im
 const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
-  form.modelScale = record.detail.modelScale;
+  form.modelVersion = record.detail.modelVersion;
   form.modelName = record.detail.modelName;
   form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
@@ -592,7 +592,7 @@ const startTraining = async () => {
       payload: {
         language: form.language,
         baseModel: form.baseModel,
-        modelScale: form.modelScale,
+        modelVersion: form.modelVersion,
         modelName: form.modelName.trim(),
         description: form.description.trim(),
         modelParams: form.modelParams,
@@ -615,7 +615,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelScale}，共 ${payload.sampleCount} 项样本。`,
+      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -816,7 +816,7 @@ onBeforeUnmount(() => {
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           </div>
           <div class="xl:col-span-1">
-            <BaseListbox v-model="form.modelScale" label="模型大小" :options="modelScaleOptions" :disabled="modelScaleOptions.length === 0" />
+            <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           </div>
           <div class="md:col-span-2 xl:col-span-1">
             <BaseListbox
@@ -848,7 +848,7 @@ onBeforeUnmount(() => {
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelScale }}。</p>
+            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelVersion }}。</p>
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
             <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>

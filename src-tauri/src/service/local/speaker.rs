@@ -1,4 +1,7 @@
-use std::{fs, io, path::{Path, PathBuf}};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{bail, Context};
 
@@ -11,9 +14,8 @@ use crate::{
     service::{
         local::entity::speaker as speaker_entity,
         models::{
-            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload,
-            ModelDownloadType, ModelInfo, SpeakerInfo, SpeakerSource, SpeakerStatus,
-            UpdateSpeakerPayload,
+            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType,
+            ModelInfo, SpeakerInfo, SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
         LocalService,
@@ -78,7 +80,7 @@ impl LocalService {
         let name = payload.name.trim();
         let description = payload.description.trim();
         let base_model = payload.base_model.trim();
-        let model_scale = payload.model_scale.trim();
+        let model_version = payload.model_version.trim();
         let source_model_dir = PathBuf::from(payload.source_model_dir_path.trim());
 
         if name.is_empty() {
@@ -90,14 +92,15 @@ impl LocalService {
         if base_model.is_empty() {
             bail!("基础模型类型不能为空");
         }
-        if model_scale.is_empty() {
-            bail!("模型参数大小不能为空");
+        if model_version.is_empty() {
+            bail!("模型版本不能为空");
         }
         if !source_model_dir.is_dir() {
             bail!("模型目录不存在或不是目录: {}", source_model_dir.display());
         }
 
-        self.find_supported_model_variant(base_model, model_scale).await?;
+        self.find_supported_model_variant(base_model, model_version)
+            .await?;
 
         let languages_json = serde_json::to_string(&vec![payload.language])?;
         let txn = self.orm().begin().await?;
@@ -120,7 +123,10 @@ impl LocalService {
 
         let managed_model_dir = speaker_model_dir(Path::new(self.model_dir()), inserted.id);
         if managed_model_dir.exists() {
-            bail!("目标模型目录已存在，请更换说话人名称后重试: {}", managed_model_dir.display());
+            bail!(
+                "目标模型目录已存在，请更换说话人名称后重试: {}",
+                managed_model_dir.display()
+            );
         }
 
         if let Err(err) = copy_directory_recursively(&source_model_dir, &managed_model_dir) {
@@ -166,25 +172,39 @@ impl LocalService {
 }
 
 impl LocalService {
-    pub(crate) async fn find_supported_model_variant(&self, base_model: &str, model_scale: &str) -> Result<ModelInfo> {
+    pub(crate) async fn find_supported_model_variant(
+        &self,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<ModelInfo> {
         use crate::service::local::entity::model_info as model_info_entity;
 
         let row = model_info_entity::Entity::find()
             .filter(model_info_entity::Column::Deleted.eq(0))
             .filter(model_info_entity::Column::BaseModel.eq(base_model))
-            .filter(model_info_entity::Column::ModelScale.eq(model_scale))
+            .filter(model_info_entity::Column::ModelVersion.eq(model_version))
             .one(self.orm())
             .await?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("当前应用不支持该模型类型或规模: {base_model} {model_scale}")))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("当前应用不支持该模型类型或版本: {base_model} {model_version}"),
+                )
+            })?;
 
         Ok(ModelInfo {
             id: row.id,
             base_model: row.base_model,
             model_name: row.model_name,
-            model_scale: row.model_scale,
-            download_type: row.download_type.parse().unwrap_or(ModelDownloadType::HfLike),
+            model_version: row.model_version,
+            download_type: row
+                .download_type
+                .parse()
+                .unwrap_or(ModelDownloadType::HfLike),
             required_model_name_list: serde_json::from_str(&row.required_model_name_list_json)?,
-            required_model_repo_id_list: serde_json::from_str(&row.required_model_repo_id_list_json)?,
+            required_model_repo_id_list: serde_json::from_str(
+                &row.required_model_repo_id_list_json,
+            )?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,
             downloaded: row.downloaded,
             create_time: row.create_time,
@@ -194,12 +214,19 @@ impl LocalService {
 }
 
 fn copy_directory_recursively(source_dir: &Path, target_dir: &Path) -> Result<()> {
-    fs::create_dir_all(target_dir)
-        .with_context(|| format!("failed to create target model directory: {}", target_dir.display()))?;
+    fs::create_dir_all(target_dir).with_context(|| {
+        format!(
+            "failed to create target model directory: {}",
+            target_dir.display()
+        )
+    })?;
 
-    for entry in fs::read_dir(source_dir)
-        .with_context(|| format!("failed to inspect source model directory: {}", source_dir.display()))?
-    {
+    for entry in fs::read_dir(source_dir).with_context(|| {
+        format!(
+            "failed to inspect source model directory: {}",
+            source_dir.display()
+        )
+    })? {
         let entry = entry?;
         let source_path = entry.path();
         let target_path = target_dir.join(entry.file_name());
