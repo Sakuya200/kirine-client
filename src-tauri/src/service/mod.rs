@@ -12,7 +12,6 @@ use crate::{
     },
     Result,
 };
-use anyhow::Context;
 use async_trait::async_trait;
 pub(crate) use local::entity;
 pub use local::LocalService;
@@ -87,13 +86,13 @@ pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {
         StorageMode::Local => {
             let local_service = LocalService::new(&config)
                 .await
-                .context("failed to initialize local storage")?;
+                .map_err(|e| anyhow::anyhow!("failed to initialize local service: {}", e))?;
             Ok(ServiceImpl::Local(local_service))
         }
         StorageMode::Remote => {
             let remote_service = RemoteService::new(&config)
                 .await
-                .context("failed to initialize remote storage")?;
+                .map_err(|e| anyhow::anyhow!("failed to initialize remote service: {}", e))?;
             Ok(ServiceImpl::Remote(remote_service))
         }
     }

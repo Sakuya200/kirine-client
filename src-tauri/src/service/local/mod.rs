@@ -68,8 +68,9 @@ impl Service for LocalService {
             .context("failed to resolve local model directory")?;
         Self::from_paths_with_config(app_dir, data_dir, model_dir, config.clone()).await
     }
+
     async fn close(&self) -> Result<()> {
-        info!("Closing local storage connection pool");
+        info!("Closing local service and database connection");
         self.orm.clone().close().await?;
         Ok(())
     }
@@ -372,21 +373,21 @@ impl LocalService {
     }
 
     async fn init_db(orm: &DatabaseConnection, data_dir: &Path) -> Result<()> {
-        migration::run_local_migrations(orm)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to run SeaORM local migrations in {}",
-                    data_dir.display()
-                )
-            })?;
+        migration::run_local_migrations(orm).await.map_err(|e| {
+            anyhow::anyhow!(
+                "failed to run SeaORM local migrations in {}: {}",
+                data_dir.display(),
+                e
+            )
+        })?;
 
         supported_models::sync_supported_models(orm)
             .await
-            .with_context(|| {
-                format!(
-                    "failed to sync supported_models.json into local database in {}",
-                    data_dir.display()
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to sync supported_models.json into local database in {}: {}",
+                    data_dir.display(),
+                    e
                 )
             })?;
 
