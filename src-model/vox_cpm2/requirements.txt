@@ -1,3 +1,6 @@
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
 soundfile==0.13.1
 ffmpy==0.6.1
 PyYAML==6.0.2
