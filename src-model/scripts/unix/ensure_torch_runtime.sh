@@ -81,7 +81,7 @@ if [ "$CPU_MODE" -eq 1 ]; then
             ;;
     esac
 
-    run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     run_checked "verify torch CPU runtime" "$VENV_PYTHON" -c "import torch; assert not (torch.version.cuda or ''), 'CPU runtime expected no CUDA tag'; print(torch.__version__)"
     append_log "[ensure-torch-runtime] torch runtime is ready"
     exit 0
@@ -139,7 +139,7 @@ if [ -n "$metadata" ]; then
 fi
 
 for tag in $candidates; do
-    if run_checked "install torch CUDA wheels (cu$tag)" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall --no-cache-dir torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/cu$tag"; then
+    if run_checked "install torch CUDA wheels (cu$tag)" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision torchaudio --index-url "https://download.pytorch.org/whl/cu$tag"; then
         if run_checked "verify torch CUDA runtime (cu$tag)" "$VENV_PYTHON" -c "import torch; assert torch.cuda.is_available(), 'torch.cuda.is_available() is False'; assert torch.version.cuda, 'torch.version.cuda is empty'; print(torch.__version__); print(torch.version.cuda)"; then
             append_log "[ensure-torch-runtime] torch runtime is ready"
             exit 0
