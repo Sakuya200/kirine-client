@@ -232,7 +232,7 @@ function Install-CpuTorchRuntime {
         return
     }
 
-    Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.18.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cpu')
+    Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.25.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cpu')
     Invoke-LoggedCommand -Description 'verify torch CPU runtime' -Command $venvPython -Arguments @('-c', "import torch; assert not (torch.version.cuda or ''), 'CPU runtime expected no CUDA tag'; print(torch.__version__)")
 }
 
@@ -256,7 +256,7 @@ function Install-CudaTorchRuntime {
     foreach ($candidate in $candidates) {
         $tag = [string]$candidate.Tag
         try {
-            Invoke-LoggedCommand -Description "install torch CUDA wheels (cu$tag)" -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.18.0', 'torchaudio==2.10.0', '--index-url', "https://download.pytorch.org/whl/cu$tag")
+            Invoke-LoggedCommand -Description "install torch CUDA wheels (cu$tag)" -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.25.0', 'torchaudio==2.10.0', '--index-url', "https://download.pytorch.org/whl/cu$tag")
             Invoke-LoggedCommand -Description "verify torch CUDA runtime (cu$tag)" -Command $venvPython -Arguments @('-c', "import torch; assert torch.cuda.is_available(), 'torch.cuda.is_available() is False'; assert torch.version.cuda, 'torch.version.cuda is empty'; print(torch.__version__); print(torch.version.cuda)")
             return
         }
