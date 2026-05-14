@@ -138,8 +138,7 @@ impl LocalServiceHarness {
             "loraDropout": "0.15",
             "epochCount": 2,
             "batchSize": 4,
-            "gradientAccumulationSteps": 1,
-            "enableGradientCheckpointing": false
+            "gradientAccumulationSteps": 1
         }))
         .await
     }

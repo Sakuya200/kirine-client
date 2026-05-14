@@ -22,7 +22,6 @@ class VoxCpm2TrainingParams:
     lr: float
     num_epochs: int
     gradient_accumulation_steps: int
-    enable_gradient_checkpointing: bool
     use_lora: bool
     training_mode: str
     lora_rank: int | None
@@ -49,7 +48,6 @@ class VoxCpm2TrainingParams:
             learning_rate=self.lr,
             weight_decay=self.weight_decay,
             warmup_steps=self.warmup_steps,
-            enable_gradient_checkpointing=self.enable_gradient_checkpointing,
             train_script_path="",
         )
 def _resolve_locator_candidate(
@@ -186,10 +184,6 @@ def load_training_params(path: str | Path) -> VoxCpm2TrainingParams:
         lr=_parse_float_with_default(params.model_param_str("learningRate", args.lr), 1e-4),
         num_epochs=args.num_epochs,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        enable_gradient_checkpointing=params.model_param_bool(
-            "enableGradientCheckpointing",
-            args.enable_gradient_checkpointing,
-        ),
         use_lora=use_lora,
         training_mode=str(training_mode),
         lora_rank=params.model_param_int("loraRank", None),

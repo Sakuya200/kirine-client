@@ -8,6 +8,7 @@ import {
   ArrowUpTrayIcon,
   CheckCircleIcon,
   CpuChipIcon,
+  EyeIcon,
   StopCircleIcon,
   TrashIcon,
   ArchiveBoxArrowDownIcon
@@ -19,9 +20,11 @@ import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
+import StatusPill from '@/components/common/StatusPill.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
+import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { AppLanguage } from '@/enums/language';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -98,6 +101,8 @@ const activeTrainingTask = ref<ModelTrainingTaskResultPayload | null>(null);
 const recentTrainingHistory = ref<ModelTrainingHistoryRecord[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const isTemplateDialogOpen = ref(false);
+const detailRecordId = ref<number | null>(null);
+const detailReloadToken = ref(0);
 const modelStore = useModelStore();
 const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
@@ -159,6 +164,39 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
     status: item.status
   }))
 );
+const selectedTrainingRecord = computed(() => recentTrainingHistory.value.find(item => item.id === selectedHistoryTaskId.value) ?? null);
+const activeTrainingRecord = computed(() => recentTrainingHistory.value.find(item => item.id === activeTrainingTask.value?.taskId) ?? null);
+const currentTrainingInfo = computed(() => {
+  const record = selectedTrainingRecord.value ?? activeTrainingRecord.value ?? recentTrainingHistory.value[0] ?? null;
+
+  if (record) {
+    return {
+      taskId: record.id,
+      speakerName: record.detail.modelName,
+      description: record.detail.description?.trim() || '未填写',
+      baseModel: record.detail.baseModel,
+      modelVersion: record.detail.modelVersion,
+      sampleCount: record.detail.sampleCount,
+      status: record.status,
+      createTime: record.createTime
+    };
+  }
+
+  if (!activeTrainingTask.value) {
+    return null;
+  }
+
+  return {
+    taskId: activeTrainingTask.value.taskId,
+    speakerName: activeTrainingTask.value.modelName,
+    description: form.description.trim() || '未填写',
+    baseModel: activeTrainingTask.value.baseModel,
+    modelVersion: activeTrainingTask.value.modelVersion,
+    sampleCount: activeTrainingTask.value.sampleCount,
+    status: activeTrainingTask.value.status,
+    createTime: activeTrainingTask.value.createTime
+  };
+});
 
 const trainingBusyLabel = computed(() => {
   if (isStarting.value) {
@@ -175,6 +213,19 @@ const trainingBusyLabel = computed(() => {
 
   return '';
 });
+
+const openCurrentTaskDetail = () => {
+  if (!currentTrainingInfo.value) {
+    return;
+  }
+
+  detailRecordId.value = currentTrainingInfo.value.taskId;
+  detailReloadToken.value += 1;
+};
+
+const closeTaskDetail = () => {
+  detailRecordId.value = null;
+};
 
 watch(
   modelOptions,
@@ -542,6 +593,10 @@ const refreshActiveTaskStatus = async () => {
       await syncSpeakerStore();
     }
 
+    if (detailRecordId.value === currentTaskId) {
+      detailReloadToken.value += 1;
+    }
+
     if (updatedTask.status === TaskStatus.Completed || updatedTask.status === TaskStatus.Cancelled || updatedTask.status === TaskStatus.Failed) {
       stopActiveTaskStatusRefresh();
     }
@@ -572,6 +627,36 @@ const cancelActiveTrainingTask = async () => {
     uiStore.notifyInfo(`已发送终止请求，任务 ${activeTrainingTask.value.taskId} 会在后端停止后刷新状态。`, 3600);
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+  } finally {
+    isCancelling.value = false;
+  }
+};
+
+const cancelTrainingTask = async (historyId: number) => {
+  if (!historyId) {
+    return;
+  }
+
+  isCancelling.value = true;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_model_training_task', {
+      historyId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      return;
+    }
+
+    if (activeTrainingTask.value?.taskId === historyId) {
+      await refreshActiveTaskStatus();
+    }
+
+    await loadRecentTasks({ silentOnError: true });
+    uiStore.notifyInfo(`已发送终止请求，任务 ${historyId} 会在后端停止后刷新状态。`, 3600);
   } catch (error) {
     uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
   } finally {
@@ -785,6 +870,36 @@ onBeforeUnmount(() => {
           </ul>
         </PanelCard>
 
+        <PanelCard class="z-0" title="微调任务信息" subtitle="展示当前聚焦任务的关键信息，可直接查看完整详情。">
+          <div v-if="currentTrainingInfo" class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-slate-900">{{ currentTrainingInfo.speakerName }}</p>
+                <p class="mt-1 text-xs text-stone-500">任务 ID {{ currentTrainingInfo.taskId }} · {{ currentTrainingInfo.createTime }}</p>
+              </div>
+              <StatusPill :status="currentTrainingInfo.status" />
+            </div>
+
+            <div class="mt-4 space-y-2">
+              <p>说话人名称 {{ currentTrainingInfo.speakerName }}。</p>
+              <p>说话人描述 {{ currentTrainingInfo.description }}。</p>
+              <p>使用模型 {{ modelStore.getModelLabel(currentTrainingInfo.baseModel) }} {{ currentTrainingInfo.modelVersion }}。</p>
+              <p>样本数 {{ currentTrainingInfo.sampleCount }} 项。</p>
+            </div>
+
+            <div class="mt-4 flex justify-end">
+              <BaseButton tone="ghost" size="sm" @click="openCurrentTaskDetail">
+                <EyeIcon class="h-4 w-4" aria-hidden="true" />
+                <span>查看详情</span>
+              </BaseButton>
+            </div>
+          </div>
+
+          <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/82 p-5 text-sm text-stone-500">
+            还没有可展示的微调任务。创建任务后，或从最近任务中选中一项后，会在这里显示关键信息。
+          </div>
+        </PanelCard>
+
         <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型微调任务，数据来自统一历史记录">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
@@ -852,10 +967,7 @@ onBeforeUnmount(() => {
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
             <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
-            <p class="mt-1">
-              当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}，梯度检查点
-              {{ form.modelParams.enableGradientCheckpointing ? '已启用' : '未启用' }}。
-            </p>
+            <p class="mt-1">当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}。</p>
           </div>
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
@@ -884,5 +996,12 @@ onBeforeUnmount(() => {
     </PanelCard>
 
     <ModelTrainingTemplateDownloadDialog :open="isTemplateDialogOpen" @close="isTemplateDialogOpen = false" />
+    <HistoryTaskDetailDialog
+      :open="detailRecordId !== null"
+      :record-id="detailRecordId"
+      :reload-token="detailReloadToken"
+      @close="closeTaskDetail"
+      @cancel="cancelTrainingTask"
+    />
   </div>
 </template>

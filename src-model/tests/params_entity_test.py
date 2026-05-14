@@ -43,7 +43,6 @@ class ParamsEntityParsingTests(unittest.TestCase):
                     "num_epochs": 4,
                     "speaker_name": "speaker_a",
                     "gradient_accumulation_steps": 8,
-                    "enable_gradient_checkpointing": True,
                 }
             },
         }
@@ -194,7 +193,6 @@ class ModelParamsLoaderTests(unittest.TestCase):
                         "num_epochs": 3,
                         "speaker_name": "speaker_moss",
                         "gradient_accumulation_steps": 4,
-                        "enable_gradient_checkpointing": True,
                     }
                 },
             }

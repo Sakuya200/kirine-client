@@ -50,7 +50,9 @@ def encode_training_dataset(params) -> str:
 def build_training_namespace(params) -> argparse.Namespace:
     base_namespace = params.to_namespace()
     output_jsonl = encode_training_dataset(params)
-    return SimpleNamespace(**vars(base_namespace), output_jsonl=output_jsonl)
+    namespace_values = vars(base_namespace).copy()
+    namespace_values["output_jsonl"] = output_jsonl
+    return SimpleNamespace(**namespace_values)
 
 
 def train(argv: list[str] | None = None) -> None:

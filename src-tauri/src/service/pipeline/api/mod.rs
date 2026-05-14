@@ -36,7 +36,6 @@ pub(crate) struct TrainingArgs {
     pub num_epochs: i64,
     pub speaker_name: String,
     pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

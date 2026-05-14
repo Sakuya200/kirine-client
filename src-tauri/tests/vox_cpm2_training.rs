@@ -67,8 +67,7 @@ async fn voxcpm2_training_task_accepts_legacy_training_mode_payload() -> Result<
             "trainingMode": "full",
             "epochCount": 2,
             "batchSize": 4,
-            "gradientAccumulationSteps": 1,
-            "enableGradientCheckpointing": false
+            "gradientAccumulationSteps": 1
         }))
         .await?;
     let stored_model_params = harness

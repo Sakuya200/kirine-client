@@ -115,7 +115,6 @@ class TrainingArgs:
     num_epochs: int
     speaker_name: str
     gradient_accumulation_steps: int
-    enable_gradient_checkpointing: bool
 
     @classmethod
     def from_mapping(cls, value: dict[str, object]) -> "TrainingArgs":
@@ -134,9 +133,6 @@ class TrainingArgs:
             gradient_accumulation_steps=_coerce_required_int(
                 value.get("gradient_accumulation_steps"),
                 "args.Training.gradient_accumulation_steps",
-            ),
-            enable_gradient_checkpointing=_coerce_optional_bool(
-                value.get("enable_gradient_checkpointing")
             ),
         )
 

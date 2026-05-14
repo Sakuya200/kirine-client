@@ -136,10 +136,46 @@ def load_lora_config_dict(checkpoint_path: Path) -> dict[str, object] | None:
     return lora_config
 
 
+def resolve_lora_checkpoint_runtime_target(checkpoint_path: Path) -> RuntimeTarget | None:
+    lora_config_path = checkpoint_path / "lora_config.json"
+    if not lora_config_path.exists():
+        return None
+
+    with lora_config_path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid VoxCPM LoRA checkpoint metadata: {lora_config_path}")
+
+    base_model_value = str(payload.get("base_model", "")).strip()
+    if not base_model_value:
+        raise ValueError(
+            "Invalid VoxCPM LoRA checkpoint metadata: missing base_model in "
+            f"{lora_config_path}"
+        )
+
+    lora_config = payload.get("lora_config")
+    if lora_config is not None and not isinstance(lora_config, dict):
+        raise ValueError(f"Invalid VoxCPM LoRA config payload: {lora_config_path}")
+
+    base_model_path = resolve_existing_path(Path(normalize_metadata_path(base_model_value)))
+    load_kwargs: dict[str, object] = {"lora_weights_path": str(checkpoint_path)}
+    if isinstance(lora_config, dict):
+        load_kwargs["lora_config_dict"] = lora_config
+
+    return RuntimeTarget(
+        model_path=str(base_model_path) if base_model_path is not None else base_model_value,
+        load_kwargs=load_kwargs,
+    )
+
+
 def resolve_runtime_target(init_model_path: str) -> RuntimeTarget:
     model_root = Path(init_model_path).expanduser().resolve()
     metadata_path = model_root / RUNTIME_METADATA_FILE_NAME
     if not metadata_path.exists():
+        lora_checkpoint_target = resolve_lora_checkpoint_runtime_target(model_root)
+        if lora_checkpoint_target is not None:
+            return lora_checkpoint_target
         return RuntimeTarget(model_path=str(model_root), load_kwargs={})
 
     with metadata_path.open("r", encoding="utf-8") as file:
