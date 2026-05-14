@@ -325,12 +325,12 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
 };
 
 const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
-  const matchedSpeakerOption = speakerOptions.value.find(option => option.value === item.speakerId) ?? null;
-
   stopActiveTaskStatusRefresh();
   activeResult.value = setAsActiveResult ? item : null;
-  form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.baseModel = item.baseModel;
+
+  const matchedSpeakerOption = speakerOptions.value.find(option => option.value === item.speakerId) ?? null;
+  form.speakerId = matchedSpeakerOption ? item.speakerId : null;
   form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;

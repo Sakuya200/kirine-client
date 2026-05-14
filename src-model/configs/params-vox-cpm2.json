@@ -161,18 +161,6 @@
         "required": false,
         "defaultValue": null,
         "description": "学习率 warmup 步数。留空时由后端/训练脚本自动计算。"
-      },
-      {
-        "name": "enableGradientCheckpointing",
-        "type": "boolean",
-        "componentType": "switch",
-        "componentProps": {
-          "label": "梯度检查点",
-          "text": "启用梯度检查点"
-        },
-        "required": true,
-        "defaultValue": false,
-        "description": "是否启用 gradient checkpointing。"
       }
     ]
   },

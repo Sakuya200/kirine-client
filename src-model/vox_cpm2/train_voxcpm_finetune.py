@@ -7,15 +7,12 @@ the upstream repository layout at execution time. It expects the `voxcpm`
 package and its training modules to be installed in the active environment.
 """
 
-from __future__ import annotations
-
 import contextlib
 import json
 import os
 import signal
 import sys
 from pathlib import Path
-from typing import Dict
 
 import argbind
 import torch
@@ -66,8 +63,8 @@ def train(
     max_batch_tokens: int = 0,
     save_path: str = "checkpoints",
     tensorboard: str = "",
-    lambdas: Dict[str, float] = {"loss/diff": 1.0, "loss/stop": 1.0},
-    lora: dict | None = None,
+    lambdas: dict = {"loss/diff": 1.0, "loss/stop": 1.0},
+    lora: dict = None,
     config_path: str = "",
     max_grad_norm: float = 0.0,
     hf_model_id: str = "",

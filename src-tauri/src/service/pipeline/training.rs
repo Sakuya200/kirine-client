@@ -50,7 +50,6 @@ pub(crate) struct CommonTrainingModelParams {
     pub batch_size: i64,
     pub epoch_count: i64,
     pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
     pub learning_rate: Option<String>,
 }
 
@@ -62,7 +61,6 @@ pub(crate) struct LoadedTrainingTaskParams {
     pub batch_size: i64,
     pub epoch_count: i64,
     pub gradient_accumulation_steps: i64,
-    pub enable_gradient_checkpointing: bool,
     pub learning_rate: Option<String>,
 }
 
@@ -176,7 +174,6 @@ pub(crate) fn build_shared_training_invocation(
             num_epochs: context.params.epoch_count,
             speaker_name: context.speaker_name.to_string(),
             gradient_accumulation_steps: context.params.gradient_accumulation_steps,
-            enable_gradient_checkpointing: context.params.enable_gradient_checkpointing,
         }),
     })
 }
@@ -352,7 +349,6 @@ pub(crate) async fn load_training_task_params(
         batch_size: params.batch_size,
         epoch_count: params.epoch_count,
         gradient_accumulation_steps: params.gradient_accumulation_steps,
-        enable_gradient_checkpointing: params.enable_gradient_checkpointing,
         learning_rate: params.learning_rate,
     })
 }
@@ -714,10 +710,6 @@ pub(crate) fn parse_common_training_model_params(
             "gradientAccumulationSteps",
         )?
         .max(1),
-        enable_gradient_checkpointing: parse_required_training_bool(
-            object,
-            "enableGradientCheckpointing",
-        )?,
         learning_rate: parse_optional_training_string(object, "learningRate"),
         model_params_json,
     })
@@ -784,30 +776,6 @@ fn parse_required_training_i64(
         }),
         _ => Err(anyhow::anyhow!(
             "training model params field {} must be an integer",
-            field
-        )),
-    }
-}
-
-fn parse_required_training_bool(
-    object: &serde_json::Map<String, Value>,
-    field: &str,
-) -> Result<bool> {
-    let value = object.get(field).ok_or_else(|| {
-        anyhow::anyhow!("training model params missing required field: {}", field)
-    })?;
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            _ => Err(anyhow::anyhow!(
-                "training model params field {} must be a boolean",
-                field
-            )),
-        },
-        _ => Err(anyhow::anyhow!(
-            "training model params field {} must be a boolean",
             field
         )),
     }

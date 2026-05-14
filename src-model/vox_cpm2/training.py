@@ -182,7 +182,6 @@ def build_training_config(args: argparse.Namespace, train_jsonl: Path, output_mo
             "loss/diff": 1.0,
             "loss/stop": 1.0,
         },
-        "gradient_checkpointing": bool(args.enable_gradient_checkpointing),
     }
     if args.training_mode == "lora":
         config["lora"] = {

@@ -234,7 +234,7 @@ def load_training_params(path: str | Path) -> MossTrainingParams:
         mixed_precision=str(mixed_precision or "bf16"),
         enable_gradient_checkpointing=params.model_param_bool(
             "enableGradientCheckpointing",
-            args.enable_gradient_checkpointing,
+            False,
         ),
         skip_reference_audio_codes=params.model_param_bool(
             "skipReferenceAudioCodes",

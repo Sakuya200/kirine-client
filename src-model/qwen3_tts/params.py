@@ -190,7 +190,10 @@ def load_training_params(path: str | Path) -> Qwen3TrainingParams:
         num_epochs=args.num_epochs,
         speaker_name=args.speaker_name,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        enable_gradient_checkpointing=args.enable_gradient_checkpointing,
+        enable_gradient_checkpointing=params.model_param_bool(
+            "enableGradientCheckpointing",
+            False,
+        ),
         runtime=_normalize_runtime(params.runtime),
     )
 
