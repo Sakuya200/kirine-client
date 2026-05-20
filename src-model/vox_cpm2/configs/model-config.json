@@ -1,0 +1,14 @@
+{
+  "models": [
+    {
+      "baseModel": "vox_cpm2",
+      "modelName": "VoxCPM2",
+      "modelVersion": "2B",
+      "downloadType": "HF-Like",
+      "requiredModelNameList": ["VoxCPM2"],
+      "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
+    }
+  ],
+  "speakers": []
+}

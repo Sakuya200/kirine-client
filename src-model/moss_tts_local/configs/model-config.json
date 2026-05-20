@@ -1,0 +1,14 @@
+{
+  "models": [
+    {
+      "baseModel": "moss_tts_local",
+      "modelName": "MOSS-TTS Local",
+      "modelVersion": "1.7B",
+      "downloadType": "HF-Like",
+      "requiredModelNameList": ["MOSS-TTS-Local-Transformer", "MOSS-Audio-Tokenizer"],
+      "requiredModelRepoIdList": ["OpenMOSS-Team/MOSS-TTS-Local-Transformer", "OpenMOSS-Team/MOSS-Audio-Tokenizer"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
+    }
+  ],
+  "speakers": []
+}
