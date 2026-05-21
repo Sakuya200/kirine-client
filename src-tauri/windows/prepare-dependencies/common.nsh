@@ -82,7 +82,7 @@ Function ExtractBundledZipArchiveContents
 
   ${StrRep} $0 "$0" "'" "''"
   ${StrRep} $1 "$1" "'" "''"
-  StrCpy $2 "$\"${POWERSHELL_EXE}$\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command $\"$destination = '$1'; if (Test-Path -LiteralPath $destination) { Get-ChildItem -LiteralPath $destination -Force | Where-Object { $_.Name -ne 'venv' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }; $tempDir = Join-Path $env:TEMP ('kirine-src-model-' + [guid]::NewGuid().ToString()); New-Item -ItemType Directory -Path $tempDir -Force | Out-Null; try { Expand-Archive -LiteralPath '$0' -DestinationPath $tempDir -Force; Get-ChildItem -LiteralPath $tempDir | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force } } finally { if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force } }$\""
+  StrCpy $2 "$\"${POWERSHELL_EXE}$\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command $\"$$destination = '$1'; if (-not (Test-Path -LiteralPath $$destination)) { New-Item -ItemType Directory -Path $$destination -Force | Out-Null }; Get-ChildItem -LiteralPath $$destination -Force -ErrorAction SilentlyContinue | Where-Object { $$_.Name -ne 'venv' -and $$_.Name -ne '.venv' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive -LiteralPath '$0' -DestinationPath $$destination -Force$\""
   StrCpy $0 "$2"
   Call RunHiddenCommandWait
   StrCpy $2 "$0"
