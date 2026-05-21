@@ -1,5 +1,6 @@
 use kirine_client_lib::{
-    load_ui_configs_from_dir, TaskParamConfig, UiComponentType, UiParamType, UiTaskKind,
+  load_ui_configs, load_ui_configs_from_dir, TaskParamConfig, UiComponentType, UiParamType,
+  UiTaskKind,
 };
 use std::{
     fs,
@@ -76,12 +77,7 @@ fn deserializes_component_props_variants() {
 
 #[test]
 fn loads_real_ui_config_files() {
-    let config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("src-model")
-        .join("configs");
-
-    let catalog = load_ui_configs_from_dir(&config_dir).expect("failed to load real ui config files");
+  let catalog = load_ui_configs().expect("failed to load real ui config files");
 
     assert!(!catalog.task_configs.is_empty());
     assert!(catalog
@@ -102,7 +98,7 @@ fn loads_real_ui_config_files() {
 fn loads_params_files_from_temp_directory() {
     let temp_dir = TempUiConfigDir::new();
     temp_dir.write_config_file(
-        "params-sample.json",
+      "params-config.json",
         r#"
         [
           {

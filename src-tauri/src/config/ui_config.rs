@@ -1,6 +1,6 @@
 use std::{
-    collections::BTreeMap,
-    fs, io,
+    collections::{BTreeMap, HashSet},
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -8,7 +8,7 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{config::SRC_MODEL_DIR_RELATIVE_PATHS, Result};
+use crate::{config::PARAMS_CONFIG_FILE_NAME, config::discover_model_config_file_paths, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +37,16 @@ pub enum UiTaskKind {
     Training,
     Tts,
     VoiceClone,
+}
+
+impl UiTaskKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Training => "training",
+            Self::Tts => "tts",
+            Self::VoiceClone => "voice-clone",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,25 +121,9 @@ pub struct SelectOption {
     pub value: Value,
 }
 
-pub fn ui_configs_dir_path() -> Result<PathBuf> {
-    for src_model_relative_path in SRC_MODEL_DIR_RELATIVE_PATHS {
-        let candidate_path = Path::new(src_model_relative_path).join("configs");
-        if candidate_path.exists() {
-            return Ok(candidate_path);
-        }
-    }
-
-    eprintln!("未找到 UI 配置目录，请检查当前目录下是否存在 src-model/configs 目录");
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "未找到 UI 配置目录，请检查当前目录下是否存在 src-model/configs 目录",
-    )
-    .into())
-}
-
 pub fn load_ui_configs() -> Result<UiConfigCatalog> {
-    let config_dir = ui_configs_dir_path()?;
-    load_ui_configs_from_dir(&config_dir)
+    let config_paths = discover_model_config_file_paths(PARAMS_CONFIG_FILE_NAME)?;
+    load_ui_configs_from_paths(&config_paths)
 }
 
 pub fn load_ui_configs_from_dir(config_dir: &Path) -> Result<UiConfigCatalog> {
@@ -137,35 +131,83 @@ pub fn load_ui_configs_from_dir(config_dir: &Path) -> Result<UiConfigCatalog> {
         bail!("UI 配置目录不存在: {}", config_dir.display());
     }
 
-    let mut config_paths: Vec<PathBuf> = fs::read_dir(config_dir)
-        .with_context(|| format!("读取 UI 配置目录失败: {}", config_dir.display()))?
-        .filter_map(|entry| entry.ok().map(|item| item.path()))
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.starts_with("params-") && name.ends_with(".json"))
-                    .unwrap_or(false)
-        })
-        .collect();
-
-    config_paths.sort();
-
-    if config_paths.is_empty() {
+    let config_path = config_dir.join(PARAMS_CONFIG_FILE_NAME);
+    if !config_path.is_file() {
         bail!(
-            "UI 配置目录中未找到 params-*.json 文件: {}",
+            "UI 配置目录中未找到 {}: {}",
+            PARAMS_CONFIG_FILE_NAME,
             config_dir.display()
         );
     }
 
     let mut task_configs = Vec::new();
+    let mut seen_config_keys = HashSet::new();
+    let file_content = fs::read_to_string(&config_path)
+        .with_context(|| format!("读取 UI 配置文件失败: {}", config_path.display()))?;
+    let file_task_configs = serde_json::from_str::<Vec<TaskParamConfig>>(&file_content)
+        .with_context(|| format!("解析 UI 配置文件失败: {}", config_path.display()))?;
+    for task_config in file_task_configs {
+        let dedup_key = format!(
+            "{}:{}",
+            task_config.base_model.trim(),
+            task_config.task.as_str()
+        );
+        if !seen_config_keys.insert(dedup_key.clone()) {
+            tracing::warn!(
+                key = %dedup_key,
+                source = %config_path.display(),
+                "检测到重复任务参数配置，已跳过"
+            );
+            continue;
+        }
+
+        task_configs.push(task_config);
+    }
+
+    Ok(UiConfigCatalog::from_task_configs(task_configs))
+}
+
+fn load_ui_configs_from_paths(config_paths: &[PathBuf]) -> Result<UiConfigCatalog> {
+    if config_paths.is_empty() {
+        bail!(
+            "未发现任何 UI 参数配置文件（{}）",
+            PARAMS_CONFIG_FILE_NAME
+        );
+    }
+
+    let mut task_configs = Vec::new();
+    let mut seen_config_keys = HashSet::new();
+
     for config_path in config_paths {
-        let file_content = fs::read_to_string(&config_path)
+        let file_content = fs::read_to_string(config_path)
             .with_context(|| format!("读取 UI 配置文件失败: {}", config_path.display()))?;
-        let mut file_task_configs = serde_json::from_str::<Vec<TaskParamConfig>>(&file_content)
+        let file_task_configs = serde_json::from_str::<Vec<TaskParamConfig>>(&file_content)
             .with_context(|| format!("解析 UI 配置文件失败: {}", config_path.display()))?;
-        task_configs.append(&mut file_task_configs);
+
+        for task_config in file_task_configs {
+            let dedup_key = format!(
+                "{}:{}",
+                task_config.base_model.trim(),
+                task_config.task.as_str()
+            );
+            if !seen_config_keys.insert(dedup_key.clone()) {
+                tracing::warn!(
+                    key = %dedup_key,
+                    source = %config_path.display(),
+                    "检测到重复任务参数配置，已跳过"
+                );
+                continue;
+            }
+
+            task_configs.push(task_config);
+        }
+    }
+
+    if task_configs.is_empty() {
+        bail!(
+            "已发现参数配置文件，但未加载到可用任务参数配置（{}）",
+            PARAMS_CONFIG_FILE_NAME
+        );
     }
 
     Ok(UiConfigCatalog::from_task_configs(task_configs))

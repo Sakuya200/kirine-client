@@ -4,18 +4,20 @@ use serde::{Deserialize, Serialize};
 
 mod env_config;
 mod log;
+mod model_catalog;
 mod ui_config;
 
 pub use env_config::{
-    load_configs, resolve_storage_dir, save_configs, supported_models_path, BasicConfig, EnvConfig,
-    RemoteConfig,
+    load_configs, resolve_storage_dir, save_configs, BasicConfig, EnvConfig, RemoteConfig,
 };
 pub use log::{init_log, resolve_base_log_dir};
+pub use model_catalog::{
+    discover_model_config_file_paths, MODEL_CONFIG_FILE_NAME, PARAMS_CONFIG_FILE_NAME,
+};
 #[allow(unused_imports)]
 pub use ui_config::{
-    load_ui_configs, load_ui_configs_from_dir, ui_configs_dir_path, ComponentProps,
-    ParamDefinition, SelectOption, TaskParamConfig, UiComponentType, UiConfigCatalog, UiParamType,
-    UiTaskKind, VisibleWhenRule,
+    load_ui_configs, load_ui_configs_from_dir, ComponentProps, ParamDefinition, SelectOption,
+    TaskParamConfig, UiComponentType, UiConfigCatalog, UiParamType, UiTaskKind, VisibleWhenRule,
 };
 
 pub(crate) static SRC_MODEL_DIR_RELATIVE_PATHS: &[&str] = &["./lib/src-model", "../src-model"];

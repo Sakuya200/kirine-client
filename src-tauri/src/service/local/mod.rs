@@ -385,7 +385,7 @@ impl LocalService {
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "failed to sync supported_models.json into local database in {}: {}",
+                    "failed to sync model config catalog into local database in {}: {}",
                     data_dir.display(),
                     e
                 )

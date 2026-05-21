@@ -151,10 +151,6 @@ pub fn config_path() -> Result<std::path::PathBuf> {
     resolve_root_file_path("config.toml")
 }
 
-pub fn supported_models_path() -> Result<std::path::PathBuf> {
-    resolve_root_file_path("supported_models.json")
-}
-
 fn resolve_root_file_path(file_name: &str) -> Result<std::path::PathBuf> {
     for relative_root_path in ROOT_RELATIVE_PATHS {
         let candidate_path = Path::new(relative_root_path).join(file_name);
