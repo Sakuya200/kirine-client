@@ -8,7 +8,9 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{config::PARAMS_CONFIG_FILE_NAME, config::discover_model_config_file_paths, Result};
+use crate::service::models::HistoryTaskType;
+
+use crate::{config::discover_model_config_file_paths, config::PARAMS_CONFIG_FILE_NAME, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -25,28 +27,10 @@ impl UiConfigCatalog {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskParamConfig {
-    pub task: UiTaskKind,
+    pub task: HistoryTaskType,
     #[serde(rename = "base-model")]
     pub base_model: String,
     pub params: Vec<ParamDefinition>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum UiTaskKind {
-    Training,
-    Tts,
-    VoiceClone,
-}
-
-impl UiTaskKind {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Training => "training",
-            Self::Tts => "tts",
-            Self::VoiceClone => "voice-clone",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -169,10 +153,7 @@ pub fn load_ui_configs_from_dir(config_dir: &Path) -> Result<UiConfigCatalog> {
 
 fn load_ui_configs_from_paths(config_paths: &[PathBuf]) -> Result<UiConfigCatalog> {
     if config_paths.is_empty() {
-        bail!(
-            "未发现任何 UI 参数配置文件（{}）",
-            PARAMS_CONFIG_FILE_NAME
-        );
+        bail!("未发现任何 UI 参数配置文件（{}）", PARAMS_CONFIG_FILE_NAME);
     }
 
     let mut task_configs = Vec::new();

@@ -195,7 +195,8 @@ pub(crate) async fn run_common_training_pipeline(
     let result = async {
         mark_training_running_state(service, task_id, speaker_id).await?;
 
-        let mut cancel_rx = service.active_training_cancel_receiver(task_id)?;
+        let mut cancel_rx =
+            service.active_task_cancel_receiver(task_id, HistoryTaskType::ModelTraining)?;
         let runtime_config = service.runtime_config()?;
         let runtime = TrainingRuntimeOptions::from_env_config(&runtime_config);
         let params = load_training_task_params(service, task_id, speaker_id, base_model).await?;

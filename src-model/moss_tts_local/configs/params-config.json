@@ -1,6 +1,6 @@
 [
   {
-    "task": "training",
+    "task": "model-training",
     "base-model": "moss_tts_local",
     "params": [
       {
@@ -203,7 +203,7 @@
     ]
   },
   {
-    "task": "tts",
+    "task": "text-to-speech",
     "base-model": "moss_tts_local",
     "params": [
       {

@@ -1,6 +1,6 @@
 [
   {
-    "task": "training",
+    "task": "model-training",
     "base-model": "qwen3_tts",
     "params": [
       {
@@ -86,7 +86,7 @@
     ]
   },
   {
-    "task": "tts",
+    "task": "text-to-speech",
     "base-model": "qwen3_tts",
     "params": [
       {

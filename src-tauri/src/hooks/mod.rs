@@ -1,7 +1,7 @@
 use tauri::Wry;
 
-mod settings;
 mod model_info;
+mod settings;
 mod speaker_info;
 mod task_history;
 
@@ -27,7 +27,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::delete_history_record,
         task_history::create_text_to_speech_task,
         task_history::create_model_training_task,
-        task_history::cancel_model_training_task,
+        task_history::cancel_history_task,
         task_history::create_voice_clone_task,
         settings::get_settings_config,
         settings::get_ui_config,

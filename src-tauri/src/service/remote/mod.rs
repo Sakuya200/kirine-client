@@ -124,8 +124,8 @@ impl Service for RemoteService {
         biz::unsupported("create_model_training_task")
     }
 
-    async fn cancel_model_training_task(&self, _history_id: i64) -> Result<bool> {
-        biz::unsupported("cancel_model_training_task")
+    async fn cancel_history_task(&self, _history_id: i64) -> Result<bool> {
+        biz::unsupported("cancel_history_task")
     }
 
     async fn create_voice_clone_task(

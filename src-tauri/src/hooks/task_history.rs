@@ -176,7 +176,7 @@ pub async fn create_model_training_task(
 }
 
 #[tauri::command]
-pub async fn cancel_model_training_task(
+pub async fn cancel_history_task(
     history_id: i64,
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, String> {
@@ -184,7 +184,7 @@ pub async fn cancel_model_training_task(
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .cancel_model_training_task(history_id)
+        .cancel_history_task(history_id)
         .await
         .map_err(|err| err.to_string())
 }

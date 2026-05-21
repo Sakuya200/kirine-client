@@ -17,7 +17,7 @@ pub use model_catalog::{
 #[allow(unused_imports)]
 pub use ui_config::{
     load_ui_configs, load_ui_configs_from_dir, ComponentProps, ParamDefinition, SelectOption,
-    TaskParamConfig, UiComponentType, UiConfigCatalog, UiParamType, UiTaskKind, VisibleWhenRule,
+    TaskParamConfig, UiComponentType, UiConfigCatalog, UiParamType, VisibleWhenRule,
 };
 
 pub(crate) static SRC_MODEL_DIR_RELATIVE_PATHS: &[&str] = &["./lib/src-model", "../src-model"];

@@ -12,17 +12,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Ok};
 use async_trait::async_trait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::sync::watch;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     common::task_paths::task_log_file_path,
     config::{EnvConfig, HardwareType},
-    service::local::LocalService,
-    service::models::{HistoryTaskType, ModelDownloadType, ModelInfo},
+    service::{
+        local::{entity::task_history as task_history_entity, LocalService},
+        models::{HistoryTaskType, ModelDownloadType, ModelInfo, TaskStatus},
+    },
     utils::process::{
         run_logged_python_script, run_logged_python_script_cancellable, run_logged_shell_script,
-        LoggedCommandResult,
+        run_logged_shell_script_cancellable, LoggedCommandResult,
     },
     Result,
 };
@@ -372,4 +375,74 @@ pub(crate) async fn run_pipeline_stage_shell_script(
         forwarded_script_args,
     )
     .await
+}
+
+pub(crate) async fn run_pipeline_stage_shell_script_cancellable(
+    script_path: &Path,
+    current_dir: &Path,
+    task_kind: HistoryTaskType,
+    task_id: i64,
+    log_dir: &Path,
+    label: &str,
+    success_message: &str,
+    script_args: Vec<String>,
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
+    let platform = ScriptPlatform::current();
+    let task_log_path = task_log_file_path(log_dir, task_kind, task_id);
+    let mut forwarded_script_args = vec![
+        "--log-path".to_string(),
+        log_dir.to_string_lossy().to_string(),
+        "--task-log-file".to_string(),
+        task_log_path.to_string_lossy().to_string(),
+    ];
+    forwarded_script_args.extend(script_args);
+
+    run_logged_shell_script_cancellable(
+        Path::new(platform.shell_program()),
+        script_path,
+        current_dir,
+        label,
+        &task_log_path,
+        success_message,
+        platform.shell_base_args(),
+        forwarded_script_args,
+        cancel_rx,
+    )
+    .await
+}
+
+impl LocalService {
+    pub(crate) async fn cancel_task_impl(&self, history_id: i64) -> Result<bool> {
+        let record = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到目标任务"))?;
+        let task_type = record
+            .task_type
+            .parse::<HistoryTaskType>()
+            .map_err(|err| anyhow::anyhow!(err))?;
+        let status = record
+            .status
+            .parse::<TaskStatus>()
+            .map_err(|err| anyhow::anyhow!(err))?;
+        info!(
+            task_id = history_id,
+            task_type = %task_type.as_str(),
+            status = %status.as_str(),
+            "handling cancel_history_task request"
+        );
+        if !matches!(status, TaskStatus::Pending | TaskStatus::Running) {
+            warn!(
+                task_id = history_id,
+                task_type = %task_type.as_str(),
+                status = %status.as_str(),
+                "rejecting cancellation because task is already finished"
+            );
+            bail!("当前任务已经结束，无法再次终止");
+        }
+
+        self.request_active_task_cancel(history_id, task_type)
+    }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -83,7 +83,7 @@ const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTask
 const uiConfigStore = useUiConfigStore();
 
 const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'tts');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.TextToSpeech);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -102,6 +102,7 @@ const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
 const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
 const isGenerating = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<TtsResult | null>(null);
 const generationHistory = ref<TtsResult[]>([]);
@@ -131,7 +132,7 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
+const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.TextToSpeech));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
   {
     value: null,
@@ -149,7 +150,9 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
 const canGenerate = computed(() => {
-  const modelParamsValid = activeTextToSpeechTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'tts', form.modelParams) : true;
+  const modelParamsValid = activeTextToSpeechTaskConfig.value
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.TextToSpeech, form.modelParams)
+    : true;
 
   return (
     Boolean(form.language) &&
@@ -159,6 +162,14 @@ const canGenerate = computed(() => {
     !!form.modelVersion &&
     (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
   );
+});
+const canCancelActiveTask = computed(() => {
+  const result = activeResult.value;
+  if (!result) {
+    return false;
+  }
+
+  return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
@@ -182,6 +193,10 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 const activeTaskBusyLabel = computed(() => {
+  if (isCancelling.value) {
+    return '正在发送终止请求，请稍候';
+  }
+
   if (isGenerating.value) {
     return '正在创建文本转语音任务，请稍候';
   }
@@ -256,7 +271,12 @@ const stopActiveTaskStatusRefresh = () => {
 const syncActiveTaskStatusRefresh = () => {
   stopActiveTaskStatusRefresh();
 
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     return;
   }
 
@@ -456,7 +476,12 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
 };
 
 const refreshActiveTaskStatus = async () => {
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     stopActiveTaskStatusRefresh();
     return;
   }
@@ -522,6 +547,34 @@ const generateAudio = async () => {
     uiStore.notifyError(formatErrorMessage('生成失败，请检查 Rust 后端日志', error));
   } finally {
     isGenerating.value = false;
+  }
+};
+
+const cancelActiveTask = async () => {
+  if (!activeResult.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeResult.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+  const taskId = activeResult.value.taskId;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_history_task', {
+      historyId: taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks({ silentOnError: true });
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+  } finally {
+    isCancelling.value = false;
   }
 };
 
@@ -640,6 +693,7 @@ onMounted(async () => {
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
           empty-text="还没有生成结果。完成文本输入并点击“生成音频”后，结果会显示在这里。"
+          @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
@@ -706,6 +760,10 @@ onMounted(async () => {
               <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="generateAudio">
                 <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              </BaseButton>
+              <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="requestClearText">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />

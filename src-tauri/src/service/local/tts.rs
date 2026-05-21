@@ -10,7 +10,6 @@ use crate::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
-    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -87,7 +86,7 @@ impl LocalService {
         )?;
         super::copy_model_param_files(
             &base_model,
-            UiTaskKind::Tts,
+            HistoryTaskType::TextToSpeech,
             &mut model_params,
             &sample_dir,
             Path::new(self.data_dir()),

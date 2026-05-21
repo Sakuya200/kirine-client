@@ -141,20 +141,22 @@ const closeDetail = () => {
   selectedRecordId.value = null;
 };
 
-const cancelTrainingTask = async (historyId: number) => {
+const cancelTask = async (historyId: number) => {
   isMutating.value = true;
 
+  console.log('Initiating cancel for historyId:', historyId);
   try {
-    const accepted = await invoke<boolean>('cancel_model_training_task', { historyId });
+    const accepted = await invoke<boolean>('cancel_history_task', { historyId });
+    console.log('Cancel request accepted:', accepted);
     if (!accepted) {
-      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
     }
 
     await loadHistory();
     uiStore.notifySuccess(`已发送任务 ${historyId} 的终止请求。`, 2600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
   } finally {
     isMutating.value = false;
   }
@@ -234,7 +236,7 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <HistoryTaskDetailDialog :open="selectedRecordId !== null" :record-id="selectedRecordId" @close="closeDetail" @cancel="cancelTrainingTask" />
+    <HistoryTaskDetailDialog :open="selectedRecordId !== null" :record-id="selectedRecordId" @close="closeDetail" @cancel="cancelTask" />
 
     <BaseDialog :open="deleteTarget !== null" title="删除历史任务" @close="closeDeleteDialog">
       <p class="text-sm text-slate-600">

@@ -35,6 +35,9 @@ const props = withDefaults(defineProps<Props>(), {
   title: '生成结果',
   subtitle: '展示最近一次任务的返回结果和输出文件信息'
 });
+const emit = defineEmits<{
+  cancel: [historyId: number];
+}>();
 
 const slots = useSlots();
 const detailRecordId = ref<number | null>(null);
@@ -114,6 +117,12 @@ defineExpose({
       {{ emptyText }}
     </div>
 
-    <HistoryTaskDetailDialog :open="detailRecordId !== null" :record-id="detailRecordId" :reload-token="detailReloadToken" @close="closeDetail" />
+    <HistoryTaskDetailDialog
+      :open="detailRecordId !== null"
+      :record-id="detailRecordId"
+      :reload-token="detailReloadToken"
+      @close="closeDetail"
+      @cancel="emit('cancel', $event)"
+    />
   </PanelCard>
 </template>

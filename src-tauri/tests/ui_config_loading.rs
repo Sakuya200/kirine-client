@@ -1,6 +1,6 @@
 use kirine_client_lib::{
-  load_ui_configs, load_ui_configs_from_dir, TaskParamConfig, UiComponentType, UiParamType,
-  UiTaskKind,
+    load_ui_configs, load_ui_configs_from_dir, HistoryTaskType, TaskParamConfig, UiComponentType,
+    UiParamType,
 };
 use std::{
     fs,
@@ -64,45 +64,53 @@ fn deserializes_component_props_variants() {
     ]
     "#;
 
-    let configs = serde_json::from_str::<Vec<TaskParamConfig>>(payload).expect("failed to deserialize inline ui config payload");
+    let configs = serde_json::from_str::<Vec<TaskParamConfig>>(payload)
+        .expect("failed to deserialize inline ui config payload");
     let param = &configs[0].params[0];
 
-    assert_eq!(configs[0].task, UiTaskKind::VoiceClone);
+    assert_eq!(configs[0].task, HistoryTaskType::VoiceClone);
     assert_eq!(param.param_type, UiParamType::String);
     assert_eq!(param.component_type, UiComponentType::Select);
     assert_eq!(param.component_props.options.len(), 2);
-    assert_eq!(param.component_props.visible_when.as_ref().expect("missing visibleWhen rule").field, "useLora");
+    assert_eq!(
+        param
+            .component_props
+            .visible_when
+            .as_ref()
+            .expect("missing visibleWhen rule")
+            .field,
+        "useLora"
+    );
     assert_eq!(param.component_props.nullable, Some(false));
 }
 
 #[test]
 fn loads_real_ui_config_files() {
-  let catalog = load_ui_configs().expect("failed to load real ui config files");
+    let catalog = load_ui_configs().expect("failed to load real ui config files");
 
     assert!(!catalog.task_configs.is_empty());
     assert!(catalog
         .task_configs
         .iter()
-        .any(|item| item.base_model == "qwen3_tts" && item.task == UiTaskKind::Training));
+        .any(|item| item.base_model == "qwen3_tts" && item.task == HistoryTaskType::ModelTraining));
     assert!(catalog
         .task_configs
         .iter()
-        .any(|item| item.base_model == "vox_cpm2" && item.task == UiTaskKind::Tts));
-    assert!(catalog
-        .task_configs
-        .iter()
-        .any(|item| item.base_model == "moss_tts_local" && item.task == UiTaskKind::VoiceClone));
+        .any(|item| item.base_model == "vox_cpm2" && item.task == HistoryTaskType::TextToSpeech));
+    assert!(catalog.task_configs.iter().any(
+        |item| item.base_model == "moss_tts_local" && item.task == HistoryTaskType::VoiceClone
+    ));
 }
 
 #[test]
 fn loads_params_files_from_temp_directory() {
     let temp_dir = TempUiConfigDir::new();
     temp_dir.write_config_file(
-      "params-config.json",
+        "params-config.json",
         r#"
         [
           {
-            "task": "tts",
+            "task": "text-to-speech",
             "base-model": "qwen3_tts",
             "params": [
               {
@@ -124,9 +132,13 @@ fn loads_params_files_from_temp_directory() {
         "#,
     );
 
-    let catalog = load_ui_configs_from_dir(&temp_dir.path).expect("failed to load temp ui config files");
+    let catalog =
+        load_ui_configs_from_dir(&temp_dir.path).expect("failed to load temp ui config files");
 
     assert_eq!(catalog.task_configs.len(), 1);
-    assert_eq!(catalog.task_configs[0].task, UiTaskKind::Tts);
-    assert_eq!(catalog.task_configs[0].params[0].component_type, UiComponentType::Textarea);
+    assert_eq!(catalog.task_configs[0].task, HistoryTaskType::TextToSpeech);
+    assert_eq!(
+        catalog.task_configs[0].params[0].component_type,
+        UiComponentType::Textarea
+    );
 }

@@ -77,7 +77,7 @@ interface ModelTrainingTaskResultPayload {
 const uiConfigStore = useUiConfigStore();
 
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'training');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.ModelTraining);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -128,7 +128,7 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
+const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -138,7 +138,9 @@ const canStartTraining = computed(() => {
   const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
 
   // 判断模型特有参数是否正确填写
-  const modelParamsValid = activeTrainingTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'training', form.modelParams) : true;
+  const modelParamsValid = activeTrainingTaskConfig.value
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.ModelTraining, form.modelParams)
+    : true;
 
   return (
     form.speakerName.trim().length > 0 &&
@@ -615,12 +617,12 @@ const cancelActiveTrainingTask = async () => {
   isCancelling.value = true;
 
   try {
-    const accepted = await invoke<boolean>('cancel_model_training_task', {
+    const accepted = await invoke<boolean>('cancel_history_task', {
       historyId: activeTrainingTask.value.taskId
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
     }
 
@@ -628,7 +630,7 @@ const cancelActiveTrainingTask = async () => {
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
   } finally {
     isCancelling.value = false;
   }
@@ -642,12 +644,12 @@ const cancelTrainingTask = async (historyId: number) => {
   isCancelling.value = true;
 
   try {
-    const accepted = await invoke<boolean>('cancel_model_training_task', {
+    const accepted = await invoke<boolean>('cancel_history_task', {
       historyId
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
     }
 
@@ -658,7 +660,7 @@ const cancelTrainingTask = async (historyId: number) => {
     await loadRecentTasks({ silentOnError: true });
     uiStore.notifyInfo(`已发送终止请求，任务 ${historyId} 会在后端停止后刷新状态。`, 3600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
   } finally {
     isCancelling.value = false;
   }

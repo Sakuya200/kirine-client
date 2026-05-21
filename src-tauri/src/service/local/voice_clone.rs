@@ -10,7 +10,6 @@ use crate::{
         local_paths::{ensure_child_dir, resolve_task_path, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
-    config::UiTaskKind,
     service::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
@@ -100,7 +99,7 @@ impl LocalService {
             serialize_task_path(Path::new(self.data_dir()), &ref_audio_target_path);
         super::copy_model_param_files(
             &base_model,
-            UiTaskKind::VoiceClone,
+            HistoryTaskType::VoiceClone,
             &mut model_params,
             &sample_dir,
             Path::new(self.data_dir()),

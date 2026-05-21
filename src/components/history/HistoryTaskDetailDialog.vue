@@ -80,11 +80,7 @@ const dialogTitle = computed(() => {
 });
 
 const canReplay = computed(() => Boolean(router));
-const canCancel = computed(() =>
-  Boolean(
-    record.value && record.value.taskType === HistoryTaskType.ModelTraining && [TaskStatus.Pending, TaskStatus.Running].includes(record.value.status)
-  )
-);
+const canCancel = computed(() => Boolean(record.value && [TaskStatus.Pending, TaskStatus.Running].includes(record.value.status)));
 
 const replayTask = async (record: HistoryRecord | null) => {
   if (!record) {

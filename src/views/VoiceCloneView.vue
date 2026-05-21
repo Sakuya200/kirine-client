@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -81,7 +81,7 @@ const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTask
 const uiConfigStore = useUiConfigStore();
 
 const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'voice-clone');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.VoiceClone);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -108,6 +108,7 @@ const formatOptions = TEXT_TO_SPEECH_FORMATS;
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
 const isGenerating = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<VoiceCloneResult | null>(null);
 const generationHistory = ref<VoiceCloneResult[]>([]);
@@ -139,13 +140,21 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'voice-clone'));
+const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.VoiceClone));
 const canGenerate = computed(() => {
   const modelParamsValid = activeVoiceCloneTaskConfig.value
-    ? uiConfigStore.validateModelParams(form.baseModel, 'voice-clone', form.modelParams)
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.VoiceClone, form.modelParams)
     : true;
 
   return Boolean(form.baseModel) && Boolean(form.modelVersion) && Boolean(effectiveRefAudioPath.value) && modelParamsValid;
+});
+const canCancelActiveTask = computed(() => {
+  const result = activeResult.value;
+  if (!result) {
+    return false;
+  }
+
+  return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
@@ -169,6 +178,10 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 const activeTaskBusyLabel = computed(() => {
+  if (isCancelling.value) {
+    return '正在发送终止请求，请稍候';
+  }
+
   if (isGenerating.value) {
     return '正在创建声音克隆任务，请稍候';
   }
@@ -405,7 +418,12 @@ const stopActiveTaskStatusRefresh = () => {
 const syncActiveTaskStatusRefresh = () => {
   stopActiveTaskStatusRefresh();
 
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     return;
   }
 
@@ -469,7 +487,12 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {})
 };
 
 const refreshActiveTaskStatus = async () => {
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     stopActiveTaskStatusRefresh();
     return;
   }
@@ -537,6 +560,34 @@ const createTask = async () => {
     uiStore.notifyError(formatErrorMessage('声音克隆任务创建失败', error));
   } finally {
     isGenerating.value = false;
+  }
+};
+
+const cancelActiveTask = async () => {
+  if (!activeResult.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeResult.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+  const taskId = activeResult.value.taskId;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_history_task', {
+      historyId: taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks();
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+  } finally {
+    isCancelling.value = false;
   }
 };
 
@@ -619,6 +670,7 @@ onBeforeUnmount(() => {
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
           empty-text="还没有生成结果。完成参考音频和文本输入后，结果会显示在这里。"
+          @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
@@ -691,6 +743,10 @@ onBeforeUnmount(() => {
               <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="createTask">
                 <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
                 <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              </BaseButton>
+              <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />

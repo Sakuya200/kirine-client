@@ -12,6 +12,7 @@ use sea_orm::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
@@ -24,7 +25,6 @@ use crate::{
         },
     },
     config::HardwareType,
-    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -286,18 +286,6 @@ impl LocalService {
         })
     }
 
-    pub(crate) async fn cancel_model_training_task_impl(&self, history_id: i64) -> Result<bool> {
-        let record = self.get_history_record_impl(history_id).await?;
-        if record.task_type != HistoryTaskType::ModelTraining {
-            bail!("当前任务不是模型微调任务，无法终止");
-        }
-        if !matches!(record.status, TaskStatus::Pending | TaskStatus::Running) {
-            bail!("当前任务已经结束，无法再次终止");
-        }
-
-        self.request_active_training_cancel(history_id)
-    }
-
     fn prepare_training_data(
         &self,
         task_id: i64,
@@ -334,7 +322,7 @@ impl LocalService {
         })?;
         super::copy_model_param_files(
             base_model,
-            UiTaskKind::Training,
+            HistoryTaskType::ModelTraining,
             model_params,
             &sample_root,
             Path::new(self.data_dir()),
