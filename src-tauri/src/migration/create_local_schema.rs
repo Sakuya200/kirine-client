@@ -293,7 +293,7 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .not_null(),
                 )
                 .col(
-                    ColumnDef::new(ModelTrainingTasks::ModelName)
+                    ColumnDef::new(ModelTrainingTasks::SpeakerName)
                         .string()
                         .not_null(),
                 )
@@ -705,7 +705,7 @@ enum ModelTrainingTasks {
     Language,
     BaseModel,
     ModelVersion,
-    ModelName,
+    SpeakerName,
     ModelParamsJson,
     SampleCount,
     SamplesJson,

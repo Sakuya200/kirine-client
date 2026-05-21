@@ -37,7 +37,7 @@ export interface ModelTrainingTaskDetail {
   language: AppLanguage;
   baseModel: BaseModel;
   modelVersion: string;
-  modelName: string;
+  speakerName: string;
   description: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;

@@ -110,7 +110,7 @@ impl LocalService {
         let selected_training_hardware = self.runtime_config()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
-        let speaker_name = payload.model_name.trim().to_string();
+        let speaker_name = payload.speaker_name.trim().to_string();
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
@@ -167,12 +167,8 @@ impl LocalService {
         .await?;
         let task_id = task_history.id;
 
-        let prepared = self.prepare_training_data(
-            task_id,
-            &base_model,
-            &mut model_params,
-            &payload.samples,
-        )?;
+        let prepared =
+            self.prepare_training_data(task_id, &base_model, &mut model_params, &payload.samples)?;
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
@@ -261,7 +257,7 @@ impl LocalService {
             language: Set(payload.language.as_str().to_string()),
             base_model: Set(base_model.clone()),
             model_version: Set(model_version.clone()),
-            model_name: Set(speaker_name.clone()),
+            speaker_name: Set(speaker_name.clone()),
             description: Set(payload.description.trim().to_string()),
             model_params_json: Set(serde_json::to_string(&model_params)?),
             sample_count: Set(sample_count),
@@ -282,7 +278,7 @@ impl LocalService {
             task_id,
             base_model,
             model_version,
-            model_name: speaker_name,
+            speaker_name,
             model_params,
             sample_count,
             create_time,

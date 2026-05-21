@@ -68,7 +68,7 @@ interface ModelTrainingTaskResultPayload {
   taskId: number;
   baseModel: string;
   modelVersion: string;
-  modelName: string;
+  speakerName: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
@@ -85,7 +85,7 @@ const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
   modelVersion: '',
-  modelName: 'speaker_a_custom',
+  speakerName: 'speaker_a_custom',
   description: '',
   modelParams: {} as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
@@ -141,7 +141,7 @@ const canStartTraining = computed(() => {
   const modelParamsValid = activeTrainingTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'training', form.modelParams) : true;
 
   return (
-    form.modelName.trim().length > 0 &&
+    form.speakerName.trim().length > 0 &&
     form.description.trim().length > 0 &&
     importedSamples.value.length > 0 &&
     epochCount > 0 &&
@@ -159,7 +159,7 @@ const sampleSummary = computed(() => ({
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
-    title: item.detail.modelName,
+    title: item.detail.speakerName,
     subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelVersion}`,
     status: item.status
   }))
@@ -172,7 +172,7 @@ const currentTrainingInfo = computed(() => {
   if (record) {
     return {
       taskId: record.id,
-      speakerName: record.detail.modelName,
+      speakerName: record.detail.speakerName,
       description: record.detail.description?.trim() || '未填写',
       baseModel: record.detail.baseModel,
       modelVersion: record.detail.modelVersion,
@@ -188,7 +188,7 @@ const currentTrainingInfo = computed(() => {
 
   return {
     taskId: activeTrainingTask.value.taskId,
-    speakerName: activeTrainingTask.value.modelName,
+    speakerName: activeTrainingTask.value.speakerName,
     description: form.description.trim() || '未填写',
     baseModel: activeTrainingTask.value.baseModel,
     modelVersion: activeTrainingTask.value.modelVersion,
@@ -308,7 +308,7 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
     modelVersion: trainingRecord.detail.modelVersion,
-    modelName: trainingRecord.detail.modelName,
+    speakerName: trainingRecord.detail.speakerName,
     modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
@@ -411,7 +411,7 @@ const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
   form.modelVersion = String(modelVersionOptions.value[0]?.value ?? '');
-  form.modelName = 'speaker_a_custom';
+  form.speakerName = 'speaker_a_custom';
   form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
   form.singleAudioFile = null;
@@ -447,7 +447,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
   form.modelVersion = record.detail.modelVersion;
-  form.modelName = record.detail.modelName;
+  form.speakerName = record.detail.speakerName;
   form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
   form.singleAudioFile = null;
@@ -678,7 +678,7 @@ const startTraining = async () => {
         language: form.language,
         baseModel: form.baseModel,
         modelVersion: form.modelVersion,
-        modelName: form.modelName.trim(),
+        speakerName: form.speakerName.trim(),
         description: form.description.trim(),
         modelParams: form.modelParams,
         samples: importedSamples.value.map(sample => ({
@@ -700,7 +700,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
+      `模型微调任务已创建：${payload.speakerName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -924,8 +924,12 @@ onBeforeUnmount(() => {
       <div class="space-y-5 text-sm text-slate-700">
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label class="block xl:col-span-1">
-            <span class="mb-1 block text-xs text-stone-500">微调输出名称</span>
-            <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
+            <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
+            <input
+              v-model="form.speakerName"
+              class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+              placeholder="请输入说话人名称"
+            />
           </label>
           <div class="xl:col-span-1">
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />

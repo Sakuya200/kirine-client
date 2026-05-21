@@ -11,8 +11,9 @@ mod m20260508_000002_make_tts_speaker_nullable;
 mod m20260508_000003_add_model_download_type;
 mod m20260511_000004_remove_task_history_error_message;
 mod m20260512_000005_rename_model_scale_to_model_version;
+mod m20260521_000006_rename_model_training_task_model_name_to_speaker_name;
 
-const LOCAL_SCHEMA_VERSION: &str = "22";
+const LOCAL_SCHEMA_VERSION: &str = "23";
 
 pub(crate) struct Migrator;
 
@@ -25,6 +26,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260508_000003_add_model_download_type::Migration),
             Box::new(m20260511_000004_remove_task_history_error_message::Migration),
             Box::new(m20260512_000005_rename_model_scale_to_model_version::Migration),
+            Box::new(
+                m20260521_000006_rename_model_training_task_model_name_to_speaker_name::Migration,
+            ),
         ]
     }
 }

@@ -78,7 +78,7 @@ interface TextToSpeechAudioAssetPayload {
 }
 
 const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_cpufast']);
-const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
+const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();
 
@@ -93,7 +93,7 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
+  exportAudioName: createDefaultExportAudioName(),
   text: '',
   modelParams: {} as Record<string, unknown>
 });
@@ -164,7 +164,7 @@ const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
   isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName}。`
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -334,7 +334,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;
-  form.exportAudioName = item.exportAudioName;
+  form.exportAudioName = createDefaultExportAudioName();
   form.text = item.text;
   form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
@@ -545,7 +545,7 @@ const confirmClearText = () => {
   form.speakerId = null;
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
-  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
+  form.exportAudioName = createDefaultExportAudioName();
   form.text = '';
   form.modelParams = {};
   selectedSpeakerOption.value = null;

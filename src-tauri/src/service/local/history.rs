@@ -397,7 +397,7 @@ impl LocalService {
                 .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
             base_model: row.base_model,
             model_version: row.model_version,
-            model_name: row.model_name,
+            speaker_name: row.speaker_name,
             description: row.description,
             model_params: serde_json::from_str(&row.model_params_json)?,
             sample_count: row.sample_count,

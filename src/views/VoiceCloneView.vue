@@ -76,7 +76,7 @@ interface SelectedAudioFile {
   filePath: string;
 }
 
-const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
+const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
 const uiConfigStore = useUiConfigStore();
 
@@ -94,7 +94,7 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
+  exportAudioName: createDefaultExportAudioName(),
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
@@ -151,7 +151,7 @@ const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
-  `导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+  `导出名称为 ${form.exportAudioName}。`
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -283,7 +283,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
-  form.exportAudioName = result.exportAudioName;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
     filePath: refAudioPath
@@ -303,7 +303,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
-  form.exportAudioName = result.exportAudioName;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
     filePath: refAudioPath
@@ -555,7 +555,7 @@ const resetForm = () => {
   form.modelVersion = modelVersionOptions.value[0]?.value ?? '';
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
-  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refText = '';
   form.text = '';
   form.modelParams = {};
