@@ -22,10 +22,12 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { AppLanguage } from '@/enums/language';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
   MODEL_TRAINING_ANNOTATION_FORMAT_TEXT,
@@ -39,6 +41,7 @@ import {
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -68,7 +71,8 @@ interface ModelTrainingTaskResultPayload {
   taskId: number;
   baseModel: string;
   modelVersion: string;
-  modelName: string;
+  speakerName: string;
+  device: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
@@ -77,7 +81,7 @@ interface ModelTrainingTaskResultPayload {
 const uiConfigStore = useUiConfigStore();
 
 const normalizeTrainingModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'training');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.ModelTraining);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -85,7 +89,8 @@ const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
   modelVersion: '',
-  modelName: 'speaker_a_custom',
+  device: HardwareType.Cpu,
+  speakerName: 'speaker_a_custom',
   description: '',
   modelParams: {} as Record<string, unknown>,
   singleAudioFile: null as SelectedLocalFile | null,
@@ -94,6 +99,7 @@ const form = reactive({
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isStarting = ref(false);
 const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
@@ -106,6 +112,18 @@ const detailReloadToken = ref(0);
 const modelStore = useModelStore();
 const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
+const {
+  dialogOpen: showDeviceMismatchDialog,
+  dialogTitle: deviceMismatchDialogTitle,
+  dialogMessage: deviceMismatchDialogMessage,
+  dialogDetailLines: deviceMismatchDialogDetails,
+  isCheckingDeviceType,
+  isAwaitingDeviceConfirmation,
+  isDeviceGuardPending,
+  ensureMatchedOrConfirmed,
+  confirmDialog: confirmDeviceMismatchDialog,
+  closeDialog: closeDeviceMismatchDialog
+} = useTaskDeviceTypeGuard();
 const route = useRoute();
 const router = useRouter();
 let importedSampleIdSeed = Date.now();
@@ -128,7 +146,13 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'training'));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
 const batchImportReady = computed(() => Boolean(form.datasetArchiveFile) && Boolean(form.datasetAnnotationFile));
@@ -138,10 +162,12 @@ const canStartTraining = computed(() => {
   const gradientAccumulationSteps = Number(form.modelParams.gradientAccumulationSteps ?? 0);
 
   // 判断模型特有参数是否正确填写
-  const modelParamsValid = activeTrainingTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'training', form.modelParams) : true;
+  const modelParamsValid = activeTrainingTaskConfig.value
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.ModelTraining, form.modelParams)
+    : true;
 
   return (
-    form.modelName.trim().length > 0 &&
+    form.speakerName.trim().length > 0 &&
     form.description.trim().length > 0 &&
     importedSamples.value.length > 0 &&
     epochCount > 0 &&
@@ -159,7 +185,7 @@ const sampleSummary = computed(() => ({
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
-    title: item.detail.modelName,
+    title: item.detail.speakerName,
     subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelVersion}`,
     status: item.status
   }))
@@ -172,10 +198,11 @@ const currentTrainingInfo = computed(() => {
   if (record) {
     return {
       taskId: record.id,
-      speakerName: record.detail.modelName,
+      speakerName: record.detail.speakerName,
       description: record.detail.description?.trim() || '未填写',
       baseModel: record.detail.baseModel,
       modelVersion: record.detail.modelVersion,
+      device: record.device,
       sampleCount: record.detail.sampleCount,
       status: record.status,
       createTime: record.createTime
@@ -188,10 +215,11 @@ const currentTrainingInfo = computed(() => {
 
   return {
     taskId: activeTrainingTask.value.taskId,
-    speakerName: activeTrainingTask.value.modelName,
+    speakerName: activeTrainingTask.value.speakerName,
     description: form.description.trim() || '未填写',
     baseModel: activeTrainingTask.value.baseModel,
     modelVersion: activeTrainingTask.value.modelVersion,
+    device: activeTrainingTask.value.device,
     sampleCount: activeTrainingTask.value.sampleCount,
     status: activeTrainingTask.value.status,
     createTime: activeTrainingTask.value.createTime
@@ -199,6 +227,14 @@ const currentTrainingInfo = computed(() => {
 });
 
 const trainingBusyLabel = computed(() => {
+  if (isCheckingDeviceType.value) {
+    return '正在检查模型环境，请稍候';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认硬件环境切换';
+  }
+
   if (isStarting.value) {
     return '正在创建模型微调任务，请稍候';
   }
@@ -212,6 +248,18 @@ const trainingBusyLabel = computed(() => {
   }
 
   return '';
+});
+const isSubmitPending = computed(() => isStarting.value || isDeviceGuardPending.value);
+const submitButtonText = computed(() => {
+  if (isCheckingDeviceType.value) {
+    return '检查环境中...';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认...';
+  }
+
+  return isStarting.value ? '创建中...' : '开始微调';
 });
 
 const openCurrentTaskDetail = () => {
@@ -252,6 +300,22 @@ watch(
     if (!options.some(option => option.value === form.modelVersion)) {
       form.modelVersion = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
   },
   { immediate: true }
 );
@@ -308,7 +372,8 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
     taskId: trainingRecord.id,
     baseModel: trainingRecord.detail.baseModel,
     modelVersion: trainingRecord.detail.modelVersion,
-    modelName: trainingRecord.detail.modelName,
+    speakerName: trainingRecord.detail.speakerName,
+    device: trainingRecord.device,
     modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
@@ -411,7 +476,8 @@ const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
   form.modelVersion = String(modelVersionOptions.value[0]?.value ?? '');
-  form.modelName = 'speaker_a_custom';
+  form.device = HardwareType.Cpu;
+  form.speakerName = 'speaker_a_custom';
   form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
   form.singleAudioFile = null;
@@ -419,6 +485,7 @@ const resetForm = () => {
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS[0];
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   importedSamples.value = [];
   uiStore.notifyInfo('训练表单已重置。', 2200);
 };
@@ -447,7 +514,8 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
   form.modelVersion = record.detail.modelVersion;
-  form.modelName = record.detail.modelName;
+  form.device = record.device as HardwareType;
+  form.speakerName = record.detail.speakerName;
   form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
   form.singleAudioFile = null;
@@ -456,6 +524,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.datasetAnnotationFile = null;
   importedSamples.value = record.detail.samples.map(mapHistorySampleToImportedSample);
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS.find(option => option.value === form.language) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === record.device) ?? null;
 };
 
 const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => {
@@ -615,12 +684,12 @@ const cancelActiveTrainingTask = async () => {
   isCancelling.value = true;
 
   try {
-    const accepted = await invoke<boolean>('cancel_model_training_task', {
+    const accepted = await invoke<boolean>('cancel_history_task', {
       historyId: activeTrainingTask.value.taskId
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
     }
 
@@ -628,7 +697,7 @@ const cancelActiveTrainingTask = async () => {
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
   } finally {
     isCancelling.value = false;
   }
@@ -642,12 +711,12 @@ const cancelTrainingTask = async (historyId: number) => {
   isCancelling.value = true;
 
   try {
-    const accepted = await invoke<boolean>('cancel_model_training_task', {
+    const accepted = await invoke<boolean>('cancel_history_task', {
       historyId
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前训练任务已经提交过终止请求。');
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
     }
 
@@ -658,7 +727,7 @@ const cancelTrainingTask = async (historyId: number) => {
     await loadRecentTasks({ silentOnError: true });
     uiStore.notifyInfo(`已发送终止请求，任务 ${historyId} 会在后端停止后刷新状态。`, 3600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止模型微调任务失败', error));
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
   } finally {
     isCancelling.value = false;
   }
@@ -666,6 +735,15 @@ const cancelTrainingTask = async (historyId: number) => {
 
 const startTraining = async () => {
   if (!canStartTraining.value) {
+    return;
+  }
+
+  const accepted = await ensureMatchedOrConfirmed({
+    baseModel: form.baseModel,
+    modelVersion: form.modelVersion,
+    selectedDevice: form.device
+  });
+  if (!accepted) {
     return;
   }
 
@@ -678,7 +756,8 @@ const startTraining = async () => {
         language: form.language,
         baseModel: form.baseModel,
         modelVersion: form.modelVersion,
-        modelName: form.modelName.trim(),
+        device: form.device,
+        speakerName: form.speakerName.trim(),
         description: form.description.trim(),
         modelParams: form.modelParams,
         samples: importedSamples.value.map(sample => ({
@@ -700,7 +779,7 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型微调任务已创建：${payload.modelName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
+      `模型微调任务已创建：${payload.speakerName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
       5200
     );
   } catch (error) {
@@ -924,14 +1003,27 @@ onBeforeUnmount(() => {
       <div class="space-y-5 text-sm text-slate-700">
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label class="block xl:col-span-1">
-            <span class="mb-1 block text-xs text-stone-500">微调输出名称</span>
-            <input v-model="form.modelName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型名称" />
+            <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
+            <input
+              v-model="form.speakerName"
+              class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
+              placeholder="请输入说话人名称"
+            />
           </label>
           <div class="xl:col-span-1">
             <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           </div>
           <div class="xl:col-span-1">
             <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          </div>
+          <div class="xl:col-span-1">
+            <BaseListbox
+              v-model="form.device"
+              v-model:selected-option="selectedDeviceOption"
+              label="设备类型"
+              :options="deviceOptions"
+              :disabled="deviceOptions.length === 0"
+            />
           </div>
           <div class="md:col-span-2 xl:col-span-1">
             <BaseListbox
@@ -964,17 +1056,17 @@ onBeforeUnmount(() => {
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
             <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelVersion }}。</p>
+            <p class="mt-1">设备类型 {{ HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }}。</p>
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
-            <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}。</p>
           </div>
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex items-center justify-center gap-2">
-              <BaseButton :loading="isStarting" :disabled="!canStartTraining" @click="startTraining">
-                <CpuChipIcon v-if="!isStarting" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isStarting ? '创建中...' : '开始微调' }}</span>
+              <BaseButton :loading="isSubmitPending" :disabled="!canStartTraining || isSubmitPending" @click="startTraining">
+                <CpuChipIcon v-if="!isSubmitPending" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ submitButtonText }}</span>
               </BaseButton>
               <BaseButton
                 tone="quiet"
@@ -1002,6 +1094,14 @@ onBeforeUnmount(() => {
       :reload-token="detailReloadToken"
       @close="closeTaskDetail"
       @cancel="cancelTrainingTask"
+    />
+    <WarningConfirmDialog
+      :open="showDeviceMismatchDialog"
+      :title="deviceMismatchDialogTitle"
+      :message="deviceMismatchDialogMessage"
+      :detail-lines="deviceMismatchDialogDetails"
+      @close="closeDeviceMismatchDialog"
+      @confirm="confirmDeviceMismatchDialog"
     />
   </div>
 </template>

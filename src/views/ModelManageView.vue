@@ -96,7 +96,7 @@ onMounted(async () => {
 
     <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" :show-history-link="false" />
 
-    <PanelCard title="模型列表" subtitle="状态来自本地数据库中的 model_info.downloaded 字段。">
+    <PanelCard title="模型列表" subtitle="系统中可用的基础模型及其支持的功能和安装状态" class="relative">
       <template #actions>
         <BaseButton tone="ghost" :loading="modelStore.isLoading" :disabled="isMutating" @click="refreshModels">
           <ArrowPathIcon v-if="!modelStore.isLoading" class="h-4 w-4" aria-hidden="true" />

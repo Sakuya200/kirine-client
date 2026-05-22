@@ -1,5 +1,6 @@
 use std::{io, path::Path};
 
+use anyhow::bail;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
     TransactionTrait,
@@ -10,7 +11,6 @@ use crate::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
-    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -31,11 +31,24 @@ impl LocalService {
         &self,
         payload: CreateTextToSpeechTaskPayload,
     ) -> Result<TextToSpeechTaskResult> {
-        let txn = self.orm().begin().await?;
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
         let model_version = payload.model_version.trim().to_string();
+        let device = payload.device;
+        let selected_model_info = self
+            .find_supported_model_variant(&base_model, &model_version)
+            .await?;
+        if !selected_model_info.supported_devices.contains(&device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                selected_model_info.model_name,
+                selected_model_info.model_version,
+                device,
+                selected_model_info.supported_devices
+            );
+        }
+        let txn = self.orm().begin().await?;
         let speaker_label = if let Some(speaker_id) = speaker_id {
             let speaker = speaker_entity::Entity::find_by_id(speaker_id)
                 .filter(speaker_entity::Column::Deleted.eq(0))
@@ -75,6 +88,7 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
+            device: Set(device.as_str().to_string()),
             deleted: Set(0),
         }
         .insert(&txn)
@@ -87,7 +101,7 @@ impl LocalService {
         )?;
         super::copy_model_param_files(
             &base_model,
-            UiTaskKind::Tts,
+            HistoryTaskType::TextToSpeech,
             &mut model_params,
             &sample_dir,
             Path::new(self.data_dir()),

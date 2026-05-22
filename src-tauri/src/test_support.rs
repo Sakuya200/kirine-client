@@ -6,6 +6,7 @@ use serde_json::Value;
 use sqlx::{sqlite::SqlitePoolOptions, Row};
 
 use crate::{
+    config::HardwareType,
     service::entity::{speaker, task_history, training_task, tts_task, voice_clone_task},
     service::{
         models::{
@@ -121,6 +122,7 @@ impl LocalServiceHarness {
                 language: AppLanguage::Chinese,
                 format: TextToSpeechFormat::Wav,
                 export_audio_name: "vox-preset-test".to_string(),
+                device: HardwareType::Cpu,
                 text: "测试 VoxCPM2 首次任务创建".to_string(),
                 model_params: serde_json::json!({
                     "cfg_value": "2.0",
@@ -161,8 +163,9 @@ impl LocalServiceHarness {
                 language: AppLanguage::Chinese,
                 base_model: "vox_cpm2".to_string(),
                 model_version: "2B".to_string(),
-                model_name: "vox_lora_test".to_string(),
+                speaker_name: "vox_lora_test".to_string(),
                 description: "用于测试的 Vox 训练说话人".to_string(),
+                device: HardwareType::Cpu,
                 model_params,
                 samples: vec![ModelTrainingSampleInput {
                     id: 1,

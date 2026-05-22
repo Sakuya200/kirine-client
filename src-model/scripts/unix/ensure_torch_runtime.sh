@@ -5,6 +5,7 @@ SCRIPT_DIR=$(CDPATH='' && cd -- "$(dirname "$0")" && pwd)
 SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
 BASE_MODEL=""
 CPU_MODE=0
+QUERY_DEVICE_TYPE=0
 TASK_LOG_FILE=""
 
 while [ "$#" -gt 0 ]; do
@@ -22,6 +23,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --cpu-mode)
             CPU_MODE=1
+            shift
+            ;;
+        --query-device-type)
+            QUERY_DEVICE_TYPE=1
             shift
             ;;
         *)
@@ -66,6 +71,35 @@ fi
 read_metadata() {
     "$VENV_PYTHON" -c "import torch; print('TORCH_METADATA|{}|{}|{}'.format(torch.__version__, torch.version.cuda or '', int(bool(torch.cuda.is_available()))))" 2>>"$TASK_LOG_FILE" | tail -n 1
 }
+
+write_detected_device_type() {
+    metadata=$(read_metadata || true)
+    case "$metadata" in
+        TORCH_METADATA*'|'*'|'*)
+            torch_version=$(printf '%s' "$metadata" | awk -F'|' '{print $2}')
+            torch_cuda=$(printf '%s' "$metadata" | awk -F'|' '{print $3}')
+            cuda_available=$(printf '%s' "$metadata" | awk -F'|' '{print $4}')
+            if [ "$cuda_available" = "1" ] && [ -n "$torch_cuda" ]; then
+                append_log "[ensure-torch-runtime] detected CUDA torch runtime (torch=$torch_version, cuda=$torch_cuda)"
+                printf '%s\n' 'DEVICE_TYPE|cuda'
+                return
+            fi
+
+            append_log "[ensure-torch-runtime] detected CPU torch runtime (torch=$torch_version)"
+            printf '%s\n' 'DEVICE_TYPE|cpu'
+            return
+            ;;
+    esac
+
+    append_log "[ensure-torch-runtime] torch runtime metadata unavailable, defaulting detected device type to cpu"
+    printf '%s\n' 'DEVICE_TYPE|cpu'
+}
+
+if [ "$QUERY_DEVICE_TYPE" -eq 1 ]; then
+    append_log "[ensure-torch-runtime] query device type mode enabled"
+    write_detected_device_type
+    exit 0
+fi
 
 if [ "$CPU_MODE" -eq 1 ]; then
     append_log "[ensure-torch-runtime] CPU mode enabled"

@@ -41,10 +41,6 @@ Function RelocateBundledAppFilesAndCleanupResources
 	Push "$INSTDIR\config.toml"
 	Call RelocateBundledAppFile
 
-	Push "$INSTDIR\resources\supported_models.json"
-	Push "$INSTDIR\supported_models.json"
-	Call RelocateBundledAppFile
-
 	IfFileExists "$0" 0 cleanup_done
 	DetailPrint "Removing bundled resources directory: $0"
 	RMDir /r "$0"

@@ -12,6 +12,7 @@ use sea_orm::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
@@ -24,7 +25,6 @@ use crate::{
         },
     },
     config::HardwareType,
-    config::UiTaskKind,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -107,24 +107,35 @@ impl LocalService {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
-        let selected_training_hardware = self.runtime_config()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
-        let speaker_name = payload.model_name.trim().to_string();
+        let speaker_name = payload.speaker_name.trim().to_string();
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        let selected_training_device = payload.device;
         let mut model_params = payload.model_params.clone();
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
+        if !selected_model_info.supported_devices.contains(&selected_training_device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                selected_model_info.model_name,
+                selected_model_info.model_version,
+                selected_training_device,
+                selected_model_info.supported_devices
+            );
+        }
+        let selected_training_mode_label = if selected_training_device == HardwareType::Cpu {
+            "CPU"
+        } else {
+            "CUDA"
+        };
         let selected_training_mode_text = format!(
             "{} / {}",
             selected_model_info.model_name,
-            match selected_training_hardware {
-                HardwareType::Cuda => "CUDA",
-                HardwareType::Cpu => "CPU",
-            }
+            selected_training_mode_label,
         );
 
         let languages_json = serde_json::to_string(&vec![payload.language])?;
@@ -161,18 +172,15 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
+            device: Set(selected_training_device.as_str().to_string()),
             deleted: Set(0),
         }
         .insert(&txn)
         .await?;
         let task_id = task_history.id;
 
-        let prepared = self.prepare_training_data(
-            task_id,
-            &base_model,
-            &mut model_params,
-            &payload.samples,
-        )?;
+        let prepared =
+            self.prepare_training_data(task_id, &base_model, &mut model_params, &payload.samples)?;
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
@@ -243,7 +251,7 @@ impl LocalService {
                 epoch_count, steps_per_epoch, total_steps
             ));
         }
-        if matches!(selected_training_hardware, HardwareType::Cpu) {
+        if selected_training_device == HardwareType::Cpu {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
         }
         if payload
@@ -261,7 +269,7 @@ impl LocalService {
             language: Set(payload.language.as_str().to_string()),
             base_model: Set(base_model.clone()),
             model_version: Set(model_version.clone()),
-            model_name: Set(speaker_name.clone()),
+            speaker_name: Set(speaker_name.clone()),
             description: Set(payload.description.trim().to_string()),
             model_params_json: Set(serde_json::to_string(&model_params)?),
             sample_count: Set(sample_count),
@@ -282,24 +290,12 @@ impl LocalService {
             task_id,
             base_model,
             model_version,
-            model_name: speaker_name,
+            speaker_name,
             model_params,
             sample_count,
             create_time,
             status: TaskStatus::Running,
         })
-    }
-
-    pub(crate) async fn cancel_model_training_task_impl(&self, history_id: i64) -> Result<bool> {
-        let record = self.get_history_record_impl(history_id).await?;
-        if record.task_type != HistoryTaskType::ModelTraining {
-            bail!("当前任务不是模型微调任务，无法终止");
-        }
-        if !matches!(record.status, TaskStatus::Pending | TaskStatus::Running) {
-            bail!("当前任务已经结束，无法再次终止");
-        }
-
-        self.request_active_training_cancel(history_id)
     }
 
     fn prepare_training_data(
@@ -338,7 +334,7 @@ impl LocalService {
         })?;
         super::copy_model_param_files(
             base_model,
-            UiTaskKind::Training,
+            HistoryTaskType::ModelTraining,
             model_params,
             &sample_root,
             Path::new(self.data_dir()),

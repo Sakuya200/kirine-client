@@ -2,9 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
+import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { UiConfigCatalog, TaskParamConfig, ComponentProps, ParamDefinition, SelectOption, UiTaskKind, VisibleWhenRule } from '@/types/uiConfig';
+import type { UiConfigCatalog, TaskParamConfig, ComponentProps, ParamDefinition, SelectOption, VisibleWhenRule } from '@/types/uiConfig';
 
 const EMPTY_CATALOG: UiConfigCatalog = {
   taskConfigs: []
@@ -90,7 +91,7 @@ const normalizeTaskParamConfig = (value: unknown): TaskParamConfig | null => {
   }
 
   return {
-    task: value.task as UiTaskKind,
+    task: value.task as HistoryTaskType,
     baseModel: String(value.baseModel ?? value['base-model']).trim(),
     params: Array.isArray(value.params) ? value.params.map(normalizeParamDefinition).filter((item): item is ParamDefinition => item !== null) : []
   };
@@ -149,9 +150,9 @@ export const useUiConfigStore = defineStore('ui-config', () => {
     }
   };
 
-  const getTaskConfig = (baseModel: string, task: UiTaskKind) => taskConfigMap.value.get(`${baseModel}:${task}`) ?? null;
+  const getTaskConfig = (baseModel: string, task: HistoryTaskType) => taskConfigMap.value.get(`${baseModel}:${task}`) ?? null;
 
-  const validateModelParams = (baseModel: string, task: UiTaskKind, modelParams: Record<string, unknown>): boolean => {
+  const validateModelParams = (baseModel: string, task: HistoryTaskType, modelParams: Record<string, unknown>): boolean => {
     const taskConfig = getTaskConfig(baseModel, task);
     if (!taskConfig) {
       return false;

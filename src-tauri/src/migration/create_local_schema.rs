@@ -132,6 +132,12 @@ async fn create_task_history_node(manager: &SchemaManager<'_>) -> Result<(), DbE
                 .col(ColumnDef::new(TaskHistory::ModifyTime).string().not_null())
                 .col(ColumnDef::new(TaskHistory::FinishedTime).string())
                 .col(
+                    ColumnDef::new(TaskHistory::Device)
+                        .string()
+                        .not_null()
+                        .default("cpu"),
+                )
+                .col(
                     ColumnDef::new(TaskHistory::Deleted)
                         .integer()
                         .not_null()
@@ -178,6 +184,12 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                     ColumnDef::new(ModelInfo::SupportedFeatureListJson)
                         .text()
                         .not_null(),
+                )
+                .col(
+                    ColumnDef::new(ModelInfo::SupportedDevices)
+                        .text()
+                        .not_null()
+                        .default("[]"),
                 )
                 .col(ColumnDef::new(ModelInfo::CreateTime).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModifyTime).string().not_null())
@@ -293,7 +305,7 @@ async fn create_model_training_tasks_node(manager: &SchemaManager<'_>) -> Result
                         .not_null(),
                 )
                 .col(
-                    ColumnDef::new(ModelTrainingTasks::ModelName)
+                    ColumnDef::new(ModelTrainingTasks::SpeakerName)
                         .string()
                         .not_null(),
                 )
@@ -655,6 +667,7 @@ enum TaskHistory {
     CreateTime,
     ModifyTime,
     FinishedTime,
+    Device,
     Deleted,
 }
 
@@ -669,6 +682,7 @@ enum ModelInfo {
     RequiredModelNameListJson,
     RequiredModelRepoIdListJson,
     SupportedFeatureListJson,
+    SupportedDevices,
     CreateTime,
     ModifyTime,
     Downloaded,
@@ -705,7 +719,7 @@ enum ModelTrainingTasks {
     Language,
     BaseModel,
     ModelVersion,
-    ModelName,
+    SpeakerName,
     ModelParamsJson,
     SampleCount,
     SamplesJson,

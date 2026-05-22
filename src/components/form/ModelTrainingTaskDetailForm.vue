@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { useModelStore } from '@/stores/models';
 import type { ModelTrainingHistoryRecord } from '@/types/domain';
 
@@ -32,8 +33,8 @@ const trainingParamsSummary = computed(() => {
   <div class="space-y-4">
     <div class="grid gap-3 md:grid-cols-2">
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-        <p class="text-xs text-stone-500">模型名称</p>
-        <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.modelName }}</p>
+        <p class="text-xs text-stone-500">说话人名称</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">{{ record.detail.speakerName }}</p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">训练语言</p>
@@ -42,6 +43,12 @@ const trainingParamsSummary = computed(() => {
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">基础模型</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ modelLabel }} {{ record.detail.modelVersion }}</p>
+      </article>
+      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+        <p class="text-xs text-stone-500">设备类型</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">
+          {{ HARDWARE_TYPE_TEXT[record.device as HardwareType] ?? record.device.toUpperCase() }}
+        </p>
       </article>
     </div>
 

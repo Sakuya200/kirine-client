@@ -47,6 +47,13 @@ def _coerce_required_int(value: object, label: str) -> int:
     return int(value)
 
 
+def _coerce_required_speaker_name(value: dict[str, object], label: str) -> str:
+    candidate = value.get("speaker_name")
+    if candidate is None:
+        raise ValueError(f"Malformed params payload: {label} is required")
+    return str(candidate)
+
+
 def _coerce_optional_bool(value: object, fallback: bool = False) -> bool:
     if value is None:
         return fallback
@@ -129,7 +136,7 @@ class TrainingArgs:
             batch_size=_coerce_required_int(value.get("batch_size"), "args.Training.batch_size"),
             lr=_coerce_optional_str(value.get("lr")),
             num_epochs=_coerce_required_int(value.get("num_epochs"), "args.Training.num_epochs"),
-            speaker_name=_coerce_required_str(value.get("speaker_name"), "args.Training.speaker_name"),
+            speaker_name=_coerce_required_speaker_name(value, "args.Training.speaker_name"),
             gradient_accumulation_steps=_coerce_required_int(
                 value.get("gradient_accumulation_steps"),
                 "args.Training.gradient_accumulation_steps",

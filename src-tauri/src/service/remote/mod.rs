@@ -6,7 +6,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::{
-    config::EnvConfig,
+    config::{EnvConfig, HardwareType},
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
@@ -74,7 +74,11 @@ impl Service for RemoteService {
         biz::unsupported("list_model_infos")
     }
 
-    async fn install_model(&self, _model_id: i64) -> Result<ModelMutationResult> {
+    async fn get_device_type(&self, _base_model: &str, _model_version: &str) -> Result<HardwareType> {
+        biz::unsupported("get_device_type")
+    }
+
+    async fn install_model(&self, _model_id: i64, _device: HardwareType) -> Result<ModelMutationResult> {
         biz::unsupported("install_model")
     }
 
@@ -124,8 +128,8 @@ impl Service for RemoteService {
         biz::unsupported("create_model_training_task")
     }
 
-    async fn cancel_model_training_task(&self, _history_id: i64) -> Result<bool> {
-        biz::unsupported("cancel_model_training_task")
+    async fn cancel_history_task(&self, _history_id: i64) -> Result<bool> {
+        biz::unsupported("cancel_history_task")
     }
 
     async fn create_voice_clone_task(

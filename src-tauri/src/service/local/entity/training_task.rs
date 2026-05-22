@@ -9,7 +9,7 @@ pub struct Model {
     pub language: String,
     pub base_model: String,
     pub model_version: String,
-    pub model_name: String,
+    pub speaker_name: String,
     pub description: String,
     pub model_params_json: String,
     pub sample_count: i64,

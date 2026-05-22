@@ -1,0 +1,45 @@
+{
+  "models": [
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelVersion": "V1",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelVersion": "V2",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelVersion": "V2Pro",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    },
+    {
+      "baseModel": "gpt_sovits_cpufast",
+      "modelName": "GPT-SoVITS-CPUFast",
+      "modelVersion": "V2ProPlus",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["gpt_sovits_cpufast"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone"]
+    }
+  ],
+  "speakers": []
+}

@@ -10,8 +10,7 @@ use tracing::{error, info};
 
 use crate::{
     config::{
-        resolve_base_log_dir, AttentionImplementation, HardwareType, StorageMode,
-        ROOT_RELATIVE_PATHS,
+        resolve_base_log_dir, AttentionImplementation, StorageMode, ROOT_RELATIVE_PATHS,
     },
     Result,
 };
@@ -46,14 +45,12 @@ pub struct RemoteConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
-    pub hardware_type: HardwareType,
     pub attn_implementation: AttentionImplementation,
 }
 
 impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
-            hardware_type: HardwareType::default(),
             attn_implementation: AttentionImplementation::default(),
         }
     }
@@ -69,11 +66,6 @@ impl Default for RemoteConfig {
 }
 
 impl TrainingConfig {
-    pub fn with_hardware_type(mut self, hardware_type: HardwareType) -> Self {
-        self.hardware_type = hardware_type;
-        self
-    }
-
     pub fn with_attn_implementation(
         mut self,
         attn_implementation: AttentionImplementation,
@@ -115,10 +107,6 @@ impl EnvConfig {
     pub fn attn_implementation(&self) -> AttentionImplementation {
         self.training.attn_implementation
     }
-
-    pub fn hardware_type(&self) -> HardwareType {
-        self.training.hardware_type
-    }
 }
 
 pub fn application_dir() -> Result<PathBuf> {
@@ -149,10 +137,6 @@ pub fn resolve_storage_dir(
 
 pub fn config_path() -> Result<std::path::PathBuf> {
     resolve_root_file_path("config.toml")
-}
-
-pub fn supported_models_path() -> Result<std::path::PathBuf> {
-    resolve_root_file_path("supported_models.json")
 }
 
 fn resolve_root_file_path(file_name: &str) -> Result<std::path::PathBuf> {

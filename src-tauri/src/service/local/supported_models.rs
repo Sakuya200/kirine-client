@@ -8,7 +8,7 @@ use sea_orm::{
 use serde::Deserialize;
 
 use crate::{
-    config::supported_models_path,
+    config::{discover_model_config_file_paths, MODEL_CONFIG_FILE_NAME},
     service::{
         local::entity::{model_info as model_info_entity, speaker as speaker_entity},
         models::{AppLanguage, ModelDownloadType, SpeakerSource, SpeakerStatus},
@@ -35,6 +35,7 @@ struct SupportedModelDefinition {
     required_model_name_list: Vec<String>,
     required_model_repo_id_list: Vec<String>,
     supported_feature_list: Vec<String>,
+    supported_devices: Vec<String>,
 }
 
 fn default_model_download_type() -> ModelDownloadType {
@@ -51,11 +52,7 @@ struct SupportedSpeakerDefinition {
 }
 
 pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()> {
-    let config_path = supported_models_path().context("解析 supported_models.json 路径失败")?;
-    let file_content = fs::read_to_string(&config_path)
-        .with_context(|| format!("读取 supported_models.json 失败: {}", config_path.display()))?;
-    let config: SupportedModelsConfig = serde_json::from_str(&file_content)
-        .with_context(|| format!("解析 supported_models.json 失败: {}", config_path.display()))?;
+    let config = load_supported_models_catalog()?;
 
     validate_supported_models(&config)?;
 
@@ -115,9 +112,65 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
     Ok(())
 }
 
+fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
+    let config_paths = discover_model_config_file_paths(MODEL_CONFIG_FILE_NAME)
+        .context("发现模型配置文件失败")?;
+
+    let mut models = Vec::new();
+    let mut speakers = Vec::new();
+    let mut model_keys = HashSet::new();
+    let mut speaker_keys = HashSet::new();
+
+    for config_path in config_paths {
+        let file_content = fs::read_to_string(&config_path)
+            .with_context(|| format!("读取模型配置文件失败: {}", config_path.display()))?;
+        let file_config = serde_json::from_str::<SupportedModelsConfig>(&file_content)
+            .with_context(|| format!("解析模型配置文件失败: {}", config_path.display()))?;
+
+        for model in file_config.models {
+            let key = format!(
+                "{}:{}",
+                model.base_model.trim(),
+                model.model_version.trim()
+            );
+            if !model_keys.insert(key.clone()) {
+                tracing::warn!(
+                    key = %key,
+                    source = %config_path.display(),
+                    "检测到重复模型定义，已跳过"
+                );
+                continue;
+            }
+            models.push(model);
+        }
+
+        for speaker in file_config.speakers {
+            let key = format!("{}:{}", speaker.base_model.trim(), speaker.name.trim());
+            if !speaker_keys.insert(key.clone()) {
+                tracing::warn!(
+                    key = %key,
+                    source = %config_path.display(),
+                    "检测到重复预置说话人定义，已跳过"
+                );
+                continue;
+            }
+            speakers.push(speaker);
+        }
+    }
+
+    if models.is_empty() {
+        bail!(
+            "未从 {} 聚合到任何模型定义",
+            MODEL_CONFIG_FILE_NAME
+        );
+    }
+
+    Ok(SupportedModelsConfig { models, speakers })
+}
+
 fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
     if config.models.is_empty() {
-        bail!("supported_models.json 中至少需要定义一个模型");
+        bail!("模型配置中至少需要定义一个模型");
     }
 
     let mut model_keys = HashSet::new();
@@ -128,7 +181,7 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
             definition.model_version.trim()
         );
         if !model_keys.insert(key.clone()) {
-            bail!("supported_models.json 中存在重复模型定义: {key}");
+            bail!("模型配置中存在重复模型定义: {key}");
         }
 
         if definition.download_type == ModelDownloadType::HfLike
@@ -136,8 +189,23 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
                 != definition.required_model_repo_id_list.len()
         {
             bail!(
-                "supported_models.json 中模型 {key} 的 requiredModelNameList 与 requiredModelRepoIdList 长度不一致"
+                "模型配置中模型 {key} 的 requiredModelNameList 与 requiredModelRepoIdList 长度不一致"
             );
+        }
+
+        if definition.supported_devices.is_empty() {
+            bail!("模型配置中模型 {key} 的 supportedDevices 不能为空");
+        }
+
+        let mut normalized_supported_devices = HashSet::new();
+        for device in &definition.supported_devices {
+            let normalized = device.trim().to_ascii_lowercase();
+            if normalized != "cpu" && normalized != "cuda" {
+                bail!("模型配置中模型 {key} 的 supportedDevices 包含非法值: {device}");
+            }
+            if !normalized_supported_devices.insert(normalized) {
+                bail!("模型配置中模型 {key} 的 supportedDevices 包含重复值");
+            }
         }
     }
 
@@ -149,7 +217,7 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
             definition.name.trim()
         );
         if !speaker_keys.insert(key.clone()) {
-            bail!("supported_models.json 中存在重复预置说话人定义: {key}");
+            bail!("模型配置中存在重复预置说话人定义: {key}");
         }
     }
 
@@ -169,6 +237,13 @@ where
     let required_model_repo_id_list_json =
         serde_json::to_string(&definition.required_model_repo_id_list)?;
     let supported_feature_list_json = serde_json::to_string(&definition.supported_feature_list)?;
+    let supported_devices_json = serde_json::to_string(
+        &definition
+            .supported_devices
+            .iter()
+            .map(|item| item.trim().to_ascii_lowercase())
+            .collect::<Vec<String>>(),
+    )?;
 
     let existing = model_info_entity::Entity::find()
         .filter(model_info_entity::Column::BaseModel.eq(definition.base_model.trim()))
@@ -187,6 +262,7 @@ where
         active_model.required_model_name_list_json = Set(required_model_name_list_json);
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
         active_model.supported_feature_list_json = Set(supported_feature_list_json);
+        active_model.supported_devices = Set(supported_devices_json);
         active_model.downloaded = Set(downloaded);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
@@ -202,6 +278,7 @@ where
             required_model_name_list_json: Set(required_model_name_list_json),
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),
+            supported_devices: Set(supported_devices_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
             downloaded: Set(false),

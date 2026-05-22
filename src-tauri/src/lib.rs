@@ -23,8 +23,9 @@ pub use anyhow::Result;
 pub use config::{
     load_configs, load_ui_configs, load_ui_configs_from_dir, save_configs, ComponentProps,
     EnvConfig, ParamDefinition, SelectOption, StorageMode, TaskParamConfig, UiComponentType,
-    UiConfigCatalog, UiParamType, UiTaskKind, VisibleWhenRule,
+    UiConfigCatalog, UiParamType, VisibleWhenRule,
 };
+pub use service::models::HistoryTaskType;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

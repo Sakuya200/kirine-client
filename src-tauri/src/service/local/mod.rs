@@ -20,13 +20,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use tokio::sync::watch;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
-        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, UiComponentType,
-        UiConfigCatalog, UiTaskKind,
+        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, HardwareType, UiComponentType,
+        UiConfigCatalog,
     },
     migration,
     service::{
@@ -47,13 +47,20 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+struct ActiveTaskControl {
+    task_type: HistoryTaskType,
+    cancel_tx: watch::Sender<bool>,
+    _cancel_rx_guard: watch::Receiver<bool>,
+}
+
+#[derive(Debug, Clone)]
 pub struct LocalService {
     app_dir: PathBuf,
     data_dir: String,
     model_dir: String,
     runtime_config: Arc<RwLock<EnvConfig>>,
     orm: DatabaseConnection,
-    active_training_controls: Arc<RwLock<HashMap<i64, watch::Sender<bool>>>>,
+    active_task_controls: Arc<RwLock<HashMap<i64, ActiveTaskControl>>>,
     ui_config: Arc<UiConfigCatalog>,
 }
 
@@ -102,8 +109,16 @@ impl Service for LocalService {
         self.list_model_infos_impl().await
     }
 
-    async fn install_model(&self, model_id: i64) -> Result<ModelMutationResult> {
-        self.install_model_impl(model_id).await
+    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
+        self.get_device_type_impl(base_model, model_version).await
+    }
+
+    async fn install_model(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelMutationResult> {
+        self.install_model_impl(model_id, device).await
     }
 
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
@@ -152,8 +167,8 @@ impl Service for LocalService {
         self.create_model_training_task_impl(payload).await
     }
 
-    async fn cancel_model_training_task(&self, history_id: i64) -> Result<bool> {
-        self.cancel_model_training_task_impl(history_id).await
+    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
+        self.cancel_task_impl(history_id).await
     }
 
     async fn create_voice_clone_task(
@@ -206,7 +221,7 @@ impl LocalService {
             model_dir: model_dir.to_string_lossy().to_string(),
             runtime_config: Arc::new(RwLock::new(runtime_config)),
             orm,
-            active_training_controls: Arc::new(RwLock::new(HashMap::new())),
+            active_task_controls: Arc::new(RwLock::new(HashMap::new())),
             ui_config: Arc::new(load_ui_configs().unwrap_or_default()),
         };
         Ok(service)
@@ -215,16 +230,25 @@ impl LocalService {
     pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
         let service = self.clone();
         let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::TextToSpeech,
+            cancel_tx,
+            cancel_rx_guard,
+        );
 
         tauri::async_runtime::spawn(async move {
-            if let Err(err) = pipeline
+            let result = pipeline
                 .run_tts_pipeline(
                     base_model.to_string(),
                     &service,
                     TtsPipelineRequest { task_id },
                 )
-                .await
-            {
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
                 tracing::error!(error = %err, "local tts pipeline failed");
             }
         });
@@ -239,16 +263,25 @@ impl LocalService {
     ) -> Result<()> {
         let service = self.clone();
         let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::VoiceClone,
+            cancel_tx,
+            cancel_rx_guard,
+        );
 
         tauri::async_runtime::spawn(async move {
-            if let Err(err) = pipeline
+            let result = pipeline
                 .run_voice_clone_pipeline(
                     base_model.to_string(),
                     &service,
                     VoiceClonePipelineRequest { task_id },
                 )
-                .await
-            {
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
                 tracing::error!(error = %err, "local voice clone pipeline failed");
             }
         });
@@ -266,8 +299,13 @@ impl LocalService {
         let service = self.clone();
         let pipeline = resolve_model_task_pipeline(&base_model)?;
         let speaker_name = speaker_name.to_string();
-        let (cancel_tx, _cancel_rx) = watch::channel(false);
-        self.register_active_training_control(task_id, cancel_tx);
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::ModelTraining,
+            cancel_tx,
+            cancel_rx_guard,
+        );
 
         tauri::async_runtime::spawn(async move {
             let result = pipeline
@@ -281,7 +319,7 @@ impl LocalService {
                     },
                 )
                 .await;
-            service.unregister_active_training_control(task_id);
+            service.unregister_active_task_control(task_id);
 
             if let Err(err) = result {
                 tracing::error!(error = %err, "local training pipeline failed");
@@ -323,52 +361,77 @@ impl LocalService {
         Ok(())
     }
 
-    pub(crate) fn register_active_training_control(
+    pub(crate) fn register_active_task_control(
         &self,
         task_id: i64,
+        task_type: HistoryTaskType,
         cancel_tx: watch::Sender<bool>,
+        cancel_rx_guard: watch::Receiver<bool>,
     ) {
-        if let Ok(mut controls) = self.active_training_controls.write() {
-            controls.insert(task_id, cancel_tx);
+        if let Ok(mut controls) = self.active_task_controls.write() {
+            controls.insert(
+                task_id,
+                ActiveTaskControl {
+                    task_type,
+                    cancel_tx,
+                    _cancel_rx_guard: cancel_rx_guard,
+                },
+            );
         }
     }
 
-    pub(crate) fn unregister_active_training_control(&self, task_id: i64) {
-        if let Ok(mut controls) = self.active_training_controls.write() {
+    pub(crate) fn unregister_active_task_control(&self, task_id: i64) {
+        if let Ok(mut controls) = self.active_task_controls.write() {
             controls.remove(&task_id);
         }
     }
 
-    pub(crate) fn active_training_cancel_receiver(
+    pub(crate) fn active_task_cancel_receiver(
         &self,
         task_id: i64,
+        task_type: HistoryTaskType,
     ) -> Result<watch::Receiver<bool>> {
         let controls = self
-            .active_training_controls
+            .active_task_controls
             .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
-        let cancel_tx = controls.get(&task_id).ok_or_else(|| {
-            anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启")
+            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+        let control = controls.get(&task_id).ok_or_else(|| {
+            anyhow::anyhow!("当前任务没有可用的终止句柄，可能已经结束或应用已重启")
         })?;
-        Ok(cancel_tx.subscribe())
+        if control.task_type != task_type {
+            anyhow::bail!("任务类型与运行中任务句柄不匹配，无法订阅终止信号");
+        }
+        Ok(control.cancel_tx.subscribe())
     }
 
-    pub(crate) fn request_active_training_cancel(&self, task_id: i64) -> Result<bool> {
+    pub(crate) fn request_active_task_cancel(
+        &self,
+        task_id: i64,
+        task_type: HistoryTaskType,
+    ) -> Result<bool> {
+        info!(task_id, task_type = %task_type.as_str(), "received task cancellation request");
         let controls = self
-            .active_training_controls
+            .active_task_controls
             .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中训练任务句柄"))?;
-        let cancel_tx = controls.get(&task_id).ok_or_else(|| {
-            anyhow::anyhow!("当前训练任务没有可用的终止句柄，可能已经结束或应用已重启")
+            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+        let control = controls.get(&task_id).ok_or_else(|| {
+            anyhow::anyhow!("当前任务没有可用的终止句柄，可能已经结束或应用已重启")
         })?;
 
-        if *cancel_tx.borrow() {
+        if control.task_type != task_type {
+            anyhow::bail!("任务类型与运行中任务句柄不匹配，无法发送终止信号");
+        }
+
+        if *control.cancel_tx.borrow() {
+            warn!(task_id, task_type = %task_type.as_str(), "task cancellation already requested");
             return Ok(false);
         }
 
-        cancel_tx
+        control
+            .cancel_tx
             .send(true)
-            .map_err(|_| anyhow::anyhow!("训练任务终止信号发送失败"))?;
+            .map_err(|_| anyhow::anyhow!("任务终止信号发送失败"))?;
+        info!(task_id, task_type = %task_type.as_str(), "task cancellation signal sent");
         Ok(true)
     }
 
@@ -385,7 +448,7 @@ impl LocalService {
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "failed to sync supported_models.json into local database in {}: {}",
+                    "failed to sync model config catalog into local database in {}: {}",
                     data_dir.display(),
                     e
                 )
@@ -407,7 +470,7 @@ impl LocalService {
 /// no-op and returns `Ok(())`.
 pub(crate) fn copy_model_param_files(
     base_model: &str,
-    task_kind: UiTaskKind,
+    task_kind: HistoryTaskType,
     model_params: &mut serde_json::Value,
     sample_dir: &Path,
     data_dir: &Path,

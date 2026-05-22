@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value;
+use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
             voice_clone_params_json_path,
         },
     },
-    config::BaseModel,
+    config::{BaseModel, HardwareType},
     service::{
         local::{
             entity::{
@@ -28,7 +29,8 @@ use crate::{
                 PythonScriptTaskKind, VoiceCloneArgs,
             },
             model_artifacts::MODEL_ARTIFACTS_DIR,
-            run_pipeline_stage_shell_script, run_python_params_file_invocation,
+            run_pipeline_stage_shell_script_cancellable,
+            run_python_params_file_invocation_cancellable,
             script_paths::{
                 src_model_model_python_script_path, src_model_transcode_script_path,
                 src_model_venv_python_path, ScriptPlatform,
@@ -42,7 +44,7 @@ use crate::{
             resolve_temp_wav_path,
         },
         file_ops::{remove_file_if_exists, replace_output_file},
-        process::run_logged_shell_script,
+        process::{run_logged_shell_script_cancellable, LoggedCommandResult},
     },
     Result,
 };
@@ -71,6 +73,7 @@ pub(crate) struct LoadedVoiceCloneTaskParams {
     pub ref_audio_path: String,
     pub ref_text: Option<String>,
     pub text: String,
+    pub device: HardwareType,
     pub output_file_path: String,
     pub model_params_json: Value,
 }
@@ -148,11 +151,13 @@ pub(crate) async fn run_common_voice_clone_pipeline(
 
     let result = async {
         mark_voice_clone_running_state(service, task_id).await?;
+        let mut cancel_rx =
+            service.active_task_cancel_receiver(task_id, HistoryTaskType::VoiceClone)?;
 
         let runtime_config = service.runtime_config()?;
-        let runtime = CommonRuntimeOptions::from_env_config(&runtime_config);
         let log_dir = resolve_local_log_dir(&runtime_config)?;
         let params = load_voice_clone_task_params(service, task_id).await?;
+        let runtime = CommonRuntimeOptions::from_task_device(params.device, &runtime_config)?;
         if params.base_model.trim() != base_model {
             bail!(
                 "Voice clone task base model mismatch: expected {}, got {}",
@@ -162,7 +167,7 @@ pub(crate) async fn run_common_voice_clone_pipeline(
         }
         let paths = resolve_voice_clone_paths(service, task_id, base_model, &params.model_version)?;
 
-        prepare_voice_clone_model_env(
+        let prepare_result = prepare_voice_clone_model_env(
             service,
             &paths.base_model,
             &paths.model_version,
@@ -172,8 +177,19 @@ pub(crate) async fn run_common_voice_clone_pipeline(
             task_id,
             &log_dir,
             runtime.is_cpu(),
+            &mut cancel_rx,
         )
         .await?;
+
+        if matches!(prepare_result, LoggedCommandResult::Cancelled) {
+            mark_voice_clone_cancelled_state(
+                service,
+                task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await?;
+            return Ok(());
+        }
 
         validate_voice_clone_environment(
             &paths,
@@ -181,15 +197,26 @@ pub(crate) async fn run_common_voice_clone_pipeline(
             &params.output_file_path,
         )?;
 
-        let normalized_ref_audio_path = normalize_voice_clone_reference_audio(
+        let (normalized_ref_audio_path, normalize_result) = normalize_voice_clone_reference_audio(
             &paths.src_model_root,
             &paths.transcode_script_path,
             task_id,
             &log_dir,
             Path::new(&params.ref_audio_path),
             COMMON_VOICE_CLONE_NORMALIZE_LABEL,
+            &mut cancel_rx,
         )
         .await?;
+
+        if matches!(normalize_result, LoggedCommandResult::Cancelled) {
+            mark_voice_clone_cancelled_state(
+                service,
+                task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await?;
+            return Ok(());
+        }
 
         let temp_wav_path = resolve_temp_wav_path(&params.output_file_path, params.format);
         let metrics_log_dir = ensure_task_metrics_log_dir(&log_dir)?;
@@ -204,7 +231,7 @@ pub(crate) async fn run_common_voice_clone_pipeline(
         let invocation =
             build_shared_voice_clone_invocation(&paths.base_model, &invocation_context);
 
-        run_voice_clone_python_command(
+        let command_result = run_voice_clone_python_command(
             &paths.venv_python_path,
             &paths.voice_clone_python_script_path,
             &paths.src_model_root,
@@ -214,10 +241,31 @@ pub(crate) async fn run_common_voice_clone_pipeline(
             &invocation,
             COMMON_VOICE_CLONE_RUN_LABEL,
             COMMON_VOICE_CLONE_START_LOG_MESSAGE,
+            &mut cancel_rx,
         )
         .await?;
 
-        finalize_voice_clone_output(
+        if matches!(command_result, LoggedCommandResult::Cancelled) {
+            mark_voice_clone_cancelled_state(
+                service,
+                task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if *cancel_rx.borrow() {
+            mark_voice_clone_cancelled_state(
+                service,
+                task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let finalize_result = finalize_voice_clone_output(
             &paths.src_model_root,
             &paths.transcode_script_path,
             task_id,
@@ -226,8 +274,19 @@ pub(crate) async fn run_common_voice_clone_pipeline(
             &params.output_file_path,
             params.format,
             COMMON_VOICE_CLONE_CONVERT_LABEL,
+            &mut cancel_rx,
         )
         .await?;
+
+        if matches!(finalize_result, LoggedCommandResult::Cancelled) {
+            mark_voice_clone_cancelled_state(
+                service,
+                task_id,
+                started_at.elapsed().as_secs() as i64,
+            )
+            .await?;
+            return Ok(());
+        }
 
         if !Path::new(&params.output_file_path).exists() {
             bail!(
@@ -260,6 +319,54 @@ pub(crate) async fn run_common_voice_clone_pipeline(
     Ok(())
 }
 
+pub(crate) async fn mark_voice_clone_cancelled_state(
+    service: &LocalService,
+    task_id: i64,
+    duration_seconds: i64,
+) -> Result<()> {
+    service
+        .update_task_status_impl(UpdateTaskStatusPayload {
+            task_id,
+            status: TaskStatus::Cancelled,
+            duration_seconds: Some(duration_seconds),
+        })
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn run_voice_clone_python_command(
+    venv_python_path: &Path,
+    voice_clone_python_script_path: &Path,
+    src_model_root: &Path,
+    params_json_path: &Path,
+    task_id: i64,
+    log_dir: &Path,
+    invocation: &PythonScriptInvocationSpec,
+    run_label: &str,
+    start_message: &str,
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
+    info!(
+        script = %voice_clone_python_script_path.display(),
+        params_file = %params_json_path.display(),
+        "{}",
+        start_message,
+    );
+
+    let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
+    run_python_params_file_invocation_cancellable(
+        venv_python_path,
+        voice_clone_python_script_path,
+        src_model_root,
+        run_label,
+        &task_log_path,
+        params_json_path,
+        invocation,
+        cancel_rx,
+    )
+    .await
+}
+
 pub(crate) async fn load_voice_clone_task_params(
     service: &LocalService,
     task_id: i64,
@@ -277,7 +384,7 @@ pub(crate) async fn load_voice_clone_task_params(
         })?
         .ok_or_else(|| anyhow::anyhow!("未找到 Voice Clone 任务执行参数: {}", task_id))?;
 
-    task_history_entity::Entity::find_by_id(task_id)
+    let task_history = task_history_entity::Entity::find_by_id(task_id)
         .filter(task_history_entity::Column::Deleted.eq(0))
         .one(service.orm())
         .await
@@ -308,6 +415,10 @@ pub(crate) async fn load_voice_clone_task_params(
         .to_string(),
         ref_text: (!ref_text.is_empty()).then_some(ref_text),
         text: task_detail.text,
+        device: task_history
+            .device
+            .parse::<HardwareType>()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         output_file_path: resolve_task_path(
             Path::new(service.data_dir()),
             &task_detail.output_file_path.unwrap_or_default(),
@@ -381,7 +492,8 @@ pub(crate) async fn prepare_voice_clone_model_env(
     task_id: i64,
     log_dir: &Path,
     use_cpu_mode: bool,
-) -> Result<()> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
     let model_downloaded = service
         .model_downloaded_impl(base_model, model_version)
         .await?;
@@ -412,7 +524,7 @@ pub(crate) async fn prepare_voice_clone_model_env(
         script_args.push("--cpu-mode".to_string());
     }
 
-    run_pipeline_stage_shell_script(
+    let result = run_pipeline_stage_shell_script_cancellable(
         ensure_torch_runtime_script_path,
         src_model_root,
         HistoryTaskType::VoiceClone,
@@ -421,8 +533,15 @@ pub(crate) async fn prepare_voice_clone_model_env(
         "校验并切换 Torch 运行时",
         "voice clone command completed successfully",
         script_args,
+        cancel_rx,
     )
-    .await
+    .await?;
+
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok(LoggedCommandResult::Cancelled);
+    }
+
+    Ok(LoggedCommandResult::Completed)
 }
 
 pub(crate) async fn normalize_voice_clone_reference_audio(
@@ -432,7 +551,8 @@ pub(crate) async fn normalize_voice_clone_reference_audio(
     log_dir: &Path,
     input_path: &Path,
     normalize_label: &str,
-) -> Result<PathBuf> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<(PathBuf, LoggedCommandResult)> {
     if !input_path.exists() {
         anyhow::bail!("Reference audio file not found: {}", input_path.display());
     }
@@ -441,7 +561,7 @@ pub(crate) async fn normalize_voice_clone_reference_audio(
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
     let platform = ScriptPlatform::current();
 
-    run_logged_shell_script(
+    let result = crate::utils::process::run_logged_shell_script_cancellable(
         Path::new(platform.shell_program()),
         transcode_script_path,
         src_model_root,
@@ -450,8 +570,13 @@ pub(crate) async fn normalize_voice_clone_reference_audio(
         "shell script completed successfully",
         platform.shell_base_args(),
         build_ffmpeg_transcode_script_args(input_path, &output_path, "wav", &task_log_path),
+        cancel_rx,
     )
     .await?;
+
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok((output_path, LoggedCommandResult::Cancelled));
+    }
 
     if !output_path.exists() {
         anyhow::bail!(
@@ -460,7 +585,7 @@ pub(crate) async fn normalize_voice_clone_reference_audio(
         );
     }
 
-    Ok(output_path)
+    Ok((output_path, LoggedCommandResult::Completed))
 }
 
 pub(crate) async fn finalize_voice_clone_output(
@@ -472,21 +597,25 @@ pub(crate) async fn finalize_voice_clone_output(
     final_output_path: &str,
     format: TextToSpeechFormat,
     convert_label: &str,
-) -> Result<()> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
     let final_output_path = Path::new(final_output_path);
     if format == TextToSpeechFormat::Wav {
+        if *cancel_rx.borrow() {
+            return Ok(LoggedCommandResult::Cancelled);
+        }
         replace_output_file(
             temp_wav_path,
             final_output_path,
             COMMON_VOICE_CLONE_OUTPUT_LABEL,
         )?;
-        return Ok(());
+        return Ok(LoggedCommandResult::Completed);
     }
 
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
     let platform = ScriptPlatform::current();
 
-    run_logged_shell_script(
+    let result = run_logged_shell_script_cancellable(
         Path::new(platform.shell_program()),
         transcode_script_path,
         src_model_root,
@@ -500,11 +629,16 @@ pub(crate) async fn finalize_voice_clone_output(
             format.as_str(),
             &task_log_path,
         ),
+        cancel_rx,
     )
     .await?;
 
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok(LoggedCommandResult::Cancelled);
+    }
+
     remove_file_if_exists(temp_wav_path, COMMON_VOICE_CLONE_TEMP_WAV_LABEL)?;
-    Ok(())
+    Ok(LoggedCommandResult::Completed)
 }
 
 pub(crate) fn resolve_voice_clone_paths_base(
@@ -602,35 +736,4 @@ pub(crate) fn validate_voice_clone_environment(
         COMMON_VOICE_CLONE_OUTPUT_LABEL,
         output_path.display()
     )
-}
-
-pub(crate) async fn run_voice_clone_python_command(
-    venv_python_path: &Path,
-    voice_clone_python_script_path: &Path,
-    src_model_root: &Path,
-    params_json_path: &Path,
-    task_id: i64,
-    log_dir: &Path,
-    invocation: &PythonScriptInvocationSpec,
-    run_label: &str,
-    start_message: &str,
-) -> Result<()> {
-    info!(
-        script = %voice_clone_python_script_path.display(),
-        params_file = %params_json_path.display(),
-        "{}",
-        start_message,
-    );
-
-    let task_log_path = task_log_file_path(log_dir, HistoryTaskType::VoiceClone, task_id);
-    run_python_params_file_invocation(
-        venv_python_path,
-        voice_clone_python_script_path,
-        src_model_root,
-        run_label,
-        &task_log_path,
-        params_json_path,
-        invocation,
-    )
-    .await
 }

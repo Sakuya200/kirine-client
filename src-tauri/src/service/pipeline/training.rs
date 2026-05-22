@@ -17,7 +17,10 @@ use crate::{
     config::{BaseModel, EnvConfig, HardwareType},
     service::{
         local::{
-            entity::{speaker as speaker_entity, training_task as training_task_entity},
+            entity::{
+                speaker as speaker_entity, task_history as task_history_entity,
+                training_task as training_task_entity,
+            },
             LocalService,
         },
         models::{HistoryTaskType, SpeakerStatus, TaskStatus, UpdateTaskStatusPayload},
@@ -57,6 +60,7 @@ pub(crate) struct CommonTrainingModelParams {
 pub(crate) struct LoadedTrainingTaskParams {
     pub base_model: BaseModel,
     pub model_version: String,
+    pub device: HardwareType,
     pub model_params_json: Value,
     pub batch_size: i64,
     pub epoch_count: i64,
@@ -111,28 +115,24 @@ pub(crate) struct TrainingInvocationContext<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TrainingRuntimeOptions {
-    hardware_type: HardwareType,
+    device: HardwareType,
     attn_implementation: String,
 }
 
 impl TrainingRuntimeOptions {
-    pub(crate) fn from_env_config(config: &EnvConfig) -> Self {
-        Self {
-            hardware_type: config.hardware_type(),
+    pub(crate) fn from_task_device(task_device: HardwareType, config: &EnvConfig) -> Result<Self> {
+        Ok(Self {
+            device: task_device,
             attn_implementation: config.attn_implementation().as_str().to_string(),
-        }
+        })
     }
 
-    pub(crate) const fn is_cpu(&self) -> bool {
-        matches!(self.hardware_type, HardwareType::Cpu)
+    pub(crate) fn is_cpu(&self) -> bool {
+        self.device == HardwareType::Cpu
     }
 
-    pub(crate) const fn training_device(&self) -> &'static str {
-        if self.is_cpu() {
-            "cpu"
-        } else {
-            "cuda:0"
-        }
+    pub(crate) fn training_device(&self) -> &str {
+        self.device.runtime_arg()
     }
 
     pub(crate) fn attn_implementation(&self) -> &str {
@@ -195,10 +195,11 @@ pub(crate) async fn run_common_training_pipeline(
     let result = async {
         mark_training_running_state(service, task_id, speaker_id).await?;
 
-        let mut cancel_rx = service.active_training_cancel_receiver(task_id)?;
+        let mut cancel_rx =
+            service.active_task_cancel_receiver(task_id, HistoryTaskType::ModelTraining)?;
         let runtime_config = service.runtime_config()?;
-        let runtime = TrainingRuntimeOptions::from_env_config(&runtime_config);
         let params = load_training_task_params(service, task_id, speaker_id, base_model).await?;
+        let runtime = TrainingRuntimeOptions::from_task_device(params.device, &runtime_config)?;
         let paths = resolve_training_paths_base(
             service,
             task_id,
@@ -339,12 +340,27 @@ pub(crate) async fn load_training_task_params(
             )
         })?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务参数"))?;
+    let task_history = task_history_entity::Entity::find_by_id(task_id)
+        .filter(task_history_entity::Column::Deleted.eq(0))
+        .one(service.orm())
+        .await
+        .with_context(|| {
+            format!(
+                "failed to load {} training task history for task {}",
+                model_label, task_id
+            )
+        })?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到训练任务历史记录"))?;
     let params = parse_common_training_model_params(&row.model_params_json)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     Ok(LoadedTrainingTaskParams {
         base_model: row.base_model,
         model_version: row.model_version.trim().to_string(),
+        device: task_history
+            .device
+            .parse::<HardwareType>()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
         model_params_json: params.model_params_json,
         batch_size: params.batch_size,
         epoch_count: params.epoch_count,

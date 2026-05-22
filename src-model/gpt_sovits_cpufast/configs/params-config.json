@@ -1,6 +1,6 @@
 [
   {
-    "task": "tts",
+    "task": "text-to-speech",
     "base-model": "gpt_sovits_cpufast",
     "params": [
       {

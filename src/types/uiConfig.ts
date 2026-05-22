@@ -1,4 +1,4 @@
-export type UiTaskKind = 'training' | 'tts' | 'voice-clone';
+import type { HistoryTaskType } from '@/enums/task';
 
 export type UiParamType = 'number' | 'string' | 'boolean';
 
@@ -43,7 +43,7 @@ export interface ParamDefinition {
 }
 
 export interface TaskParamConfig {
-  task: UiTaskKind;
+  task: HistoryTaskType;
   baseModel: string;
   params: ParamDefinition[];
 }

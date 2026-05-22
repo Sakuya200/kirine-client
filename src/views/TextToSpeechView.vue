@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -12,7 +12,9 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
@@ -24,6 +26,7 @@ import {
   type TextToSpeechSpeakerOption
 } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -44,6 +47,7 @@ interface TtsResult {
   format: TextToSpeechFormat;
   formatLabel: string;
   exportAudioName: string;
+  device: string;
   durationSeconds: number;
   text: string;
   modelParams: Record<string, unknown>;
@@ -62,6 +66,7 @@ interface TextToSpeechTaskResultPayload {
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
+  device: string;
   text: string;
   modelParams: Record<string, unknown>;
   durationSeconds: number;
@@ -78,12 +83,12 @@ interface TextToSpeechAudioAssetPayload {
 }
 
 const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_cpufast']);
-const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.TextToSpeech);
+const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();
 
 const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'tts');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.TextToSpeech);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -93,7 +98,8 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
+  device: HardwareType.Cpu,
+  exportAudioName: createDefaultExportAudioName(),
   text: '',
   modelParams: {} as Record<string, unknown>
 });
@@ -101,7 +107,9 @@ const form = reactive({
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
 const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<TtsResult | null>(null);
 const generationHistory = ref<TtsResult[]>([]);
@@ -111,6 +119,18 @@ const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(
 const speakerStore = useSpeakerStore();
 const modelStore = useModelStore();
 const uiStore = useUiStore();
+const {
+  dialogOpen: showDeviceMismatchDialog,
+  dialogTitle: deviceMismatchDialogTitle,
+  dialogMessage: deviceMismatchDialogMessage,
+  dialogDetailLines: deviceMismatchDialogDetails,
+  isCheckingDeviceType,
+  isAwaitingDeviceConfirmation,
+  isDeviceGuardPending,
+  ensureMatchedOrConfirmed,
+  confirmDialog: confirmDeviceMismatchDialog,
+  closeDialog: closeDeviceMismatchDialog
+} = useTaskDeviceTypeGuard();
 const route = useRoute();
 const router = useRouter();
 
@@ -131,7 +151,13 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'tts'));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.TextToSpeech));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
   {
     value: null,
@@ -149,7 +175,9 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
 const canGenerate = computed(() => {
-  const modelParamsValid = activeTextToSpeechTaskConfig.value ? uiConfigStore.validateModelParams(form.baseModel, 'tts', form.modelParams) : true;
+  const modelParamsValid = activeTextToSpeechTaskConfig.value
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.TextToSpeech, form.modelParams)
+    : true;
 
   return (
     Boolean(form.language) &&
@@ -160,11 +188,20 @@ const canGenerate = computed(() => {
     (!isDynamicReferenceModel.value || (Boolean(dynamicRefAudioPath.value) && Boolean(dynamicRefTextPath.value)))
   );
 });
+const canCancelActiveTask = computed(() => {
+  const result = activeResult.value;
+  if (!result) {
+    return false;
+  }
+
+  return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
+});
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
+  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
   isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName}。`
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -182,6 +219,18 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 const activeTaskBusyLabel = computed(() => {
+  if (isCancelling.value) {
+    return '正在发送终止请求，请稍候';
+  }
+
+  if (isCheckingDeviceType.value) {
+    return '正在检查模型环境，请稍候';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认硬件环境切换';
+  }
+
   if (isGenerating.value) {
     return '正在创建文本转语音任务，请稍候';
   }
@@ -191,6 +240,18 @@ const activeTaskBusyLabel = computed(() => {
   }
 
   return '';
+});
+const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
+const submitButtonText = computed(() => {
+  if (isCheckingDeviceType.value) {
+    return '检查环境中...';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认...';
+  }
+
+  return isGenerating.value ? '生成中...' : '生成音频';
 });
 
 watch(
@@ -218,6 +279,22 @@ watch(
     if (!options.some(option => option.value === form.modelVersion)) {
       form.modelVersion = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
   },
   { immediate: true }
 );
@@ -256,7 +333,12 @@ const stopActiveTaskStatusRefresh = () => {
 const syncActiveTaskStatusRefresh = () => {
   stopActiveTaskStatusRefresh();
 
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     return;
   }
 
@@ -290,6 +372,7 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   format: payload.format,
   formatLabel: findFormatLabel(payload.format),
   exportAudioName: payload.exportAudioName,
+  device: payload.device,
   durationSeconds: payload.durationSeconds,
   text: payload.text,
   modelParams: payload.modelParams,
@@ -315,6 +398,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     format: record.detail.format,
     formatLabel: findFormatLabel(record.detail.format),
     exportAudioName: record.detail.exportAudioName,
+    device: record.device,
     durationSeconds: record.durationSeconds,
     text: record.detail.text,
     modelParams: record.detail.modelParams,
@@ -334,12 +418,14 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;
-  form.exportAudioName = item.exportAudioName;
+  form.device = item.device as HardwareType;
+  form.exportAudioName = createDefaultExportAudioName();
   form.text = item.text;
   form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === item.device) ?? null;
 
   if (setAsActiveResult) {
     syncActiveTaskStatusRefresh();
@@ -456,7 +542,12 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
 };
 
 const refreshActiveTaskStatus = async () => {
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     stopActiveTaskStatusRefresh();
     return;
   }
@@ -495,6 +586,15 @@ const generateAudio = async () => {
     return;
   }
 
+  const accepted = await ensureMatchedOrConfirmed({
+    baseModel: form.baseModel,
+    modelVersion: form.modelVersion,
+    selectedDevice: form.device
+  });
+  if (!accepted) {
+    return;
+  }
+
   isGenerating.value = true;
   uiStore.notifyInfo('正在提交生成任务。', 2200);
 
@@ -507,6 +607,7 @@ const generateAudio = async () => {
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
+        device: form.device,
         text: trimmedText.value,
         modelParams: form.modelParams
       }
@@ -525,6 +626,34 @@ const generateAudio = async () => {
   }
 };
 
+const cancelActiveTask = async () => {
+  if (!activeResult.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeResult.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+  const taskId = activeResult.value.taskId;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_history_task', {
+      historyId: taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks({ silentOnError: true });
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+  } finally {
+    isCancelling.value = false;
+  }
+};
+
 const requestClearText = () => {
   const hasChanges =
     trimmedText.value ||
@@ -532,6 +661,7 @@ const requestClearText = () => {
     form.baseModel ||
     form.language !== AppLanguage.Chinese ||
     form.format !== TextToSpeechFormat.Wav ||
+    form.device !== HardwareType.Cpu ||
     JSON.stringify(form.modelParams) !== '{}';
   if (!hasChanges) {
     uiStore.notifyInfo('表单已为默认状态。', 2200);
@@ -545,12 +675,14 @@ const confirmClearText = () => {
   form.speakerId = null;
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
-  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
+  form.device = HardwareType.Cpu;
+  form.exportAudioName = createDefaultExportAudioName();
   form.text = '';
   form.modelParams = {};
   selectedSpeakerOption.value = null;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES[0] ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   showClearDialog.value = false;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
@@ -620,6 +752,13 @@ onMounted(async () => {
           />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox
+            v-model="form.device"
+            v-model:selected-option="selectedDeviceOption"
+            label="设备类型"
+            :options="deviceOptions"
+            :disabled="deviceOptions.length === 0"
+          />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
           <label class="block text-sm text-slate-700">
             <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
@@ -640,6 +779,7 @@ onMounted(async () => {
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
           empty-text="还没有生成结果。完成文本输入并点击“生成音频”后，结果会显示在这里。"
+          @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
@@ -703,9 +843,13 @@ onMounted(async () => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="generateAudio">
-                <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              <BaseButton :loading="isSubmitPending" :disabled="!canGenerate || isSubmitPending" @click="generateAudio">
+                <SparklesIcon v-if="!isSubmitPending" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ submitButtonText }}</span>
+              </BaseButton>
+              <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="requestClearText">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
@@ -728,5 +872,14 @@ onMounted(async () => {
         </BaseButton>
       </template>
     </BaseDialog>
+
+    <WarningConfirmDialog
+      :open="showDeviceMismatchDialog"
+      :title="deviceMismatchDialogTitle"
+      :message="deviceMismatchDialogMessage"
+      :detail-lines="deviceMismatchDialogDetails"
+      @close="closeDeviceMismatchDialog"
+      @confirm="confirmDeviceMismatchDialog"
+    />
   </div>
 </template>

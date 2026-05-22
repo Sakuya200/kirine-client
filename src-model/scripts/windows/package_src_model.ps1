@@ -40,7 +40,7 @@ function Get-RelativeArchivePath {
 
 $excludeDirectoryNames = @('base-models', 'tests', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'venv', '.venv')
 $excludeExtensions = @('.pyc', '.pyo')
-$sourceDirectories = @('scripts', 'configs')
+$sourceDirectories = @('scripts')
 $modelDirectories = @('qwen3_tts', 'vox_cpm2', 'moss_tts_local', 'gpt_sovits_cpufast')
 
 function Test-ShouldExcludeArchivePath {

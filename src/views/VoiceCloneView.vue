@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline';
+import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -12,12 +12,15 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { useModelStore } from '@/stores/models';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -37,6 +40,7 @@ interface VoiceCloneResult {
   format: TextToSpeechFormat;
   formatLabel: string;
   exportAudioName: string;
+  device: string;
   durationSeconds: number;
   refText: string;
   text: string;
@@ -55,6 +59,7 @@ interface VoiceCloneTaskResultPayload {
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
+  device: string;
   refText: string;
   text: string;
   modelParams: Record<string, unknown>;
@@ -76,17 +81,29 @@ interface SelectedAudioFile {
   filePath: string;
 }
 
-const DEFAULT_EXPORT_AUDIO_NAME = createTaskExportAudioName(HistoryTaskType.VoiceClone);
+const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.VoiceClone);
 
 const uiConfigStore = useUiConfigStore();
 
 const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, 'voice-clone');
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.VoiceClone);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const {
+  dialogOpen: showDeviceMismatchDialog,
+  dialogTitle: deviceMismatchDialogTitle,
+  dialogMessage: deviceMismatchDialogMessage,
+  dialogDetailLines: deviceMismatchDialogDetails,
+  isCheckingDeviceType,
+  isAwaitingDeviceConfirmation,
+  isDeviceGuardPending,
+  ensureMatchedOrConfirmed,
+  confirmDialog: confirmDeviceMismatchDialog,
+  closeDialog: closeDeviceMismatchDialog
+} = useTaskDeviceTypeGuard();
 const route = useRoute();
 const router = useRouter();
 const form = reactive({
@@ -94,7 +111,8 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
-  exportAudioName: DEFAULT_EXPORT_AUDIO_NAME,
+  device: HardwareType.Cpu,
+  exportAudioName: createDefaultExportAudioName(),
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
   text: '',
@@ -107,7 +125,9 @@ const languageOptions = Object.values(AppLanguage).map(value => ({
 const formatOptions = TEXT_TO_SPEECH_FORMATS;
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
+const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
 const activeResult = ref<VoiceCloneResult | null>(null);
 const generationHistory = ref<VoiceCloneResult[]>([]);
@@ -139,19 +159,34 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
-const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, 'voice-clone'));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.VoiceClone));
 const canGenerate = computed(() => {
   const modelParamsValid = activeVoiceCloneTaskConfig.value
-    ? uiConfigStore.validateModelParams(form.baseModel, 'voice-clone', form.modelParams)
+    ? uiConfigStore.validateModelParams(form.baseModel, HistoryTaskType.VoiceClone, form.modelParams)
     : true;
 
   return Boolean(form.baseModel) && Boolean(form.modelVersion) && Boolean(effectiveRefAudioPath.value) && modelParamsValid;
 });
+const canCancelActiveTask = computed(() => {
+  const result = activeResult.value;
+  if (!result) {
+    return false;
+  }
+
+  return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
+});
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
+  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
-  `导出名称为 ${form.exportAudioName || DEFAULT_EXPORT_AUDIO_NAME}。`
+  `导出名称为 ${form.exportAudioName}。`
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -169,6 +204,18 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   }))
 );
 const activeTaskBusyLabel = computed(() => {
+  if (isCancelling.value) {
+    return '正在发送终止请求，请稍候';
+  }
+
+  if (isCheckingDeviceType.value) {
+    return '正在检查模型环境，请稍候';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认硬件环境切换';
+  }
+
   if (isGenerating.value) {
     return '正在创建声音克隆任务，请稍候';
   }
@@ -178,6 +225,18 @@ const activeTaskBusyLabel = computed(() => {
   }
 
   return '';
+});
+const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
+const submitButtonText = computed(() => {
+  if (isCheckingDeviceType.value) {
+    return '检查环境中...';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认...';
+  }
+
+  return isGenerating.value ? '生成中...' : '生成音频';
 });
 
 watch(
@@ -205,6 +264,22 @@ watch(
     if (!options.some(option => option.value === form.modelVersion)) {
       form.modelVersion = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
   },
   { immediate: true }
 );
@@ -241,6 +316,7 @@ const mapResultPayload = (payload: VoiceCloneTaskResultPayload): VoiceCloneResul
   format: payload.format,
   formatLabel: findFormatLabel(payload.format),
   exportAudioName: payload.exportAudioName,
+  device: payload.device,
   durationSeconds: payload.durationSeconds,
   refText: payload.refText,
   text: payload.text,
@@ -266,6 +342,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceCloneResult | nul
     format: record.detail.format,
     formatLabel: findFormatLabel(record.detail.format),
     exportAudioName: record.detail.exportAudioName,
+    device: record.device,
     durationSeconds: record.durationSeconds,
     refText: record.detail.refText,
     text: record.detail.text,
@@ -283,7 +360,8 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
-  form.exportAudioName = result.exportAudioName;
+  form.device = result.device as HardwareType;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
     filePath: refAudioPath
@@ -293,6 +371,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
 };
 
@@ -303,7 +382,8 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
-  form.exportAudioName = result.exportAudioName;
+  form.device = result.device as HardwareType;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
     filePath: refAudioPath
@@ -313,6 +393,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
 
   if (setAsActiveResult) {
     syncActiveTaskStatusRefresh();
@@ -405,7 +486,12 @@ const stopActiveTaskStatusRefresh = () => {
 const syncActiveTaskStatusRefresh = () => {
   stopActiveTaskStatusRefresh();
 
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     return;
   }
 
@@ -469,7 +555,12 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {})
 };
 
 const refreshActiveTaskStatus = async () => {
-  if (!activeResult.value || activeResult.value.status === TaskStatus.Completed || activeResult.value.status === TaskStatus.Failed) {
+  if (
+    !activeResult.value ||
+    activeResult.value.status === TaskStatus.Completed ||
+    activeResult.value.status === TaskStatus.Cancelled ||
+    activeResult.value.status === TaskStatus.Failed
+  ) {
     stopActiveTaskStatusRefresh();
     return;
   }
@@ -508,6 +599,15 @@ const createTask = async () => {
     return;
   }
 
+  const accepted = await ensureMatchedOrConfirmed({
+    baseModel: form.baseModel,
+    modelVersion: form.modelVersion,
+    selectedDevice: form.device
+  });
+  if (!accepted) {
+    return;
+  }
+
   isGenerating.value = true;
   uiStore.notifyInfo('正在创建声音克隆任务。', 2200);
 
@@ -519,6 +619,7 @@ const createTask = async () => {
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
+        device: form.device,
         refAudioName: effectiveRefAudioName.value || 'reference.wav',
         refAudioPath: effectiveRefAudioPath.value,
         refText: trimmedRefText.value,
@@ -540,6 +641,34 @@ const createTask = async () => {
   }
 };
 
+const cancelActiveTask = async () => {
+  if (!activeResult.value || ![TaskStatus.Pending, TaskStatus.Running].includes(activeResult.value.status)) {
+    return;
+  }
+
+  isCancelling.value = true;
+  const taskId = activeResult.value.taskId;
+
+  try {
+    const accepted = await invoke<boolean>('cancel_history_task', {
+      historyId: taskId
+    });
+
+    if (!accepted) {
+      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      return;
+    }
+
+    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    await refreshActiveTaskStatus();
+    await loadRecentTasks();
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+  } finally {
+    isCancelling.value = false;
+  }
+};
+
 const loadResultAudioAsset = (taskId: number) =>
   invoke<VoiceCloneAudioAssetPayload>('get_voice_clone_audio', {
     historyId: taskId
@@ -555,12 +684,14 @@ const resetForm = () => {
   form.modelVersion = modelVersionOptions.value[0]?.value ?? '';
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
-  form.exportAudioName = DEFAULT_EXPORT_AUDIO_NAME;
+  form.device = HardwareType.Cpu;
+  form.exportAudioName = createDefaultExportAudioName();
   form.refText = '';
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
 
@@ -585,10 +716,17 @@ onBeforeUnmount(() => {
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，任务会使用设置页中的全局硬件类型执行克隆推理。">
+      <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，硬件类型按当前任务单独选择。">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox
+            v-model="form.device"
+            v-model:selected-option="selectedDeviceOption"
+            label="设备类型"
+            :options="deviceOptions"
+            :disabled="deviceOptions.length === 0"
+          />
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">
@@ -619,6 +757,7 @@ onBeforeUnmount(() => {
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
           empty-text="还没有生成结果。完成参考音频和文本输入后，结果会显示在这里。"
+          @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
@@ -688,9 +827,13 @@ onBeforeUnmount(() => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="createTask">
-                <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              <BaseButton :loading="isSubmitPending" :disabled="!canGenerate || isSubmitPending" @click="createTask">
+                <SparklesIcon v-if="!isSubmitPending" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ submitButtonText }}</span>
+              </BaseButton>
+              <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
+                <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
@@ -701,5 +844,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </PanelCard>
+
+    <WarningConfirmDialog
+      :open="showDeviceMismatchDialog"
+      :title="deviceMismatchDialogTitle"
+      :message="deviceMismatchDialogMessage"
+      :detail-lines="deviceMismatchDialogDetails"
+      @close="closeDeviceMismatchDialog"
+      @confirm="confirmDeviceMismatchDialog"
+    />
   </div>
 </template>

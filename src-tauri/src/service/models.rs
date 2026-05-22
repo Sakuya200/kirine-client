@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::BaseModel;
+use crate::config::{BaseModel, HardwareType};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum AppLanguage {
@@ -418,6 +418,7 @@ pub struct ModelInfo {
     pub required_model_name_list: Vec<String>,
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,
+    pub supported_devices: Vec<HardwareType>,
     pub downloaded: bool,
     pub create_time: String,
     pub modify_time: String,
@@ -453,7 +454,7 @@ pub struct ModelTrainingTaskDetail {
     pub language: AppLanguage,
     pub base_model: BaseModel,
     pub model_version: String,
-    pub model_name: String,
+    pub speaker_name: String,
     pub description: String,
     pub model_params: Value,
     pub sample_count: i64,
@@ -488,6 +489,7 @@ pub struct HistoryRecord {
     pub speaker: String,
     pub status: TaskStatus,
     pub duration_seconds: i64,
+    pub device: HardwareType,
     pub create_time: String,
     pub modify_time: String,
     pub task_log: Option<String>,
@@ -503,6 +505,7 @@ pub struct CreateTextToSpeechTaskPayload {
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
+    pub device: HardwareType,
     pub text: String,
     pub model_params: Value,
 }
@@ -571,8 +574,9 @@ pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
     pub base_model: BaseModel,
     pub model_version: String,
-    pub model_name: String,
+    pub speaker_name: String,
     pub description: String,
+    pub device: HardwareType,
     pub model_params: Value,
     pub samples: Vec<ModelTrainingSampleInput>,
 }
@@ -585,6 +589,7 @@ pub struct CreateVoiceCloneTaskPayload {
     pub language: AppLanguage,
     pub format: TextToSpeechFormat,
     pub export_audio_name: String,
+    pub device: HardwareType,
     pub ref_audio_name: String,
     pub ref_audio_path: String,
     pub ref_text: String,
@@ -598,7 +603,7 @@ pub struct ModelTrainingTaskResult {
     pub task_id: i64,
     pub base_model: BaseModel,
     pub model_version: String,
-    pub model_name: String,
+    pub speaker_name: String,
     pub model_params: Value,
     pub sample_count: i64,
     pub create_time: String,

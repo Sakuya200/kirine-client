@@ -1,6 +1,6 @@
 [
   {
-    "task": "training",
+    "task": "model-training",
     "base-model": "vox_cpm2",
     "params": [
       {
@@ -165,7 +165,7 @@
     ]
   },
   {
-    "task": "tts",
+    "task": "text-to-speech",
     "base-model": "vox_cpm2",
     "params": [
       {

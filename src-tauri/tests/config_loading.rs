@@ -57,7 +57,6 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
         assert!(config.data_dir().is_some());
         assert!(config.log_dir().is_some());
         assert!(config.model_dir().is_some());
-        assert_eq!(config.hardware_type().to_string(), "cuda");
         assert_eq!(config.api_url(), Some(""));
         assert_eq!(config.api_token(), Some(""));
 
@@ -67,7 +66,6 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
         assert!(persisted.contains("[remote]"));
         assert!(persisted.contains("api_url = \"\""));
         assert!(persisted.contains("api_token = \"\""));
-        assert!(persisted.contains("hardware_type = \"cuda\""));
     })();
 
     std::env::set_current_dir(original_dir).expect("failed to restore current dir");

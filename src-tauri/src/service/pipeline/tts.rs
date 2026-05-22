@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value;
+use tokio::sync::watch;
 use tracing::{error, info};
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir, tts_params_json_path,
         },
     },
-    config::BaseModel,
+    config::{BaseModel, HardwareType},
     service::{
         local::{
             entity::{
@@ -31,7 +32,8 @@ use crate::{
             },
             model_artifacts::MODEL_ARTIFACTS_DIR,
             model_paths::speaker_model_dir,
-            run_pipeline_stage_shell_script, run_python_params_file_invocation,
+            run_pipeline_stage_shell_script_cancellable,
+            run_python_params_file_invocation_cancellable,
             script_paths::{
                 resolve_src_model_root, src_model_model_python_script_path,
                 src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
@@ -42,7 +44,7 @@ use crate::{
     utils::{
         audio::{build_ffmpeg_transcode_script_args, resolve_temp_wav_path},
         file_ops::{remove_file_if_exists, replace_output_file},
-        process::run_logged_shell_script,
+        process::{run_logged_shell_script_cancellable, LoggedCommandResult},
     },
     Result,
 };
@@ -69,6 +71,7 @@ pub(crate) struct LoadedTtsTaskParams {
     pub format: TextToSpeechFormat,
     pub text: String,
     pub speaker_name: Option<String>,
+    pub device: HardwareType,
     pub output_file_path: String,
     pub model_params_json: Value,
 }
@@ -142,11 +145,13 @@ pub(crate) async fn run_common_tts_pipeline(
 
     let result = async {
         mark_tts_running_state(service, task_id).await?;
+        let mut cancel_rx =
+            service.active_task_cancel_receiver(task_id, HistoryTaskType::TextToSpeech)?;
 
         let runtime_config = service.runtime_config()?;
-        let runtime = CommonRuntimeOptions::from_env_config(&runtime_config);
         let log_dir = resolve_local_log_dir(&runtime_config)?;
         let params = load_tts_task_params(service, task_id).await?;
+        let runtime = CommonRuntimeOptions::from_task_device(params.device, &runtime_config)?;
         if params.base_model.trim() != base_model {
             bail!(
                 "TTS task base model mismatch: expected {}, got {}",
@@ -156,7 +161,7 @@ pub(crate) async fn run_common_tts_pipeline(
         }
         let paths = resolve_tts_paths(service, task_id, base_model, &params.model_version)?;
 
-        prepare_tts_model_env(
+        let prepare_result = prepare_tts_model_env(
             service,
             &paths.base_model,
             &paths.model_version,
@@ -166,8 +171,15 @@ pub(crate) async fn run_common_tts_pipeline(
             task_id,
             &log_dir,
             runtime.is_cpu(),
+            &mut cancel_rx,
         )
         .await?;
+
+        if matches!(prepare_result, LoggedCommandResult::Cancelled) {
+            mark_tts_cancelled_state(service, task_id, started_at.elapsed().as_secs() as i64)
+                .await?;
+            return Ok(());
+        }
 
         validate_tts_environment(
             &paths,
@@ -184,7 +196,7 @@ pub(crate) async fn run_common_tts_pipeline(
         };
         let invocation = build_shared_tts_invocation(&paths.base_model, &invocation_context);
 
-        run_tts_python_command(
+        let command_result = run_tts_python_command(
             &paths.venv_python_path,
             &paths.tts_python_script_path,
             &paths.src_model_root,
@@ -196,10 +208,23 @@ pub(crate) async fn run_common_tts_pipeline(
             COMMON_TTS_RUN_LABEL,
             COMMON_TTS_START_LOG_MESSAGE,
             COMMON_TTS_OUTPUT_MISSING_LABEL,
+            &mut cancel_rx,
         )
         .await?;
 
-        finalize_tts_output(
+        if matches!(command_result, LoggedCommandResult::Cancelled) {
+            mark_tts_cancelled_state(service, task_id, started_at.elapsed().as_secs() as i64)
+                .await?;
+            return Ok(());
+        }
+
+        if *cancel_rx.borrow() {
+            mark_tts_cancelled_state(service, task_id, started_at.elapsed().as_secs() as i64)
+                .await?;
+            return Ok(());
+        }
+
+        let finalize_result = finalize_tts_output(
             &paths.src_model_root,
             &paths.transcode_script_path,
             task_id,
@@ -210,8 +235,15 @@ pub(crate) async fn run_common_tts_pipeline(
             COMMON_TTS_CONVERT_LABEL,
             COMMON_TTS_OUTPUT_LABEL,
             COMMON_TTS_TEMP_WAV_LABEL,
+            &mut cancel_rx,
         )
         .await?;
+
+        if matches!(finalize_result, LoggedCommandResult::Cancelled) {
+            mark_tts_cancelled_state(service, task_id, started_at.elapsed().as_secs() as i64)
+                .await?;
+            return Ok(());
+        }
 
         mark_tts_completed_state(service, task_id, started_at.elapsed().as_secs() as i64).await
     }
@@ -317,6 +349,10 @@ pub(crate) async fn load_tts_task_params(
             .map_err(|err: String| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         text: task_detail.text,
         speaker_name,
+        device: task_history
+            .device
+            .parse::<HardwareType>()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         output_file_path: resolve_task_path(
             Path::new(service.data_dir()),
             &task_detail.output_file_path.unwrap_or_default(),
@@ -377,6 +413,21 @@ pub(crate) async fn mark_tts_failed_state(
     Ok(())
 }
 
+pub(crate) async fn mark_tts_cancelled_state(
+    service: &LocalService,
+    task_id: i64,
+    duration_seconds: i64,
+) -> Result<()> {
+    service
+        .update_task_status_impl(UpdateTaskStatusPayload {
+            task_id,
+            status: TaskStatus::Cancelled,
+            duration_seconds: Some(duration_seconds),
+        })
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn prepare_tts_model_env(
     service: &LocalService,
     base_model: &str,
@@ -387,7 +438,8 @@ pub(crate) async fn prepare_tts_model_env(
     task_id: i64,
     log_dir: &Path,
     use_cpu_mode: bool,
-) -> Result<()> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
     let model_downloaded = service
         .model_downloaded_impl(base_model, model_version)
         .await?;
@@ -404,7 +456,7 @@ pub(crate) async fn prepare_tts_model_env(
         script_args.push("--cpu-mode".to_string());
     }
 
-    run_pipeline_stage_shell_script(
+    let result = run_pipeline_stage_shell_script_cancellable(
         ensure_torch_runtime_script_path,
         src_model_root,
         HistoryTaskType::TextToSpeech,
@@ -413,10 +465,16 @@ pub(crate) async fn prepare_tts_model_env(
         "校验并切换 Torch 运行时",
         "tts command completed successfully",
         script_args,
+        cancel_rx,
     )
     .await?;
 
-    ensure_required_tts_runtime_files(venv_python_path, ensure_torch_runtime_script_path)
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok(LoggedCommandResult::Cancelled);
+    }
+
+    ensure_required_tts_runtime_files(venv_python_path, ensure_torch_runtime_script_path)?;
+    Ok(LoggedCommandResult::Completed)
 }
 
 fn ensure_required_tts_runtime_files(
@@ -534,7 +592,8 @@ pub(crate) async fn run_tts_python_command(
     run_label: &str,
     start_message: &str,
     output_missing_label: &str,
-) -> Result<()> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
     info!(
         script = %tts_python_script_path.display(),
         params_file = %params_json_path.display(),
@@ -543,7 +602,7 @@ pub(crate) async fn run_tts_python_command(
     );
 
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
-    run_python_params_file_invocation(
+    let result = run_python_params_file_invocation_cancellable(
         venv_python_path,
         tts_python_script_path,
         src_model_root,
@@ -551,14 +610,19 @@ pub(crate) async fn run_tts_python_command(
         &task_log_path,
         params_json_path,
         invocation,
+        cancel_rx,
     )
     .await?;
+
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok(LoggedCommandResult::Cancelled);
+    }
 
     if !temp_wav_path.exists() {
         bail!("{}: {}", output_missing_label, temp_wav_path.display());
     }
 
-    Ok(())
+    Ok(LoggedCommandResult::Completed)
 }
 
 pub(crate) async fn finalize_tts_output(
@@ -572,17 +636,21 @@ pub(crate) async fn finalize_tts_output(
     convert_label: &str,
     output_label: &str,
     temp_wav_label: &str,
-) -> Result<()> {
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
     let final_output_path = Path::new(final_output_path);
     if format == TextToSpeechFormat::Wav {
+        if *cancel_rx.borrow() {
+            return Ok(LoggedCommandResult::Cancelled);
+        }
         replace_output_file(temp_wav_path, final_output_path, output_label)?;
-        return Ok(());
+        return Ok(LoggedCommandResult::Completed);
     }
 
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
     let platform = ScriptPlatform::current();
 
-    run_logged_shell_script(
+    let result = run_logged_shell_script_cancellable(
         Path::new(platform.shell_program()),
         transcode_script_path,
         src_model_root,
@@ -596,9 +664,14 @@ pub(crate) async fn finalize_tts_output(
             format.as_str(),
             &task_log_path,
         ),
+        cancel_rx,
     )
     .await?;
 
+    if matches!(result, LoggedCommandResult::Cancelled) {
+        return Ok(LoggedCommandResult::Cancelled);
+    }
+
     remove_file_if_exists(temp_wav_path, temp_wav_label)?;
-    Ok(())
+    Ok(LoggedCommandResult::Completed)
 }

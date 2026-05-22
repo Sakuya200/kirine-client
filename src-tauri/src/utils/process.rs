@@ -18,6 +18,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
 const MAX_ERROR_SNIPPET_CHARS: usize = 2000;
 const GRACEFUL_TERMINATION_TIMEOUT: Duration = Duration::from_secs(30);
+const FORCEFUL_TERMINATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoggedCommandResult {
@@ -226,17 +227,19 @@ fn request_process_termination(process_id: u32) -> std::io::Result<()> {
     unsafe {
         FreeConsole();
         if AttachConsole(process_id) == 0 {
-            return Err(std::io::Error::last_os_error());
+            return terminate_process_tree_windows(process_id, false);
         }
         if SetConsoleCtrlHandler(None, 1) == 0 {
             let err = std::io::Error::last_os_error();
             FreeConsole();
+            let _ = terminate_process_tree_windows(process_id, false);
             return Err(err);
         }
         if GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, process_id) == 0 {
             let err = std::io::Error::last_os_error();
             SetConsoleCtrlHandler(None, 0);
             FreeConsole();
+            let _ = terminate_process_tree_windows(process_id, false);
             return Err(err);
         }
         SetConsoleCtrlHandler(None, 0);
@@ -271,6 +274,10 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
 
 #[cfg(windows)]
 fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+    if terminate_process_tree_windows(process_id, true).is_ok() {
+        return Ok(());
+    }
+
     use windows_sys::Win32::{
         Foundation::CloseHandle,
         System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE},
@@ -291,6 +298,24 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
         CloseHandle(handle);
         status
     }
+}
+
+#[cfg(windows)]
+fn terminate_process_tree_windows(process_id: u32, force: bool) -> std::io::Result<()> {
+    let mut args = vec!["/PID".to_string(), process_id.to_string(), "/T".to_string()];
+    if force {
+        args.push("/F".to_string());
+    }
+
+    let status = std::process::Command::new("taskkill").args(args).status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(std::io::Error::other(format!(
+        "taskkill failed to terminate process tree for {}",
+        process_id
+    )))
 }
 
 pub async fn run_logged_command(
@@ -326,6 +351,52 @@ pub async fn run_logged_command(
             "command completed"
         );
         return Ok(());
+    }
+
+    error!(command = label, log_path = %task_log_path.display(), status = %status, "command failed");
+
+    bail!(build_process_failure_message(
+        label,
+        status,
+        task_log_path,
+        &output.stdout,
+        &output.stderr,
+    ))
+}
+
+pub async fn run_logged_command_with_output(
+    program: &Path,
+    args: &[String],
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    success_message: &str,
+) -> Result<String> {
+    initialize_task_log(task_log_path)?;
+
+    let output = prepare_command(program, args, current_dir)
+        .output()
+        .await
+        .with_context(|| {
+            format!(
+                "failed to spawn `{}` with program {} in {}",
+                label,
+                program.display(),
+                current_dir.display()
+            )
+        })?;
+
+    append_process_output(task_log_path, &output.stdout, &output.stderr)?;
+
+    let status = output.status;
+
+    if status.success() {
+        info!(
+            command = label,
+            message = success_message,
+            "command completed"
+        );
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
 
     error!(command = label, log_path = %task_log_path.display(), status = %status, "command failed");
@@ -386,18 +457,35 @@ pub async fn run_logged_command_cancellable(
                 }
                 Err(_) => {
                     if let Some(process_id) = process_id {
+                        info!(
+                            command = label,
+                            process_id,
+                            "graceful termination timed out, forcing process termination"
+                        );
                         if let Err(err) = force_terminate_process(process_id) {
                             error!(command = label, process_id, error = %err, "failed to force terminate cancelled process");
                         }
                     }
-                    break wait_with_output.await.with_context(|| {
-                        format!(
-                            "failed while force-waiting for cancelled `{}` with program {} in {}",
-                            label,
-                            program.display(),
-                            current_dir.display()
-                        )
-                    })?;
+                    match timeout(FORCEFUL_TERMINATION_TIMEOUT, &mut wait_with_output).await {
+                        Ok(output) => {
+                            break output.with_context(|| {
+                                format!(
+                                    "failed while force-waiting for cancelled `{}` with program {} in {}",
+                                    label,
+                                    program.display(),
+                                    current_dir.display()
+                                )
+                            })?
+                        }
+                        Err(_) => {
+                            bail!(
+                                "cancelled command `{}` did not exit after force termination timeout (program: {}, cwd: {})",
+                                label,
+                                program.display(),
+                                current_dir.display()
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -417,8 +505,12 @@ pub async fn run_logged_command_cancellable(
                 if changed.is_ok() && *cancel_rx.borrow() {
                     cancellation_requested = true;
                     if let Some(process_id) = process_id {
+                        info!(command = label, process_id, "received cancellation signal, requesting graceful process termination");
                         if let Err(err) = request_process_termination(process_id) {
                             error!(command = label, process_id, error = %err, "failed to request graceful termination for cancelled process");
+                            if let Err(force_err) = force_terminate_process(process_id) {
+                                error!(command = label, process_id, error = %force_err, "failed to force terminate process after graceful termination request failed");
+                            }
                         }
                     }
                 }
@@ -508,6 +600,32 @@ pub async fn run_logged_shell_script(
         label,
         task_log_path,
         success_message,
+    )
+    .await
+}
+
+pub async fn run_logged_shell_script_cancellable(
+    shell_program: &Path,
+    script_path: &Path,
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    success_message: &str,
+    mut shell_args: Vec<String>,
+    script_args: Vec<String>,
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<LoggedCommandResult> {
+    shell_args.push(script_path.to_string_lossy().to_string());
+    shell_args.extend(script_args);
+
+    run_logged_command_cancellable(
+        shell_program,
+        &shell_args,
+        current_dir,
+        label,
+        task_log_path,
+        success_message,
+        cancel_rx,
     )
     .await
 }

@@ -56,6 +56,33 @@ class ParamsEntityParsingTests(unittest.TestCase):
         self.assertEqual(params.model_param_str("learningRate"), "1e-5")
         self.assertEqual(params.training_args().gradient_accumulation_steps, 8)
 
+    def test_params_entity_parses_training_speaker_name(self):
+        module = load_module("qwen3_tts.params_entity")
+        payload = {
+            "version": "1.0.0",
+            "base_model": "qwen3_tts",
+            "model_version": "0.6B",
+            "kind": "Training",
+            "runtime": {"device": "cpu"},
+            "args": {
+                "Training": {
+                    "model_root_path": "models",
+                    "speaker_dir_name": None,
+                    "model_params_json": {},
+                    "input_jsonl": "input.jsonl",
+                    "output_jsonl": "output.jsonl",
+                    "output_model_path": "out",
+                    "batch_size": 2,
+                    "num_epochs": 4,
+                    "speaker_name": "speaker_from_speaker_name",
+                    "gradient_accumulation_steps": 8,
+                }
+            },
+        }
+
+        params = module.ParamsEntity.from_json(json.dumps(payload, ensure_ascii=False))
+        self.assertEqual(params.training_args().speaker_name, "speaker_from_speaker_name")
+
 
 class ModelParamsLoaderTests(unittest.TestCase):
     def test_qwen3_tts_loader_uses_shared_params_entity(self):
