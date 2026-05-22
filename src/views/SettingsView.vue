@@ -132,7 +132,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="设置" description="管理服务连接、模型资源与数据日志路径。保存后会直接覆写 config.toml。" eyebrow="Settings" />
+    <PageHeader title="设置" description="管理服务连接、模型资源与数据日志路径。" eyebrow="Settings" />
 
     <BaseLoadingBanner v-if="settingsBusyLabel" :label="settingsBusyLabel" />
 

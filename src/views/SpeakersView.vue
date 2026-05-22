@@ -280,7 +280,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="说话人管理" description="查看、筛选、编辑和删除已训练说话人，当前数据已接入本地数据库。" eyebrow="Speaker Management" />
+    <PageHeader title="说话人管理" description="查看、筛选、编辑和删除已训练说话人。" eyebrow="Speaker Management" />
 
     <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <article class="rounded-2xl border border-brand-200 bg-white/90 p-4">

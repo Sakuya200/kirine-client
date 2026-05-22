@@ -20,7 +20,7 @@ interface PendingDeviceMismatch {
 }
 
 const WARNING_MESSAGE =
-  '当前选择硬件类型与模型环境当前支持的类型不一致，如果继续执行，会自动更新当前环境，从而大大延长本次任务执行的时间，是否继续？';
+  '当前选择硬件类型与模型环境当前支持的类型不一致，如果继续，会自动更新当前环境，不会影响任务正常执行，但是会大大延长本次任务执行的时间，是否继续？';
 
 export const useTaskDeviceTypeGuard = () => {
   const modelStore = useModelStore();
