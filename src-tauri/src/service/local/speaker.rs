@@ -206,6 +206,7 @@ impl LocalService {
                 &row.required_model_repo_id_list_json,
             )?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,
+            supported_devices: serde_json::from_str(&row.supported_devices)?,
             downloaded: row.downloaded,
             create_time: row.create_time,
             modify_time: row.modify_time,

@@ -13,6 +13,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
@@ -44,6 +45,7 @@ interface TtsResult {
   format: TextToSpeechFormat;
   formatLabel: string;
   exportAudioName: string;
+  device: string;
   durationSeconds: number;
   text: string;
   modelParams: Record<string, unknown>;
@@ -62,6 +64,7 @@ interface TextToSpeechTaskResultPayload {
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
+  device: string;
   text: string;
   modelParams: Record<string, unknown>;
   durationSeconds: number;
@@ -93,6 +96,7 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
+  device: HardwareType.Cpu,
   exportAudioName: createDefaultExportAudioName(),
   text: '',
   modelParams: {} as Record<string, unknown>
@@ -101,6 +105,7 @@ const form = reactive({
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
 const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
@@ -132,6 +137,12 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
 const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.TextToSpeech));
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
   {
@@ -173,6 +184,7 @@ const canCancelActiveTask = computed(() => {
 });
 const generationTips = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
+  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
   isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
   `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName}。`
@@ -233,6 +245,22 @@ watch(
     if (!options.some(option => option.value === form.modelVersion)) {
       form.modelVersion = String(options[0]?.value ?? '');
     }
+  },
+  { immediate: true }
+);
+
+watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
   },
   { immediate: true }
 );
@@ -310,6 +338,7 @@ const mapResultPayload = (payload: TextToSpeechTaskResultPayload): TtsResult => 
   format: payload.format,
   formatLabel: findFormatLabel(payload.format),
   exportAudioName: payload.exportAudioName,
+  device: payload.device,
   durationSeconds: payload.durationSeconds,
   text: payload.text,
   modelParams: payload.modelParams,
@@ -335,6 +364,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): TtsResult | null => {
     format: record.detail.format,
     formatLabel: findFormatLabel(record.detail.format),
     exportAudioName: record.detail.exportAudioName,
+    device: record.device,
     durationSeconds: record.durationSeconds,
     text: record.detail.text,
     modelParams: record.detail.modelParams,
@@ -354,12 +384,14 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.modelVersion = item.modelVersion;
   form.language = item.language;
   form.format = item.format;
+  form.device = item.device as HardwareType;
   form.exportAudioName = createDefaultExportAudioName();
   form.text = item.text;
   form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === item.device) ?? null;
 
   if (setAsActiveResult) {
     syncActiveTaskStatusRefresh();
@@ -532,6 +564,7 @@ const generateAudio = async () => {
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
+        device: form.device,
         text: trimmedText.value,
         modelParams: form.modelParams
       }
@@ -585,6 +618,7 @@ const requestClearText = () => {
     form.baseModel ||
     form.language !== AppLanguage.Chinese ||
     form.format !== TextToSpeechFormat.Wav ||
+    form.device !== HardwareType.Cpu ||
     JSON.stringify(form.modelParams) !== '{}';
   if (!hasChanges) {
     uiStore.notifyInfo('表单已为默认状态。', 2200);
@@ -598,12 +632,14 @@ const confirmClearText = () => {
   form.speakerId = null;
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
+  form.device = HardwareType.Cpu;
   form.exportAudioName = createDefaultExportAudioName();
   form.text = '';
   form.modelParams = {};
   selectedSpeakerOption.value = null;
   selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES[0] ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   showClearDialog.value = false;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
@@ -673,6 +709,13 @@ onMounted(async () => {
           />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox
+            v-model="form.device"
+            v-model:selected-option="selectedDeviceOption"
+            label="设备类型"
+            :options="deviceOptions"
+            :disabled="deviceOptions.length === 0"
+          />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
           <label class="block text-sm text-slate-700">
             <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>

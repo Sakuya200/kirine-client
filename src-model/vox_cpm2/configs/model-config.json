@@ -7,6 +7,7 @@
       "downloadType": "HF-Like",
       "requiredModelNameList": ["VoxCPM2"],
       "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
+      "supportedDevices": ["cpu", "cuda"],
       "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
     }
   ],

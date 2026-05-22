@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
+import { HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
@@ -18,6 +19,12 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
     ? item.supportedFeatureList
         .filter((feature): feature is string => typeof feature === 'string')
         .map(feature => feature.trim())
+        .filter(Boolean)
+    : [],
+  supportedDevices: Array.isArray(item.supportedDevices)
+    ? item.supportedDevices
+        .filter((device): device is string => typeof device === 'string')
+        .map(device => device.trim().toLowerCase())
         .filter(Boolean)
     : [],
   downloaded: item.downloaded === true,
@@ -66,9 +73,9 @@ export const useModelStore = defineStore('models', () => {
     items.value = items.value.map(item => (item.id === nextModel.id ? nextModel : item));
   };
 
-  const installModel = async (modelId: number) => {
+  const installModel = async (modelId: number, device: HardwareType = HardwareType.Cpu) => {
     try {
-      const result = await invoke<ModelMutationResult>('install_model', { modelId });
+      const result = await invoke<ModelMutationResult>('install_model', { modelId, device });
       const normalized = {
         ...result,
         model: normalizeModelInfo(result.model)
@@ -98,13 +105,13 @@ export const useModelStore = defineStore('models', () => {
     }
   };
 
-  const reinstallModel = async (modelId: number) => {
+  const reinstallModel = async (modelId: number, device: HardwareType = HardwareType.Cpu) => {
     const uninstalled = await uninstallModel(modelId);
     if (!uninstalled) {
       return null;
     }
 
-    const installed = await installModel(modelId);
+    const installed = await installModel(modelId, device);
     if (!installed) {
       uiStore.notifyWarning('模型已卸载，但重装失败，请重试安装。', 4200);
       return null;
@@ -135,6 +142,9 @@ export const useModelStore = defineStore('models', () => {
       value: item.modelVersion
     }));
 
+  const getSupportedDevices = (baseModel: BaseModel, modelVersion: string) =>
+    (byBaseModel.value.get(baseModel) ?? []).find(item => item.modelVersion === modelVersion)?.supportedDevices ?? [];
+
   return {
     items,
     isLoading,
@@ -147,6 +157,7 @@ export const useModelStore = defineStore('models', () => {
     getModelsByFeature,
     getModelLabel,
     getModelVersionOptions,
+    getSupportedDevices,
     uninstallModel,
     supportsModelFeature
   };

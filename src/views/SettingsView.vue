@@ -9,7 +9,7 @@ import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation, HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
+import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 
@@ -21,7 +21,6 @@ interface SettingsForm {
   modelDir: string;
   dataDir: string;
   logCacheDir: string;
-  hardwareType: HardwareType;
   attnImplementation: AttentionImplementation;
 }
 
@@ -37,7 +36,6 @@ const DEFAULT_SETTINGS_FORM: SettingsForm = {
   modelDir: '',
   dataDir: '',
   logCacheDir: '',
-  hardwareType: HardwareType.Cpu,
   attnImplementation: AttentionImplementation.Sdpa
 };
 
@@ -46,11 +44,6 @@ const attnImplementationOptions = Object.values(AttentionImplementation).map(val
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
 }));
-const hardwareTypeOptions = Object.values(HardwareType).map(value => ({
-  label: HARDWARE_TYPE_TEXT[value],
-  value
-}));
-const selectedHardwareTypeOption = ref<{ label: string; value: HardwareType } | null>(null);
 const selectedAttnImplementationOption = ref<{ label: string; value: AttentionImplementation } | null>(null);
 const isLoading = ref(false);
 const isSaving = ref(false);
@@ -79,7 +72,6 @@ const applySettings = (payload: SettingsForm) => {
   form.modelDir = payload.modelDir;
   form.dataDir = payload.dataDir;
   form.logCacheDir = payload.logCacheDir;
-  form.hardwareType = payload.hardwareType;
   form.attnImplementation = payload.attnImplementation;
 };
 
@@ -114,7 +106,6 @@ const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
         modelDir: form.modelDir,
         dataDir: form.dataDir,
         logCacheDir: form.logCacheDir,
-        hardwareType: form.hardwareType,
         attnImplementation: form.attnImplementation
       }
     });
@@ -176,18 +167,12 @@ onMounted(async () => {
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <p class="rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2 text-xs leading-5 text-stone-600">
-              这里维护本地模型资源目录、全局硬件类型，以及统一的 Qwen 模型注意力实现。微调参数与 LoRA 配置已迁移到对应任务页面。
+              这里维护本地模型资源目录，以及统一的 Qwen 模型注意力实现。任务执行设备已经迁移到各任务页面与模型安装界面单独选择。
             </p>
             <label class="block">
               <span class="mb-1 block text-xs text-stone-500">模型目录</span>
               <input v-model="form.modelDir" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型目录" />
             </label>
-            <BaseListbox
-              v-model="form.hardwareType"
-              v-model:selected-option="selectedHardwareTypeOption"
-              label="全局硬件类型"
-              :options="hardwareTypeOptions"
-            />
             <BaseListbox
               v-model="form.attnImplementation"
               v-model:selected-option="selectedAttnImplementationOption"

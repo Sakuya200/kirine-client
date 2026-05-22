@@ -13,6 +13,7 @@ import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
@@ -37,6 +38,7 @@ interface VoiceCloneResult {
   format: TextToSpeechFormat;
   formatLabel: string;
   exportAudioName: string;
+  device: string;
   durationSeconds: number;
   refText: string;
   text: string;
@@ -55,6 +57,7 @@ interface VoiceCloneTaskResultPayload {
   language: AppLanguage;
   format: TextToSpeechFormat;
   exportAudioName: string;
+  device: string;
   refText: string;
   text: string;
   modelParams: Record<string, unknown>;
@@ -94,6 +97,7 @@ const form = reactive({
   modelVersion: '',
   language: AppLanguage.Chinese,
   format: TextToSpeechFormat.Wav,
+  device: HardwareType.Cpu,
   exportAudioName: createDefaultExportAudioName(),
   refAudioFile: null as SelectedAudioFile | null,
   refText: '',
@@ -107,6 +111,7 @@ const languageOptions = Object.values(AppLanguage).map(value => ({
 const formatOptions = TEXT_TO_SPEECH_FORMATS;
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
@@ -140,6 +145,12 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
 const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.VoiceClone));
 const canGenerate = computed(() => {
   const modelParamsValid = activeVoiceCloneTaskConfig.value
@@ -158,6 +169,7 @@ const canCancelActiveTask = computed(() => {
 });
 const cloneSummary = computed(() => [
   `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
+  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
   `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
   `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
   `导出名称为 ${form.exportAudioName}。`
@@ -223,6 +235,22 @@ watch(
 );
 
 watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeVoiceCloneModelParams(nextBaseModel, form.modelParams);
@@ -254,6 +282,7 @@ const mapResultPayload = (payload: VoiceCloneTaskResultPayload): VoiceCloneResul
   format: payload.format,
   formatLabel: findFormatLabel(payload.format),
   exportAudioName: payload.exportAudioName,
+  device: payload.device,
   durationSeconds: payload.durationSeconds,
   refText: payload.refText,
   text: payload.text,
@@ -279,6 +308,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceCloneResult | nul
     format: record.detail.format,
     formatLabel: findFormatLabel(record.detail.format),
     exportAudioName: record.detail.exportAudioName,
+    device: record.device,
     durationSeconds: record.durationSeconds,
     refText: record.detail.refText,
     text: record.detail.text,
@@ -296,6 +326,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
+  form.device = result.device as HardwareType;
   form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
@@ -306,6 +337,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
 };
 
@@ -316,6 +348,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.modelVersion = result.modelVersion;
   form.language = result.language;
   form.format = result.format;
+  form.device = result.device as HardwareType;
   form.exportAudioName = createDefaultExportAudioName();
   form.refAudioFile = {
     fileName: result.refAudioName,
@@ -326,6 +359,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
 
   if (setAsActiveResult) {
     syncActiveTaskStatusRefresh();
@@ -542,6 +576,7 @@ const createTask = async () => {
         language: form.language,
         format: form.format,
         exportAudioName: form.exportAudioName,
+        device: form.device,
         refAudioName: effectiveRefAudioName.value || 'reference.wav',
         refAudioPath: effectiveRefAudioPath.value,
         refText: trimmedRefText.value,
@@ -606,12 +641,14 @@ const resetForm = () => {
   form.modelVersion = modelVersionOptions.value[0]?.value ?? '';
   form.language = AppLanguage.Chinese;
   form.format = TextToSpeechFormat.Wav;
+  form.device = HardwareType.Cpu;
   form.exportAudioName = createDefaultExportAudioName();
   form.refText = '';
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
 
@@ -636,10 +673,17 @@ onBeforeUnmount(() => {
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，任务会使用设置页中的全局硬件类型执行克隆推理。">
+      <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，硬件类型按当前任务单独选择。">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox
+            v-model="form.device"
+            v-model:selected-option="selectedDeviceOption"
+            label="设备类型"
+            :options="deviceOptions"
+            :disabled="deviceOptions.length === 0"
+          />
           <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">

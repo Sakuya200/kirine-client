@@ -13,7 +13,7 @@ use crate::{
             ensure_task_metrics_log_dir, task_log_file_path, task_sample_dir, tts_params_json_path,
         },
     },
-    config::BaseModel,
+    config::{BaseModel, HardwareType},
     service::{
         local::{
             entity::{
@@ -71,6 +71,7 @@ pub(crate) struct LoadedTtsTaskParams {
     pub format: TextToSpeechFormat,
     pub text: String,
     pub speaker_name: Option<String>,
+    pub device: HardwareType,
     pub output_file_path: String,
     pub model_params_json: Value,
 }
@@ -148,9 +149,9 @@ pub(crate) async fn run_common_tts_pipeline(
             service.active_task_cancel_receiver(task_id, HistoryTaskType::TextToSpeech)?;
 
         let runtime_config = service.runtime_config()?;
-        let runtime = CommonRuntimeOptions::from_env_config(&runtime_config);
         let log_dir = resolve_local_log_dir(&runtime_config)?;
         let params = load_tts_task_params(service, task_id).await?;
+        let runtime = CommonRuntimeOptions::from_task_device(params.device, &runtime_config)?;
         if params.base_model.trim() != base_model {
             bail!(
                 "TTS task base model mismatch: expected {}, got {}",
@@ -348,6 +349,10 @@ pub(crate) async fn load_tts_task_params(
             .map_err(|err: String| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         text: task_detail.text,
         speaker_name,
+        device: task_history
+            .device
+            .parse::<HardwareType>()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         output_file_path: resolve_task_path(
             Path::new(service.data_dir()),
             &task_detail.output_file_path.unwrap_or_default(),

@@ -7,7 +7,7 @@ use sea_orm::{
 
 use crate::{
     common::{local_paths::resolve_task_path, task_paths::task_log_file_path},
-    config::resolve_base_log_dir,
+    config::{resolve_base_log_dir, HardwareType},
     service::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
@@ -87,6 +87,7 @@ impl LocalService {
                 speaker: row.speaker_name_snapshot,
                 status: parse_task_status(&row.status)?,
                 duration_seconds: row.duration_seconds,
+                device: parse_hardware_type(&row.device)?,
                 create_time: row.create_time,
                 modify_time: row.modify_time,
                 task_log: None,
@@ -212,6 +213,7 @@ impl LocalService {
             speaker: row.speaker_name_snapshot,
             status: parse_task_status(&row.status)?,
             duration_seconds: row.duration_seconds,
+            device: parse_hardware_type(&row.device)?,
             create_time: row.create_time,
             modify_time: row.modify_time,
             task_log: self.load_task_error_log_impl(row.id, task_type).await?,
@@ -439,6 +441,12 @@ impl LocalService {
             output_file_path: row.output_file_path.unwrap_or_default(),
         })?)
     }
+}
+
+fn parse_hardware_type(value: &str) -> Result<HardwareType> {
+    value
+        .parse::<HardwareType>()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
 }
 
 fn parse_history_task_type(value: &str) -> Result<HistoryTaskType> {

@@ -25,7 +25,7 @@ use tracing::{info, warn};
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
-        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, UiComponentType,
+        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, HardwareType, UiComponentType,
         UiConfigCatalog,
     },
     migration,
@@ -109,8 +109,8 @@ impl Service for LocalService {
         self.list_model_infos_impl().await
     }
 
-    async fn install_model(&self, model_id: i64) -> Result<ModelMutationResult> {
-        self.install_model_impl(model_id).await
+    async fn install_model(&self, model_id: i64, device: HardwareType) -> Result<ModelMutationResult> {
+        self.install_model_impl(model_id, device).await
     }
 
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {

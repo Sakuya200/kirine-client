@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fs, path::Path};
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::de::DeserializeOwned;
 
@@ -89,9 +89,22 @@ impl LocalService {
             .map_err(Into::into)
     }
 
-    pub(crate) async fn install_model_impl(&self, model_id: i64) -> Result<ModelMutationResult> {
+    pub(crate) async fn install_model_impl(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelMutationResult> {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
+        if !model_info.supported_devices.contains(&device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                model_info.model_name,
+                model_info.model_version,
+                device,
+                model_info.supported_devices
+            );
+        }
         let runtime_config = self.runtime_config()?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
         let log_dir = ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "model-management")?;
@@ -99,7 +112,7 @@ impl LocalService {
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
-        let use_cpu_mode = runtime_config.hardware_type() == HardwareType::Cpu;
+        let use_cpu_mode = device == HardwareType::Cpu;
         let init_log_path = log_dir.join(format!(
             "install-{}-{}-init.log",
             model_info.base_model, model_info.model_version
@@ -286,6 +299,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         required_model_name_list: parse_json_field(&row.required_model_name_list_json)?,
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,
+        supported_devices: parse_json_field::<Vec<HardwareType>>(&row.supported_devices)?,
         downloaded: row.downloaded,
         create_time: row.create_time,
         modify_time: row.modify_time,

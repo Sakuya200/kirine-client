@@ -2,7 +2,7 @@ mod local;
 pub mod models;
 mod remote;
 use crate::{
-    config::{EnvConfig, StorageMode},
+    config::{EnvConfig, HardwareType, StorageMode},
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
         CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ImportModelAsSpeakerPayload,
@@ -54,7 +54,7 @@ pub trait Service: Send + Sync {
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
     async fn list_model_infos(&self) -> Result<Vec<ModelInfo>>;
-    async fn install_model(&self, model_id: i64) -> Result<ModelMutationResult>;
+    async fn install_model(&self, model_id: i64, device: HardwareType) -> Result<ModelMutationResult>;
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult>;
     async fn list_history_records(&self) -> Result<Vec<HistoryRecord>>;
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;

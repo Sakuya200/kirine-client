@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { TEXT_TO_SPEECH_FORMATS } from '@/enums/textToSpeech';
 import { useModelStore } from '@/stores/models';
 import type { TextToSpeechHistoryRecord } from '@/types/domain';
@@ -38,6 +39,12 @@ const voicePrompt = computed(() => String(props.record.detail.modelParams.voiceP
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
         <p class="text-xs text-stone-500">输出格式</p>
         <p class="mt-1 text-sm font-semibold text-slate-800">{{ formatLabel }}</p>
+      </article>
+      <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
+        <p class="text-xs text-stone-500">设备类型</p>
+        <p class="mt-1 text-sm font-semibold text-slate-800">
+          {{ HARDWARE_TYPE_TEXT[record.device as HardwareType] ?? record.device.toUpperCase() }}
+        </p>
       </article>
       <article class="rounded-2xl border border-brand-200 bg-white/80 p-4 md:col-span-2">
         <p class="text-xs text-stone-500">导出音频名称</p>

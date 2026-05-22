@@ -26,6 +26,7 @@ import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { AppLanguage } from '@/enums/language';
+import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
   MODEL_TRAINING_ANNOTATION_FORMAT_TEXT,
@@ -69,6 +70,7 @@ interface ModelTrainingTaskResultPayload {
   baseModel: string;
   modelVersion: string;
   speakerName: string;
+  device: string;
   modelParams: Record<string, unknown>;
   sampleCount: number;
   createTime: string;
@@ -85,6 +87,7 @@ const form = reactive({
   language: AppLanguage.Chinese,
   baseModel: '',
   modelVersion: '',
+  device: HardwareType.Cpu,
   speakerName: 'speaker_a_custom',
   description: '',
   modelParams: {} as Record<string, unknown>,
@@ -94,6 +97,7 @@ const form = reactive({
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
 const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
+const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isStarting = ref(false);
 const isCancelling = ref(false);
 const isRefreshingHistory = ref(false);
@@ -128,6 +132,12 @@ const modelOptions = computed(() =>
   }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const deviceOptions = computed(() =>
+  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+    value: device,
+    label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));
 
 const singleImportReady = computed(() => Boolean(form.singleAudioFile) && form.singleTranscript.trim().length > 0);
@@ -178,6 +188,7 @@ const currentTrainingInfo = computed(() => {
       description: record.detail.description?.trim() || '未填写',
       baseModel: record.detail.baseModel,
       modelVersion: record.detail.modelVersion,
+      device: record.device,
       sampleCount: record.detail.sampleCount,
       status: record.status,
       createTime: record.createTime
@@ -194,6 +205,7 @@ const currentTrainingInfo = computed(() => {
     description: form.description.trim() || '未填写',
     baseModel: activeTrainingTask.value.baseModel,
     modelVersion: activeTrainingTask.value.modelVersion,
+    device: activeTrainingTask.value.device,
     sampleCount: activeTrainingTask.value.sampleCount,
     status: activeTrainingTask.value.status,
     createTime: activeTrainingTask.value.createTime
@@ -259,6 +271,22 @@ watch(
 );
 
 watch(
+  deviceOptions,
+  options => {
+    if (options.length === 0) {
+      form.device = HardwareType.Cpu;
+      selectedDeviceOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.device) ?? options[0] ?? null;
+    form.device = (matched?.value ?? HardwareType.Cpu) as HardwareType;
+    selectedDeviceOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeTrainingModelParams(nextBaseModel, form.modelParams);
@@ -311,6 +339,7 @@ const mapHistoryRecordToTrainingTask = (record: HistoryRecord): ModelTrainingTas
     baseModel: trainingRecord.detail.baseModel,
     modelVersion: trainingRecord.detail.modelVersion,
     speakerName: trainingRecord.detail.speakerName,
+    device: trainingRecord.device,
     modelParams: trainingRecord.detail.modelParams,
     sampleCount: trainingRecord.detail.sampleCount,
     createTime: trainingRecord.createTime,
@@ -413,6 +442,7 @@ const resetForm = () => {
   form.language = AppLanguage.Chinese;
   form.baseModel = String(modelOptions.value[0]?.value ?? '');
   form.modelVersion = String(modelVersionOptions.value[0]?.value ?? '');
+  form.device = HardwareType.Cpu;
   form.speakerName = 'speaker_a_custom';
   form.description = '';
   form.modelParams = normalizeTrainingModelParams(form.baseModel, {});
@@ -421,6 +451,7 @@ const resetForm = () => {
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS[0];
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   importedSamples.value = [];
   uiStore.notifyInfo('训练表单已重置。', 2200);
 };
@@ -449,6 +480,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.language = record.detail.language;
   form.baseModel = record.detail.baseModel;
   form.modelVersion = record.detail.modelVersion;
+  form.device = record.device as HardwareType;
   form.speakerName = record.detail.speakerName;
   form.description = record.detail.description ?? '';
   form.modelParams = normalizeTrainingModelParams(record.detail.baseModel, { ...record.detail.modelParams });
@@ -458,6 +490,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.datasetAnnotationFile = null;
   importedSamples.value = record.detail.samples.map(mapHistorySampleToImportedSample);
   selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS.find(option => option.value === form.language) ?? null;
+  selectedDeviceOption.value = deviceOptions.value.find(option => option.value === record.device) ?? null;
 };
 
 const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => {
@@ -680,6 +713,7 @@ const startTraining = async () => {
         language: form.language,
         baseModel: form.baseModel,
         modelVersion: form.modelVersion,
+        device: form.device,
         speakerName: form.speakerName.trim(),
         description: form.description.trim(),
         modelParams: form.modelParams,
@@ -939,6 +973,15 @@ onBeforeUnmount(() => {
           <div class="xl:col-span-1">
             <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           </div>
+          <div class="xl:col-span-1">
+            <BaseListbox
+              v-model="form.device"
+              v-model:selected-option="selectedDeviceOption"
+              label="设备类型"
+              :options="deviceOptions"
+              :disabled="deviceOptions.length === 0"
+            />
+          </div>
           <div class="md:col-span-2 xl:col-span-1">
             <BaseListbox
               v-model="form.language"
@@ -970,8 +1013,8 @@ onBeforeUnmount(() => {
             <p>微调摘要</p>
             <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
             <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelVersion }}。</p>
+            <p class="mt-1">设备类型 {{ HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }}。</p>
             <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
-            <p class="mt-1">微调任务会使用设置页中的全局硬件类型；若切换硬件，请先前往设置页保存。</p>
             <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
             <p class="mt-1">当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}。</p>
           </div>

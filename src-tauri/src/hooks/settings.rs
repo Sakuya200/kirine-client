@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::config::{
     resolve_base_log_dir, resolve_storage_dir, save_configs, AttentionImplementation, BasicConfig,
-    EnvConfig, HardwareType, RemoteConfig, UiConfigCatalog,
+    EnvConfig, RemoteConfig, UiConfigCatalog,
 };
 use crate::service::{ServiceImpl, ServiceState};
 use crate::utils::file_ops::migrate_directory;
@@ -21,7 +21,6 @@ pub struct SettingsPayload {
     pub model_dir: String,
     pub data_dir: String,
     pub log_cache_dir: String,
-    pub hardware_type: String,
     pub attn_implementation: String,
     pub restart_required: bool,
     pub migrated_directories: Vec<String>,
@@ -36,7 +35,6 @@ pub struct SaveSettingsPayload {
     pub model_dir: String,
     pub data_dir: String,
     pub log_cache_dir: String,
-    pub hardware_type: String,
     pub attn_implementation: String,
 }
 
@@ -54,7 +52,6 @@ impl SettingsPayload {
             log_cache_dir: resolve_base_log_dir(config.log_dir())
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_default(),
-            hardware_type: config.hardware_type().as_str().to_string(),
             attn_implementation: config.attn_implementation().as_str().to_string(),
             restart_required: false,
             migrated_directories: Vec::new(),
@@ -110,10 +107,6 @@ pub fn save_settings_config(
         .attn_implementation
         .parse::<AttentionImplementation>()
         .map_err(|err| err.to_string())?;
-    let hardware_type = payload
-        .hardware_type
-        .parse::<HardwareType>()
-        .map_err(|err| err.to_string())?;
     let next_data_dir = normalized_path(&payload.data_dir);
     let next_log_dir = normalized_path(&payload.log_cache_dir);
     let next_model_dir = normalized_path(&payload.model_dir);
@@ -166,7 +159,6 @@ pub fn save_settings_config(
         training: persisted_config
             .training
             .clone()
-            .with_hardware_type(hardware_type)
             .with_attn_implementation(attn_implementation),
     };
 

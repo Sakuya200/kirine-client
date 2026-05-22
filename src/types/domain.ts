@@ -28,6 +28,7 @@ export interface HistoryRecordBase {
   speaker: string;
   status: TaskStatus;
   durationSeconds: number;
+  device: string;
   createTime: string;
   modifyTime: string;
   taskLog?: string | null;
@@ -99,6 +100,7 @@ export interface ModelInfo {
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];
+  supportedDevices: string[];
   downloaded: boolean;
   createTime: string;
   modifyTime: string;

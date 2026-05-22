@@ -34,7 +34,7 @@ pub enum StorageMode {
 pub type BaseModel = String;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum HardwareType {
     Cpu,
     #[default]
@@ -46,6 +46,13 @@ impl HardwareType {
         match self {
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
+        }
+    }
+
+    pub const fn runtime_arg(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Cuda => "cuda:0",
         }
     }
 }

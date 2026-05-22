@@ -14,7 +14,7 @@ use crate::{
             voice_clone_params_json_path,
         },
     },
-    config::BaseModel,
+    config::{BaseModel, HardwareType},
     service::{
         local::{
             entity::{
@@ -73,6 +73,7 @@ pub(crate) struct LoadedVoiceCloneTaskParams {
     pub ref_audio_path: String,
     pub ref_text: Option<String>,
     pub text: String,
+    pub device: HardwareType,
     pub output_file_path: String,
     pub model_params_json: Value,
 }
@@ -154,9 +155,9 @@ pub(crate) async fn run_common_voice_clone_pipeline(
             service.active_task_cancel_receiver(task_id, HistoryTaskType::VoiceClone)?;
 
         let runtime_config = service.runtime_config()?;
-        let runtime = CommonRuntimeOptions::from_env_config(&runtime_config);
         let log_dir = resolve_local_log_dir(&runtime_config)?;
         let params = load_voice_clone_task_params(service, task_id).await?;
+        let runtime = CommonRuntimeOptions::from_task_device(params.device, &runtime_config)?;
         if params.base_model.trim() != base_model {
             bail!(
                 "Voice clone task base model mismatch: expected {}, got {}",
@@ -383,7 +384,7 @@ pub(crate) async fn load_voice_clone_task_params(
         })?
         .ok_or_else(|| anyhow::anyhow!("未找到 Voice Clone 任务执行参数: {}", task_id))?;
 
-    task_history_entity::Entity::find_by_id(task_id)
+    let task_history = task_history_entity::Entity::find_by_id(task_id)
         .filter(task_history_entity::Column::Deleted.eq(0))
         .one(service.orm())
         .await
@@ -414,6 +415,10 @@ pub(crate) async fn load_voice_clone_task_params(
         .to_string(),
         ref_text: (!ref_text.is_empty()).then_some(ref_text),
         text: task_detail.text,
+        device: task_history
+            .device
+            .parse::<HardwareType>()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?,
         output_file_path: resolve_task_path(
             Path::new(service.data_dir()),
             &task_detail.output_file_path.unwrap_or_default(),

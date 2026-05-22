@@ -7,6 +7,7 @@
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
       "supportedFeatureList": ["text-to-speech", "voice-clone"]
     },
     {
@@ -16,6 +17,7 @@
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
       "supportedFeatureList": ["text-to-speech", "voice-clone"]
     },
     {
@@ -25,6 +27,7 @@
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
       "supportedFeatureList": ["text-to-speech", "voice-clone"]
     },
     {
@@ -34,6 +37,7 @@
       "downloadType": "Custom",
       "requiredModelNameList": ["gpt_sovits_cpufast"],
       "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
       "supportedFeatureList": ["text-to-speech", "voice-clone"]
     }
   ],

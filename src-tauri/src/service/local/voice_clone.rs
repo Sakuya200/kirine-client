@@ -26,9 +26,22 @@ impl LocalService {
         &self,
         payload: CreateVoiceCloneTaskPayload,
     ) -> Result<VoiceCloneTaskResult> {
-        let txn = self.orm().begin().await?;
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
+        let model_version = payload.model_version.trim().to_string();
+        let device = payload.device;
+        let selected_model_info = self
+            .find_supported_model_variant(&base_model, &model_version)
+            .await?;
+        if !selected_model_info.supported_devices.contains(&device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                selected_model_info.model_name,
+                selected_model_info.model_version,
+                device,
+                selected_model_info.supported_devices
+            );
+        }
         let ref_audio_path = payload.ref_audio_path.trim().to_string();
         let ref_text = payload.ref_text.trim().to_string();
         let text = payload.text.trim().to_string();
@@ -54,7 +67,6 @@ impl LocalService {
         } else {
             payload.ref_audio_name.trim().to_string()
         };
-        let model_version = payload.model_version.trim().to_string();
         let mut model_params = payload.model_params.clone();
         let export_audio_name =
             super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_clone");
@@ -62,6 +74,7 @@ impl LocalService {
         let speaker_snapshot = "-";
         let title = super::build_task_title("声音克隆", None, &create_time);
         let output_dir = ensure_child_dir(Path::new(self.data_dir()), "generated")?;
+        let txn = self.orm().begin().await?;
 
         let task_history = task_history_entity::ActiveModel {
             id: NotSet,
@@ -74,6 +87,7 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
+            device: Set(device.as_str().to_string()),
             deleted: Set(0),
         }
         .insert(&txn)

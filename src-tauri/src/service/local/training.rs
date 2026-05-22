@@ -107,24 +107,35 @@ impl LocalService {
         &self,
         payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
-        let selected_training_hardware = self.runtime_config()?.hardware_type();
         let create_time = now_string()?;
         let sample_count = payload.samples.len() as i64;
         let speaker_name = payload.speaker_name.trim().to_string();
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        let selected_training_device = payload.device;
         let mut model_params = payload.model_params.clone();
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
+        if !selected_model_info.supported_devices.contains(&selected_training_device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                selected_model_info.model_name,
+                selected_model_info.model_version,
+                selected_training_device,
+                selected_model_info.supported_devices
+            );
+        }
+        let selected_training_mode_label = if selected_training_device == HardwareType::Cpu {
+            "CPU"
+        } else {
+            "CUDA"
+        };
         let selected_training_mode_text = format!(
             "{} / {}",
             selected_model_info.model_name,
-            match selected_training_hardware {
-                HardwareType::Cuda => "CUDA",
-                HardwareType::Cpu => "CPU",
-            }
+            selected_training_mode_label,
         );
 
         let languages_json = serde_json::to_string(&vec![payload.language])?;
@@ -161,6 +172,7 @@ impl LocalService {
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             finished_time: Set(None),
+            device: Set(selected_training_device.as_str().to_string()),
             deleted: Set(0),
         }
         .insert(&txn)
@@ -239,7 +251,7 @@ impl LocalService {
                 epoch_count, steps_per_epoch, total_steps
             ));
         }
-        if matches!(selected_training_hardware, HardwareType::Cpu) {
+        if selected_training_device == HardwareType::Cpu {
             notes.push("当前使用 CPU 训练，速度会较慢，且可能占用较高系统资源。".into());
         }
         if payload

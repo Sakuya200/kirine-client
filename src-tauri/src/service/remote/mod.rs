@@ -6,7 +6,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::{
-    config::EnvConfig,
+    config::{EnvConfig, HardwareType},
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
@@ -74,7 +74,7 @@ impl Service for RemoteService {
         biz::unsupported("list_model_infos")
     }
 
-    async fn install_model(&self, _model_id: i64) -> Result<ModelMutationResult> {
+    async fn install_model(&self, _model_id: i64, _device: HardwareType) -> Result<ModelMutationResult> {
         biz::unsupported("install_model")
     }
 

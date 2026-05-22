@@ -56,28 +56,24 @@ pub(crate) struct VoiceClonePipelineRequest {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CommonRuntimeOptions {
-    hardware_type: HardwareType,
+    device: HardwareType,
     attn_implementation: String,
 }
 
 impl CommonRuntimeOptions {
-    pub(crate) fn from_env_config(config: &EnvConfig) -> Self {
-        Self {
-            hardware_type: config.hardware_type(),
+    pub(crate) fn from_task_device(task_device: HardwareType, config: &EnvConfig) -> Result<Self> {
+        Ok(Self {
+            device: task_device,
             attn_implementation: config.attn_implementation().as_str().to_string(),
-        }
+        })
     }
 
-    pub(crate) const fn is_cpu(&self) -> bool {
-        matches!(self.hardware_type, HardwareType::Cpu)
+    pub(crate) fn is_cpu(&self) -> bool {
+        self.device == HardwareType::Cpu
     }
 
-    pub(crate) const fn device(&self) -> &'static str {
-        if self.is_cpu() {
-            "cpu"
-        } else {
-            "cuda:0"
-        }
+    pub(crate) fn device(&self) -> &str {
+        self.device.runtime_arg()
     }
 
     pub(crate) fn attn_implementation(&self) -> &str {

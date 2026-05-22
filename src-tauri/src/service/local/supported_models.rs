@@ -35,6 +35,7 @@ struct SupportedModelDefinition {
     required_model_name_list: Vec<String>,
     required_model_repo_id_list: Vec<String>,
     supported_feature_list: Vec<String>,
+    supported_devices: Vec<String>,
 }
 
 fn default_model_download_type() -> ModelDownloadType {
@@ -191,6 +192,21 @@ fn validate_supported_models(config: &SupportedModelsConfig) -> Result<()> {
                 "模型配置中模型 {key} 的 requiredModelNameList 与 requiredModelRepoIdList 长度不一致"
             );
         }
+
+        if definition.supported_devices.is_empty() {
+            bail!("模型配置中模型 {key} 的 supportedDevices 不能为空");
+        }
+
+        let mut normalized_supported_devices = HashSet::new();
+        for device in &definition.supported_devices {
+            let normalized = device.trim().to_ascii_lowercase();
+            if normalized != "cpu" && normalized != "cuda" {
+                bail!("模型配置中模型 {key} 的 supportedDevices 包含非法值: {device}");
+            }
+            if !normalized_supported_devices.insert(normalized) {
+                bail!("模型配置中模型 {key} 的 supportedDevices 包含重复值");
+            }
+        }
     }
 
     let mut speaker_keys = HashSet::new();
@@ -221,6 +237,13 @@ where
     let required_model_repo_id_list_json =
         serde_json::to_string(&definition.required_model_repo_id_list)?;
     let supported_feature_list_json = serde_json::to_string(&definition.supported_feature_list)?;
+    let supported_devices_json = serde_json::to_string(
+        &definition
+            .supported_devices
+            .iter()
+            .map(|item| item.trim().to_ascii_lowercase())
+            .collect::<Vec<String>>(),
+    )?;
 
     let existing = model_info_entity::Entity::find()
         .filter(model_info_entity::Column::BaseModel.eq(definition.base_model.trim()))
@@ -239,6 +262,7 @@ where
         active_model.required_model_name_list_json = Set(required_model_name_list_json);
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
         active_model.supported_feature_list_json = Set(supported_feature_list_json);
+        active_model.supported_devices = Set(supported_devices_json);
         active_model.downloaded = Set(downloaded);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
@@ -254,6 +278,7 @@ where
             required_model_name_list_json: Set(required_model_name_list_json),
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),
+            supported_devices: Set(supported_devices_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
             downloaded: Set(false),

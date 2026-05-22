@@ -39,7 +39,7 @@ pub(crate) async fn connect_local_database(db_path: &Path) -> Result<DatabaseCon
     let orm_db_path = db_path.to_path_buf();
     let mut sea_options = ConnectOptions::new(build_sqlite_url(db_path)?);
     sea_options
-        .max_connections(1)
+        .max_connections(4)
         .min_connections(1)
         .connect_timeout(Duration::from_secs(8))
         .acquire_timeout(Duration::from_secs(8))

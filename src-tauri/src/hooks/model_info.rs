@@ -1,6 +1,9 @@
 use tauri::State;
 
-use crate::service::{models::{ModelInfo, ModelMutationResult}, ServiceState};
+use crate::{
+    config::HardwareType,
+    service::{models::{ModelInfo, ModelMutationResult}, ServiceState},
+};
 
 #[tauri::command]
 pub async fn list_model_infos(
@@ -18,13 +21,14 @@ pub async fn list_model_infos(
 #[tauri::command]
 pub async fn install_model(
     model_id: i64,
+    device: HardwareType,
     state: State<'_, ServiceState>,
 ) -> std::result::Result<ModelMutationResult, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .install_model(model_id)
+        .install_model(model_id, device)
         .await
         .map_err(|err| err.to_string())
 }
