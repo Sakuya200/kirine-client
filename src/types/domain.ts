@@ -1,5 +1,6 @@
 import type { AppLanguage } from '@/enums/language';
 import type { ModelTrainingSampleType } from '@/enums/modelTraining';
+import type { HardwareType } from '@/enums/settings';
 import type { SpeakerStatus, TaskStatus } from '@/enums/status';
 import type { TextToSpeechFormat } from '@/enums/textToSpeech';
 import type { HistoryTaskType } from '@/enums/task';
@@ -28,7 +29,7 @@ export interface HistoryRecordBase {
   speaker: string;
   status: TaskStatus;
   durationSeconds: number;
-  device: string;
+  device: HardwareType;
   createTime: string;
   modifyTime: string;
   taskLog?: string | null;
@@ -100,7 +101,7 @@ export interface ModelInfo {
   requiredModelNameList: string[];
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];
-  supportedDevices: string[];
+  supportedDevices: HardwareType[];
   downloaded: boolean;
   createTime: string;
   modifyTime: string;

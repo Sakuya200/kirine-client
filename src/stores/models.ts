@@ -22,10 +22,7 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
         .filter(Boolean)
     : [],
   supportedDevices: Array.isArray(item.supportedDevices)
-    ? item.supportedDevices
-        .filter((device): device is string => typeof device === 'string')
-        .map(device => device.trim().toLowerCase())
-        .filter(Boolean)
+    ? item.supportedDevices.map(device => (device === HardwareType.Cuda ? HardwareType.Cuda : HardwareType.Cpu))
     : [],
   downloaded: item.downloaded === true,
   createTime: item.createTime ?? '',
@@ -120,6 +117,11 @@ export const useModelStore = defineStore('models', () => {
     return installed;
   };
 
+  const getDeviceType = async (baseModel: BaseModel, modelVersion: string) => {
+    const result = await invoke<HardwareType>('get_device_type', { baseModel, modelVersion });
+    return result === HardwareType.Cuda ? HardwareType.Cuda : HardwareType.Cpu;
+  };
+
   const ensureLoaded = async () => {
     if (!initialized.value && !isLoading.value) {
       await loadModels();
@@ -154,6 +156,7 @@ export const useModelStore = defineStore('models', () => {
     ensureLoaded,
     installModel,
     reinstallModel,
+    getDeviceType,
     getModelsByFeature,
     getModelLabel,
     getModelVersionOptions,

@@ -364,6 +364,52 @@ pub async fn run_logged_command(
     ))
 }
 
+pub async fn run_logged_command_with_output(
+    program: &Path,
+    args: &[String],
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+    success_message: &str,
+) -> Result<String> {
+    initialize_task_log(task_log_path)?;
+
+    let output = prepare_command(program, args, current_dir)
+        .output()
+        .await
+        .with_context(|| {
+            format!(
+                "failed to spawn `{}` with program {} in {}",
+                label,
+                program.display(),
+                current_dir.display()
+            )
+        })?;
+
+    append_process_output(task_log_path, &output.stdout, &output.stderr)?;
+
+    let status = output.status;
+
+    if status.success() {
+        info!(
+            command = label,
+            message = success_message,
+            "command completed"
+        );
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+
+    error!(command = label, log_path = %task_log_path.display(), status = %status, "command failed");
+
+    bail!(build_process_failure_message(
+        label,
+        status,
+        task_log_path,
+        &output.stdout,
+        &output.stderr,
+    ))
+}
+
 pub async fn run_logged_command_cancellable(
     program: &Path,
     args: &[String],

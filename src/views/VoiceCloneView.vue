@@ -12,6 +12,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import RecentTaskList, { type RecentTaskListItem } from '@/components/common/RecentTaskList.vue';
+import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
@@ -19,6 +20,7 @@ import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { useModelStore } from '@/stores/models';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -90,6 +92,18 @@ const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<s
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const {
+  dialogOpen: showDeviceMismatchDialog,
+  dialogTitle: deviceMismatchDialogTitle,
+  dialogMessage: deviceMismatchDialogMessage,
+  dialogDetailLines: deviceMismatchDialogDetails,
+  isCheckingDeviceType,
+  isAwaitingDeviceConfirmation,
+  isDeviceGuardPending,
+  ensureMatchedOrConfirmed,
+  confirmDialog: confirmDeviceMismatchDialog,
+  closeDialog: closeDeviceMismatchDialog
+} = useTaskDeviceTypeGuard();
 const route = useRoute();
 const router = useRouter();
 const form = reactive({
@@ -194,6 +208,14 @@ const activeTaskBusyLabel = computed(() => {
     return '正在发送终止请求，请稍候';
   }
 
+  if (isCheckingDeviceType.value) {
+    return '正在检查模型环境，请稍候';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认硬件环境切换';
+  }
+
   if (isGenerating.value) {
     return '正在创建声音克隆任务，请稍候';
   }
@@ -203,6 +225,18 @@ const activeTaskBusyLabel = computed(() => {
   }
 
   return '';
+});
+const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
+const submitButtonText = computed(() => {
+  if (isCheckingDeviceType.value) {
+    return '检查环境中...';
+  }
+
+  if (isAwaitingDeviceConfirmation.value) {
+    return '等待确认...';
+  }
+
+  return isGenerating.value ? '生成中...' : '生成音频';
 });
 
 watch(
@@ -565,6 +599,15 @@ const createTask = async () => {
     return;
   }
 
+  const accepted = await ensureMatchedOrConfirmed({
+    baseModel: form.baseModel,
+    modelVersion: form.modelVersion,
+    selectedDevice: form.device
+  });
+  if (!accepted) {
+    return;
+  }
+
   isGenerating.value = true;
   uiStore.notifyInfo('正在创建声音克隆任务。', 2200);
 
@@ -784,9 +827,9 @@ onBeforeUnmount(() => {
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <BaseButton :loading="isGenerating" :disabled="!canGenerate" @click="createTask">
-                <SparklesIcon v-if="!isGenerating" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isGenerating ? '生成中...' : '生成音频' }}</span>
+              <BaseButton :loading="isSubmitPending" :disabled="!canGenerate || isSubmitPending" @click="createTask">
+                <SparklesIcon v-if="!isSubmitPending" class="h-4 w-4" aria-hidden="true" />
+                <span>{{ submitButtonText }}</span>
               </BaseButton>
               <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
                 <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
@@ -801,5 +844,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </PanelCard>
+
+    <WarningConfirmDialog
+      :open="showDeviceMismatchDialog"
+      :title="deviceMismatchDialogTitle"
+      :message="deviceMismatchDialogMessage"
+      :detail-lines="deviceMismatchDialogDetails"
+      @close="closeDeviceMismatchDialog"
+      @confirm="confirmDeviceMismatchDialog"
+    />
   </div>
 </template>

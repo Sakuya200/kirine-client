@@ -109,7 +109,15 @@ impl Service for LocalService {
         self.list_model_infos_impl().await
     }
 
-    async fn install_model(&self, model_id: i64, device: HardwareType) -> Result<ModelMutationResult> {
+    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
+        self.get_device_type_impl(base_model, model_version).await
+    }
+
+    async fn install_model(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelMutationResult> {
         self.install_model_impl(model_id, device).await
     }
 

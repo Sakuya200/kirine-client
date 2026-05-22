@@ -18,7 +18,10 @@ use crate::{
         },
         LocalService,
     },
-    utils::{process::run_logged_command, time::now_string},
+    utils::{
+        process::{run_logged_command, run_logged_command_with_output},
+        time::now_string,
+    },
     Result,
 };
 
@@ -107,7 +110,8 @@ impl LocalService {
         }
         let runtime_config = self.runtime_config()?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
-        let log_dir = ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "model-management")?;
+        let log_dir =
+            ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "model-management")?;
         let platform = ScriptPlatform::current();
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
@@ -201,6 +205,47 @@ impl LocalService {
             removed_paths: Vec::new(),
             preserved_paths: Vec::new(),
         })
+    }
+
+    pub(crate) async fn get_device_type_impl(
+        &self,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<HardwareType> {
+        let model_info = self
+            .find_supported_model_variant(base_model.trim(), model_version.trim())
+            .await?;
+        let runtime_config = self.runtime_config()?;
+        let src_model_root = resolve_src_model_root(self.app_dir())?;
+        let platform = ScriptPlatform::current();
+        let ensure_torch_runtime_script_path =
+            src_model_root.join(platform.ensure_torch_runtime_relative_path());
+        let log_dir = ensure_child_dir(&resolve_local_log_dir(&runtime_config)?, "device-check")?;
+        let log_path = log_dir.join(format!(
+            "detect-device-{}-{}.log",
+            model_info.base_model, model_info.model_version
+        ));
+
+        let mut args = platform.shell_args(&ensure_torch_runtime_script_path);
+        args.push("--log-path".to_string());
+        args.push(log_dir.to_string_lossy().to_string());
+        args.push("--task-log-file".to_string());
+        args.push(log_path.to_string_lossy().to_string());
+        args.push("--base-model".to_string());
+        args.push(model_info.base_model.clone());
+        args.push("--query-device-type".to_string());
+
+        let output = run_logged_command_with_output(
+            Path::new(platform.shell_program()),
+            &args,
+            &src_model_root,
+            "查询 Torch 运行时设备类型",
+            &log_path,
+            "Torch 运行时设备类型查询完成",
+        )
+        .await?;
+
+        Ok(parse_detected_device_type(&output).unwrap_or(HardwareType::Cpu))
     }
 
     pub(crate) async fn uninstall_model_impl(&self, model_id: i64) -> Result<ModelMutationResult> {
@@ -314,4 +359,12 @@ where
         let normalized = value.replace(r#"\""#, r#"""#);
         serde_json::from_str(&normalized).map_err(|_| first_err.into())
     })
+}
+
+fn parse_detected_device_type(output: &str) -> Option<HardwareType> {
+    output
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("DEVICE_TYPE|"))
+        .and_then(|value| value.trim().parse::<HardwareType>().ok())
 }

@@ -74,6 +74,10 @@ impl Service for RemoteService {
         biz::unsupported("list_model_infos")
     }
 
+    async fn get_device_type(&self, _base_model: &str, _model_version: &str) -> Result<HardwareType> {
+        biz::unsupported("get_device_type")
+    }
+
     async fn install_model(&self, _model_id: i64, _device: HardwareType) -> Result<ModelMutationResult> {
         biz::unsupported("install_model")
     }

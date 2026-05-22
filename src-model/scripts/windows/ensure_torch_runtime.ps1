@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
 
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--log-path', '--task-log-file') -SwitchOptions @('--cpu-mode') -ActionName 'ensure-torch-runtime'
+    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--log-path', '--task-log-file') -SwitchOptions @('--cpu-mode', '--query-device-type') -ActionName 'ensure-torch-runtime'
 }
 catch {
     Write-Error $_.Exception.Message
@@ -271,7 +271,31 @@ function Install-CudaTorchRuntime {
     throw "[ensure-torch-runtime] Unable to initialize working CUDA torch runtime. Tried: $($failedTags -join ', ')"
 }
 
+function Write-DetectedDeviceType {
+    $metadata = Get-TorchRuntimeMetadata
+    if ($null -eq $metadata) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value '[ensure-torch-runtime] torch runtime metadata unavailable, defaulting detected device type to cpu'
+        Write-Output 'DEVICE_TYPE|cpu'
+        return
+    }
+
+    if ([bool]$metadata.cuda_available -and -not [string]::IsNullOrWhiteSpace([string]$metadata.torch_cuda)) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[ensure-torch-runtime] detected CUDA torch runtime (torch=$($metadata.torch_version), cuda=$($metadata.torch_cuda))"
+        Write-Output 'DEVICE_TYPE|cuda'
+        return
+    }
+
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[ensure-torch-runtime] detected CPU torch runtime (torch=$($metadata.torch_version))"
+    Write-Output 'DEVICE_TYPE|cpu'
+}
+
 try {
+    if ($parsed['--query-device-type']) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value '[ensure-torch-runtime] query device type mode enabled'
+        Write-DetectedDeviceType
+        exit 0
+    }
+
     if (-not (Test-Path -LiteralPath $venvPython)) {
         throw "[ensure-torch-runtime] Python virtual environment not found: $venvPython. Please install model from model management first."
     }
