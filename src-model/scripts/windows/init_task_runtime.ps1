@@ -24,6 +24,7 @@ if ([string]::IsNullOrWhiteSpace($baseModel)) {
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
 $requirementsFile = Join-Path $modelRoot 'requirements.txt'
+$torchRequirementsFile = Join-Path $modelRoot 'requirements-torch.txt'
 $venvDir = Join-Path $modelRoot 'venv'
 $venvPython = Join-Path $venvDir 'Scripts\python.exe'
 
@@ -69,6 +70,29 @@ function Invoke-LoggedCommand {
     if ($exitCode -ne 0) {
         throw "[init-task-runtime] $Description failed with exit code $exitCode."
     }
+}
+
+function Get-TorchInstallArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$IndexUrl
+    )
+
+    if (-not (Test-Path -LiteralPath $torchRequirementsFile)) {
+        throw "[init-task-runtime] Torch requirements file not found: $torchRequirementsFile"
+    }
+
+    return @(
+        '-m',
+        'pip',
+        'install',
+        '--force-reinstall',
+        '--no-cache-dir',
+        '-r',
+        $torchRequirementsFile,
+        '--index-url',
+        $IndexUrl
+    )
 }
 
 function Get-CommandOutput {
@@ -377,7 +401,7 @@ function Install-CompatibleTorchCuda {
         $candidateTag = $candidate.Tag
 
         try {
-            Invoke-LoggedCommand -Description "install torch wheels for cu$candidateTag" -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.25.0', 'torchaudio==2.10.0', '--index-url', "https://download.pytorch.org/whl/cu$candidateTag")
+            Invoke-LoggedCommand -Description "install torch wheels for cu$candidateTag" -Command $venvPython -Arguments (Get-TorchInstallArguments -IndexUrl "https://download.pytorch.org/whl/cu$candidateTag")
             Invoke-LoggedCommand -Description "verify torch CUDA runtime using cu$candidateTag" -Command $venvPython -Arguments (Get-TorchCudaVerifyArguments)
             Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] verified working PyTorch CUDA runtime using cu$candidateTag"
             return $candidateTag
@@ -435,7 +459,7 @@ try {
             Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall'
         }
         else {
-            Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments @('-m', 'pip', 'install', '--force-reinstall', '--no-cache-dir', 'torch==2.10.0', 'torchvision==0.25.0', 'torchaudio==2.10.0', '--index-url', 'https://download.pytorch.org/whl/cpu')
+            Invoke-LoggedCommand -Description 'install torch CPU wheels' -Command $venvPython -Arguments (Get-TorchInstallArguments -IndexUrl 'https://download.pytorch.org/whl/cpu')
         }
     }
     else {

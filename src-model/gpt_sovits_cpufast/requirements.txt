@@ -2,11 +2,9 @@
 # - gpt_sovits_cpufast package itself is CLI glue and relies on the downloaded
 #   GPT-SoVITS-CPUFast checkout under src-model/base-models/<base-model>/.
 # - The bridge imports soundfile at runtime through the package environment.
+# - Torch runtime wheels are installed separately from requirements-torch.txt.
 # - Keep this list aligned with CPUFast inference-time imports (TTS.py, TextPreprocessor,
 #   LangSegmenter, chinese/chinese2), not full WebUI-only dependencies.
-torch==2.10.0
-torchvision==0.25.0
-torchaudio==2.10.0
 soundfile==0.13.1
 ffmpy==0.6.1
 tqdm==4.67.1

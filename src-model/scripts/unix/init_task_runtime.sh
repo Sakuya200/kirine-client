@@ -6,6 +6,7 @@ SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
 BASE_MODEL=""
 MODEL_ROOT=""
 REQUIREMENTS_FILE=""
+TORCH_REQUIREMENTS_FILE=""
 VENV_DIR=""
 VENV_PYTHON=""
 CPU_MODE=0
@@ -48,6 +49,7 @@ MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
 if [ -z "$REQUIREMENTS_FILE" ]; then
     REQUIREMENTS_FILE="$MODEL_ROOT/requirements.txt"
 fi
+TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
 VENV_DIR="$MODEL_ROOT/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
@@ -70,6 +72,13 @@ run_checked() {
     shift
     append_log "[init-task-runtime] $description: $*"
     "$@" >>"$TASK_LOG_FILE" 2>&1
+}
+
+ensure_torch_requirements_file() {
+    if [ ! -f "$TORCH_REQUIREMENTS_FILE" ]; then
+        echo "[init-task-runtime] Torch requirements file not found: $TORCH_REQUIREMENTS_FILE" >&2
+        exit 1
+    fi
 }
 
 detect_python() {
@@ -269,8 +278,9 @@ install_compatible_torch_cuda() {
     candidates=$1
     failed_tags=''
 
+    ensure_torch_requirements_file
     for candidate_tag in $candidates; do
-        if run_checked "install torch wheels for cu$candidate_tag" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url "https://download.pytorch.org/whl/cu$candidate_tag" \
+        if run_checked "install torch wheels for cu$candidate_tag" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir -r "$TORCH_REQUIREMENTS_FILE" --index-url "https://download.pytorch.org/whl/cu$candidate_tag" \
             && verify_torch_cuda_runtime "verify torch CUDA runtime using cu$candidate_tag"; then
             append_log "[init-task-runtime] verified working PyTorch CUDA runtime using cu$candidate_tag"
             printf '%s\n' "$candidate_tag"
@@ -310,7 +320,8 @@ if [ "$CPU_MODE" -eq 1 ]; then
     if verify_torch_cpu_runtime "verify existing torch runtime"; then
         append_log "[init-task-runtime] existing torch runtime is already usable after base dependency sync; skipping torch reinstall"
     else
-        run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+        ensure_torch_requirements_file
+        run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir -r "$TORCH_REQUIREMENTS_FILE" --index-url https://download.pytorch.org/whl/cpu
     fi
 else
     cuda_version=$(detect_cuda_version)

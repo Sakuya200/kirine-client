@@ -1,8 +1,9 @@
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, path::Path};
 
 use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::de::DeserializeOwned;
+use tokio::fs;
 
 use crate::{
     common::local_paths::{ensure_child_dir, resolve_local_log_dir},
@@ -125,6 +126,22 @@ impl LocalService {
             "install-{}-{}-download.log",
             model_info.base_model, model_info.model_version
         ));
+        remove_file_if_exists(&init_log_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to clear previous install init log: {}",
+                    init_log_path.display()
+                )
+            })?;
+        remove_file_if_exists(&download_log_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to clear previous install download log: {}",
+                    download_log_path.display()
+                )
+            })?;
         let bootstrap_paths = PipelineBootstrapPaths {
             base_model: &model_info.base_model,
             model_version: &model_info.model_version,
@@ -252,6 +269,7 @@ impl LocalService {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
+        let venv_dir = src_model_root.join(&model_info.base_model).join("venv");
         let artifacts_root = src_model_root.join("base-models");
         let shared_artifacts = self.collect_shared_artifact_names(model_id).await?;
         let mut removed_paths = Vec::new();
@@ -269,14 +287,14 @@ impl LocalService {
             }
 
             if artifact_path.is_dir() {
-                fs::remove_dir_all(&artifact_path).with_context(|| {
+                fs::remove_dir_all(&artifact_path).await.with_context(|| {
                     format!(
                         "failed to remove model artifact directory: {}",
                         artifact_path.display()
                     )
                 })?;
             } else {
-                fs::remove_file(&artifact_path).with_context(|| {
+                fs::remove_file(&artifact_path).await.with_context(|| {
                     format!(
                         "failed to remove model artifact file: {}",
                         artifact_path.display()
@@ -285,6 +303,15 @@ impl LocalService {
             }
 
             removed_paths.push(artifact_path.to_string_lossy().to_string());
+        }
+
+        if remove_dir_if_exists(&venv_dir).await.with_context(|| {
+            format!(
+                "failed to remove model runtime directory: {}",
+                venv_dir.display()
+            )
+        })? {
+            removed_paths.push(venv_dir.to_string_lossy().to_string());
         }
 
         self.set_model_downloaded_impl(&model_info.base_model, &model_info.model_version, false)
@@ -367,4 +394,32 @@ fn parse_detected_device_type(output: &str) -> Option<HardwareType> {
         .rev()
         .find_map(|line| line.trim().strip_prefix("DEVICE_TYPE|"))
         .and_then(|value| value.trim().parse::<HardwareType>().ok())
+}
+
+async fn remove_file_if_exists(path: &Path) -> Result<bool> {
+    if !fs::try_exists(path)
+        .await
+        .with_context(|| format!("failed to inspect file: {}", path.display()))?
+    {
+        return Ok(false);
+    }
+
+    fs::remove_file(path)
+        .await
+        .with_context(|| format!("failed to remove file: {}", path.display()))?;
+    Ok(true)
+}
+
+async fn remove_dir_if_exists(path: &Path) -> Result<bool> {
+    if !fs::try_exists(path)
+        .await
+        .with_context(|| format!("failed to inspect directory: {}", path.display()))?
+    {
+        return Ok(false);
+    }
+
+    fs::remove_dir_all(path)
+        .await
+        .with_context(|| format!("failed to remove directory: {}", path.display()))?;
+    Ok(true)
 }

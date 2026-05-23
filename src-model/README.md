@@ -75,27 +75,37 @@
 本地模型任务按固定阶段执行，当前主要脚本如下：
 
 1. `init_task_runtime.ps1` / `init_task_runtime.sh`
-  - 创建或复用指定 `--base-model` 的 `venv`
-  - 安装模型目录中的 `requirements.txt`
-  - 为后续任务准备基础运行环境
-2. `ensure_torch_runtime.ps1` / `ensure_torch_runtime.sh`
-  - 校验当前模型环境中的 torch 是否满足 CPU 或 CUDA 任务要求
-  - 按需要切换 torch 运行时版本
-  - 当前还支持只读查询模式，用于返回当前模型环境的设备类型，输出约定为 `DEVICE_TYPE|cpu` 或 `DEVICE_TYPE|cuda`
-3. `download_models.ps1` / `download_models.sh`
-  - 下载基础模型资源与相关离线资产
-4. `transcode_audio.ps1` / `transcode_audio.sh`
-  - 统一音频格式转换
-5. `package_src_model.ps1` / 对应 Unix 打包脚本
-  - 打包 `src-model` 运行时资产
+
+- 创建或复用指定 `--base-model` 的 `venv`
+- 安装模型目录中的 `requirements.txt`
+- 为后续任务准备基础运行环境
+
+1. `ensure_torch_runtime.ps1` / `ensure_torch_runtime.sh`
+
+- 校验当前模型环境中的 torch 是否满足 CPU 或 CUDA 任务要求
+- 按需要结合模型目录中的 `requirements-torch.txt` 切换 torch 运行时版本
+- 当前还支持只读查询模式，用于返回当前模型环境的设备类型，输出约定为 `DEVICE_TYPE|cpu` 或 `DEVICE_TYPE|cuda`
+
+1. `download_models.ps1` / `download_models.sh`
+
+- 下载基础模型资源与相关离线资产
+
+1. `transcode_audio.ps1` / `transcode_audio.sh`
+
+- 统一音频格式转换
+
+1. `package_src_model.ps1` / 对应 Unix 打包脚本
+
+- 打包 `src-model` 运行时资产
 
 ## 当前运行时行为
 
-1. 每个基础模型维护独立 `requirements.txt` 与 `venv/`，避免不同模型链路互相污染。
-2. 任务设备类型已经改为任务级参数，而不是全局设置。
-3. 任务创建前，前端会先调用后端 `get_device_type`，后端再通过 `ensure_torch_runtime` 的查询模式探测当前模型环境里的 torch 设备类型。
-4. 如果当前模型环境与任务选择的设备类型不一致，用户确认后才会继续执行，并由后续运行时阶段自动切换 torch 环境。
-5. `task_history.device` 是任务最终执行设备的记录来源，历史详情会展示该字段。
+1. 每个基础模型维护独立 `requirements.txt`、`requirements-torch.txt` 与 `venv/`，避免不同模型链路互相污染。
+2. `requirements.txt` 只负责基础 Python 依赖；`requirements-torch.txt` 负责模型自定义的 Torch 运行时依赖，实际 CPU/CUDA 轮子来源仍由运行时脚本通过 `index-url` 选择。
+3. 任务设备类型已经改为任务级参数，而不是全局设置。
+4. 任务创建前，前端会先调用后端 `get_device_type`，后端再通过 `ensure_torch_runtime` 的查询模式探测当前模型环境里的 torch 设备类型。
+5. 如果当前模型环境与任务选择的设备类型不一致，用户确认后才会继续执行，并由后续运行时阶段自动切换 torch 环境。
+6. `task_history.device` 是任务最终执行设备的记录来源，历史详情会展示该字段。
 
 ## 配置说明
 

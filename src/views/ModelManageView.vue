@@ -32,8 +32,7 @@ const modelBusyLabel = computed(() => {
 const featureLabelMap: Record<string, string> = {
   [HistoryTaskType.TextToSpeech]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.TextToSpeech],
   [HistoryTaskType.VoiceClone]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceClone],
-  [HistoryTaskType.ModelTraining]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.ModelTraining],
-  lora: 'LoRA'
+  [HistoryTaskType.ModelTraining]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.ModelTraining]
 };
 
 const refreshModels = async () => {
