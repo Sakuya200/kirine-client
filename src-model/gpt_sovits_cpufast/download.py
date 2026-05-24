@@ -10,6 +10,15 @@ import urllib.request
 import zipfile
 
 
+DEFAULT_REPO_BRANCH = "main"
+# 固定为2026年5月前最后一次提交，确保下载的代码与预训练模型兼容且稳定。
+DEFAULT_REPO_REVISION = "7a77761b69760a757a698565d0089806dc58ec83"
+
+
+def _emit(message: str, *, stderr: bool = False) -> None:
+    print(message, file=sys.stderr if stderr else sys.stdout)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-model", dest="base_model", type=str, required=True)
@@ -22,6 +31,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="repo_url",
         type=str,
         default="https://github.com/baicai-1145/GPT-SoVITS-CPUFast",
+    )
+    parser.add_argument(
+        "--repo-branch",
+        dest="repo_branch",
+        type=str,
+        default=DEFAULT_REPO_BRANCH,
+        help="Git branch to fetch before checking out fixed revision.",
+    )
+    parser.add_argument(
+        "--repo-revision",
+        dest="repo_revision",
+        type=str,
+        default=DEFAULT_REPO_REVISION,
+        help="Pinned git commit for GPT-SoVITS-CPUFast checkout.",
     )
     parser.add_argument(
         "--asset-source",
@@ -220,7 +243,110 @@ def _is_cpufast_runtime_ready(root: Path, version: str = "v2ProPlus") -> bool:
     return len(missing) == 0
 
 
-def _clone_repo(repo_url: str, destination: Path) -> Path:
+def _ensure_repo_revision(
+    destination: Path,
+    branch: str,
+    revision: str,
+) -> None:
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        raise SystemExit(
+            "Pinned checkout requires git, but it is not available in PATH."
+        )
+
+    git_dir = destination / ".git"
+    if not git_dir.exists():
+        raise SystemExit(
+            "Pinned checkout requires a git repository, but .git was not found under "
+            f"{destination}. Please remove this directory and retry."
+        )
+
+    try:
+        head = subprocess.run(
+            [git_bin, "rev-parse", "HEAD"],
+            check=True,
+            timeout=60,
+            cwd=destination,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if head == revision:
+            _emit(f"✓ Repository already pinned at {revision}")
+            return
+
+        _emit(
+            f"📌 Repository revision drift detected (HEAD={head}), pinning to {branch}@{revision}",
+        )
+
+        subprocess.run(
+            [git_bin, "fetch", "origin", branch],
+            check=True,
+            timeout=180,
+            cwd=destination,
+        )
+
+        try:
+            subprocess.run(
+                [git_bin, "checkout", "--detach", revision],
+                check=True,
+                timeout=180,
+                cwd=destination,
+            )
+        except subprocess.CalledProcessError:
+            # Fallback: the requested revision may not be reachable from the fetched branch
+            # (e.g. revision is on another branch), or local object graph is incomplete.
+            _emit(
+                "⚠️  Direct checkout failed after branch fetch; trying fallback fetch for full refs and target revision...",
+                stderr=True,
+            )
+            subprocess.run(
+                [git_bin, "fetch", "origin", "--tags", "--prune"],
+                check=True,
+                timeout=300,
+                cwd=destination,
+            )
+            subprocess.run(
+                [git_bin, "fetch", "origin", revision],
+                check=True,
+                timeout=300,
+                cwd=destination,
+            )
+            subprocess.run(
+                [git_bin, "checkout", "--detach", revision],
+                check=True,
+                timeout=180,
+                cwd=destination,
+            )
+
+        pinned_head = subprocess.run(
+            [git_bin, "rev-parse", "HEAD"],
+            check=True,
+            timeout=60,
+            cwd=destination,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        _emit(f"✓ Repository pinned to {pinned_head}")
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(
+            "❌ Failed to pin GPT-SoVITS-CPUFast revision due to git timeout: "
+            f"{exc}"
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(
+            "❌ Failed to pin GPT-SoVITS-CPUFast revision to "
+            f"{revision}: {exc}\n"
+            f"Hint: ensure the revision exists on remote and is fetchable. "
+            f"If this revision is not on branch '{branch}', pass the correct --repo-branch or keep using pinned SHA with network access."
+        )
+
+
+def _clone_repo(
+    repo_url: str,
+    branch: str,
+    revision: str,
+    destination: Path,
+) -> Path:
     """Clone a git repository with retry logic and timeout handling."""
     git_bin = shutil.which("git")
     if git_bin is None:
@@ -236,10 +362,19 @@ def _clone_repo(repo_url: str, destination: Path) -> Path:
     for attempt in range(1, max_retries + 1):
         try:
             subprocess.run(
-                [git_bin, "clone", "--depth", "1", repo_url, str(destination)],
+                [
+                    git_bin,
+                    "clone",
+                    "--branch",
+                    branch,
+                    "--single-branch",
+                    repo_url,
+                    str(destination),
+                ],
                 check=True,
                 timeout=timeout,
             )
+            _ensure_repo_revision(destination, branch, revision)
             return destination
         except subprocess.TimeoutExpired:
             error_msg = f"Git clone timed out after {timeout}s (attempt {attempt}/{max_retries})"
@@ -349,23 +484,38 @@ def main(argv: list[str] | None = None) -> None:
     resolved_asset_version = _resolve_asset_version(args.asset_version, args.model_version)
     target_root.mkdir(parents=True, exist_ok=True)
 
-    # Check 1: Already fully ready?
-    if _is_cpufast_runtime_ready(target_dir, resolved_asset_version):
-        print(f"✓ GPT-SoVITS-CPUFast is already complete at {target_dir} for {resolved_asset_version}")
-        return
-
-    # Check 2: Ensure code checkout exists.
+    # Check 1: Ensure code checkout exists and is pinned to the expected revision.
     if not _has_gpt_sovits_structure(target_dir):
         if target_dir.exists():
-            print(f"⚠️  Existing target directory is not a valid GPT-SoVITS-CPUFast checkout: {target_dir}")
-            print("🧹 Removing invalid directory for a clean direct clone...")
+            _emit(
+                f"⚠️  Existing target directory is not a valid GPT-SoVITS-CPUFast checkout: {target_dir}",
+            )
+            _emit("🧹 Removing invalid directory for a clean direct clone...")
             shutil.rmtree(target_dir)
 
-        print(f"📥 Cloning GPT-SoVITS-CPUFast directly into target directory: {target_dir}")
-        _clone_repo(args.repo_url, target_dir)
-        print("✓ Clone completed successfully")
+        _emit(
+            f"📥 Cloning GPT-SoVITS-CPUFast directly into target directory: {target_dir}",
+        )
+        _clone_repo(
+            args.repo_url,
+            args.repo_branch,
+            args.repo_revision,
+            target_dir,
+        )
+        _emit("✓ Clone completed successfully")
     else:
-        print(f"✓ GPT-SoVITS-CPUFast checkout already exists at {target_dir}; skip clone")
+        _emit(
+            f"✓ GPT-SoVITS-CPUFast checkout already exists at {target_dir}; skip clone",
+        )
+
+    _ensure_repo_revision(target_dir, args.repo_branch, args.repo_revision)
+
+    # Check 2: If runtime already complete, finish early after pinning.
+    if _is_cpufast_runtime_ready(target_dir, resolved_asset_version):
+        _emit(
+            f"✓ GPT-SoVITS-CPUFast is already complete at {target_dir} for {resolved_asset_version}",
+        )
+        return
 
     # Check 3: Ensure official inference assets are present.
     _download_missing_assets(target_dir, args.asset_source, resolved_asset_version)
@@ -386,7 +536,7 @@ def main(argv: list[str] | None = None) -> None:
             f"  5. Verify selected model-scale/asset-version points to available checkpoints"
         )
     
-    print(f"✅ GPT-SoVITS-CPUFast is ready at {target_dir}")
+    _emit(f"✅ GPT-SoVITS-CPUFast is ready at {target_dir}")
 
 
 if __name__ == "__main__":
