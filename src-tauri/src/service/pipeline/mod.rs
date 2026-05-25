@@ -23,9 +23,12 @@ use crate::{
         local::{entity::task_history as task_history_entity, LocalService},
         models::{HistoryTaskType, ModelDownloadType, ModelInfo, TaskStatus},
     },
-    utils::process::{
-        run_logged_python_script, run_logged_python_script_cancellable, run_logged_shell_script,
-        run_logged_shell_script_cancellable, LoggedCommandResult,
+    utils::{
+        file_ops::remove_file_if_exists,
+        process::{
+            run_logged_python_script, run_logged_python_script_cancellable,
+            run_logged_shell_script, run_logged_shell_script_cancellable, LoggedCommandResult,
+        },
     },
     Result,
 };
@@ -85,6 +88,7 @@ impl CommonRuntimeOptions {
 pub(crate) struct PipelineBootstrapPaths<'a> {
     pub base_model: &'a str,
     pub model_version: &'a str,
+    pub log_dir: &'a Path,
     pub src_model_root: &'a Path,
     pub venv_python_path: &'a Path,
     pub init_task_runtime_script_path: &'a Path,
@@ -93,6 +97,13 @@ pub(crate) struct PipelineBootstrapPaths<'a> {
 
 pub(crate) const INIT_MODEL_RUNTIME_LABEL: &str = "初始化本地模型运行时环境";
 pub(crate) const DOWNLOAD_MODEL_ARTIFACTS_LABEL: &str = "下载基础模型权重";
+
+fn model_install_stage_log_path(paths: PipelineBootstrapPaths<'_>, stage: &str) -> PathBuf {
+    paths.log_dir.join(format!(
+        "install-{}-{}-{}.log",
+        paths.base_model, paths.model_version, stage
+    ))
+}
 
 #[async_trait]
 pub(crate) trait ModelTaskPipeline: Send + Sync {
@@ -121,18 +132,19 @@ pub(crate) trait ModelTaskPipeline: Send + Sync {
 pub(crate) async fn validate_and_init<RunStage, Fut, Label>(
     paths: PipelineBootstrapPaths<'_>,
     task_id: i64,
-    log_dir: &Path,
     use_cpu_mode: bool,
     init_label: Label,
     run_stage: RunStage,
 ) -> Result<()>
 where
-    RunStage: Fn(PathBuf, PathBuf, i64, PathBuf, Vec<String>, Label) -> Fut,
+    RunStage: Fn(PathBuf, PathBuf, i64, PathBuf, PathBuf, Vec<String>, Label) -> Fut,
     Fut: Future<Output = Result<()>>,
     Label: Copy,
 {
     ensure_required_path_exists(paths.init_task_runtime_script_path, "运行时初始化脚本")?;
     ensure_required_path_exists(paths.download_models_script_path, "模型下载脚本")?;
+    let init_log_path = model_install_stage_log_path(paths, "init");
+    remove_file_if_exists(&init_log_path, "previous install init log")?;
 
     info!(
         base_model = %paths.base_model,
@@ -151,7 +163,8 @@ where
         paths.init_task_runtime_script_path.to_path_buf(),
         paths.src_model_root.to_path_buf(),
         task_id,
-        log_dir.to_path_buf(),
+        paths.log_dir.to_path_buf(),
+        init_log_path,
         init_script_args,
         init_label,
     )
@@ -171,14 +184,13 @@ pub(crate) async fn validate_and_download<RunStage, Fut, Validate, Label>(
     service: &LocalService,
     paths: PipelineBootstrapPaths<'_>,
     task_id: i64,
-    log_dir: &Path,
     model_info: &ModelInfo,
     download_label: Label,
     run_stage: RunStage,
     validate_downloads: Validate,
 ) -> Result<()>
 where
-    RunStage: Fn(PathBuf, PathBuf, i64, PathBuf, Vec<String>, Label) -> Fut,
+    RunStage: Fn(PathBuf, PathBuf, i64, PathBuf, PathBuf, Vec<String>, Label) -> Fut,
     Fut: Future<Output = Result<()>>,
     Validate: Fn() -> Result<()>,
     Label: Copy + AsRef<str>,
@@ -195,6 +207,9 @@ where
         );
         return Ok(());
     }
+
+    let download_log_path = model_install_stage_log_path(paths, "download");
+    remove_file_if_exists(&download_log_path, "previous install download log")?;
 
     info!(
         base_model = %paths.base_model,
@@ -215,17 +230,14 @@ where
                 paths.download_models_script_path.to_path_buf(),
                 paths.src_model_root.to_path_buf(),
                 task_id,
-                log_dir.to_path_buf(),
+                paths.log_dir.to_path_buf(),
+                download_log_path,
                 args,
                 download_label,
             )
             .await?;
         }
         ModelDownloadType::Custom => {
-            let task_log_path = log_dir.join(format!(
-                "{}_{}_download.log",
-                paths.base_model, paths.model_version
-            ));
             let script_path = self::model_artifacts::resolve_custom_model_download_script_path(
                 paths.src_model_root,
                 model_info,
@@ -242,9 +254,9 @@ where
                     .to_string_lossy()
                     .to_string(),
                 "--log-path".to_string(),
-                log_dir.to_string_lossy().to_string(),
+                paths.log_dir.to_string_lossy().to_string(),
                 "--task-log-file".to_string(),
-                task_log_path.to_string_lossy().to_string(),
+                download_log_path.to_string_lossy().to_string(),
             ];
 
             run_logged_python_script(
@@ -252,7 +264,7 @@ where
                 &script_path,
                 paths.src_model_root,
                 download_label.as_ref(),
-                &task_log_path,
+                &download_log_path,
                 "python script completed successfully",
                 script_args,
             )

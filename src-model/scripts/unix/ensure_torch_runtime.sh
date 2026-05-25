@@ -61,7 +61,15 @@ run_checked() {
 }
 
 MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
+TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
 VENV_PYTHON="$MODEL_ROOT/venv/bin/python"
+
+ensure_torch_requirements_file() {
+    if [ ! -f "$TORCH_REQUIREMENTS_FILE" ]; then
+        echo "[ensure-torch-runtime] Torch requirements file not found: $TORCH_REQUIREMENTS_FILE" >&2
+        exit 1
+    fi
+}
 
 if [ ! -x "$VENV_PYTHON" ]; then
     echo "[ensure-torch-runtime] Python virtual environment not found: $VENV_PYTHON. Please install model from model management first." >&2
@@ -115,8 +123,9 @@ if [ "$CPU_MODE" -eq 1 ]; then
             ;;
     esac
 
-    run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu
-    run_checked "verify torch CPU runtime" "$VENV_PYTHON" -c "import torch; assert not (torch.version.cuda or ''), 'CPU runtime expected no CUDA tag'; print(torch.__version__)"
+    ensure_torch_requirements_file
+    run_checked "install torch CPU wheels" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir -r "$TORCH_REQUIREMENTS_FILE" --index-url https://download.pytorch.org/whl/cpu
+    run_checked "verify torch CPU runtime" "$VENV_PYTHON" -c "import torch, torchaudio, torchvision; assert not (torch.version.cuda or ''), 'CPU runtime expected no CUDA tag'; print(torch.__version__)"
     append_log "[ensure-torch-runtime] torch runtime is ready"
     exit 0
 fi
@@ -172,9 +181,10 @@ if [ -n "$metadata" ]; then
     fi
 fi
 
+ensure_torch_requirements_file
 for tag in $candidates; do
-    if run_checked "install torch CUDA wheels (cu$tag)" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url "https://download.pytorch.org/whl/cu$tag"; then
-        if run_checked "verify torch CUDA runtime (cu$tag)" "$VENV_PYTHON" -c "import torch; assert torch.cuda.is_available(), 'torch.cuda.is_available() is False'; assert torch.version.cuda, 'torch.version.cuda is empty'; print(torch.__version__); print(torch.version.cuda)"; then
+    if run_checked "install torch CUDA wheels (cu$tag)" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir -r "$TORCH_REQUIREMENTS_FILE" --index-url "https://download.pytorch.org/whl/cu$tag"; then
+        if run_checked "verify torch CUDA runtime (cu$tag)" "$VENV_PYTHON" -c "import torch, torchaudio, torchvision; assert torch.cuda.is_available(), 'torch.cuda.is_available() is False'; assert torch.version.cuda, 'torch.version.cuda is empty'; print(torch.__version__); print(torch.version.cuda)"; then
             append_log "[ensure-torch-runtime] torch runtime is ready"
             exit 0
         fi

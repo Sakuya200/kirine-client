@@ -1,8 +1,9 @@
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, path::Path};
 
 use anyhow::{bail, Context};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::de::DeserializeOwned;
+use tokio::fs;
 
 use crate::{
     common::local_paths::{ensure_child_dir, resolve_local_log_dir},
@@ -117,17 +118,10 @@ impl LocalService {
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
         let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
         let use_cpu_mode = device == HardwareType::Cpu;
-        let init_log_path = log_dir.join(format!(
-            "install-{}-{}-init.log",
-            model_info.base_model, model_info.model_version
-        ));
-        let download_log_path = log_dir.join(format!(
-            "install-{}-{}-download.log",
-            model_info.base_model, model_info.model_version
-        ));
         let bootstrap_paths = PipelineBootstrapPaths {
             base_model: &model_info.base_model,
             model_version: &model_info.model_version,
+            log_dir: &log_dir,
             src_model_root: &src_model_root,
             venv_python_path: &venv_python_path,
             init_task_runtime_script_path: &init_script_path,
@@ -137,28 +131,24 @@ impl LocalService {
         validate_and_init(
             bootstrap_paths,
             model_id,
-            &log_dir,
             use_cpu_mode,
             INIT_MODEL_RUNTIME_LABEL,
-            |script_path, working_dir, _task_id, log_dir, script_args, label| {
-                let log_path = init_log_path.clone();
-                async move {
-                    let mut args = platform.shell_args(&script_path);
-                    args.push("--log-path".to_string());
-                    args.push(log_dir.to_string_lossy().to_string());
-                    args.push("--task-log-file".to_string());
-                    args.push(log_path.to_string_lossy().to_string());
-                    args.extend(script_args);
-                    run_logged_command(
-                        Path::new(platform.shell_program()),
-                        &args,
-                        &working_dir,
-                        label,
-                        &log_path,
-                        "模型管理安装阶段执行完成",
-                    )
-                    .await
-                }
+            |script_path, working_dir, _task_id, log_dir, log_path, script_args, label| async move {
+                let mut args = platform.shell_args(&script_path);
+                args.push("--log-path".to_string());
+                args.push(log_dir.to_string_lossy().to_string());
+                args.push("--task-log-file".to_string());
+                args.push(log_path.to_string_lossy().to_string());
+                args.extend(script_args);
+                run_logged_command(
+                    Path::new(platform.shell_program()),
+                    &args,
+                    &working_dir,
+                    label,
+                    &log_path,
+                    "模型管理安装阶段执行完成",
+                )
+                .await
             },
         )
         .await?;
@@ -167,28 +157,24 @@ impl LocalService {
             self,
             bootstrap_paths,
             model_id,
-            &log_dir,
             &model_info,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL,
-            |script_path, working_dir, _task_id, log_dir, script_args, label| {
-                let log_path = download_log_path.clone();
-                async move {
-                    let mut args = platform.shell_args(&script_path);
-                    args.push("--log-path".to_string());
-                    args.push(log_dir.to_string_lossy().to_string());
-                    args.push("--task-log-file".to_string());
-                    args.push(log_path.to_string_lossy().to_string());
-                    args.extend(script_args);
-                    run_logged_command(
-                        Path::new(platform.shell_program()),
-                        &args,
-                        &working_dir,
-                        label,
-                        &log_path,
-                        "模型管理安装阶段执行完成",
-                    )
-                    .await
-                }
+            |script_path, working_dir, _task_id, log_dir, log_path, script_args, label| async move {
+                let mut args = platform.shell_args(&script_path);
+                args.push("--log-path".to_string());
+                args.push(log_dir.to_string_lossy().to_string());
+                args.push("--task-log-file".to_string());
+                args.push(log_path.to_string_lossy().to_string());
+                args.extend(script_args);
+                run_logged_command(
+                    Path::new(platform.shell_program()),
+                    &args,
+                    &working_dir,
+                    label,
+                    &log_path,
+                    "模型管理安装阶段执行完成",
+                )
+                .await
             },
             || {
                 validate_model_artifact_paths(
@@ -252,6 +238,7 @@ impl LocalService {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
+        let venv_dir = src_model_root.join(&model_info.base_model).join("venv");
         let artifacts_root = src_model_root.join("base-models");
         let shared_artifacts = self.collect_shared_artifact_names(model_id).await?;
         let mut removed_paths = Vec::new();
@@ -269,14 +256,14 @@ impl LocalService {
             }
 
             if artifact_path.is_dir() {
-                fs::remove_dir_all(&artifact_path).with_context(|| {
+                fs::remove_dir_all(&artifact_path).await.with_context(|| {
                     format!(
                         "failed to remove model artifact directory: {}",
                         artifact_path.display()
                     )
                 })?;
             } else {
-                fs::remove_file(&artifact_path).with_context(|| {
+                fs::remove_file(&artifact_path).await.with_context(|| {
                     format!(
                         "failed to remove model artifact file: {}",
                         artifact_path.display()
@@ -285,6 +272,15 @@ impl LocalService {
             }
 
             removed_paths.push(artifact_path.to_string_lossy().to_string());
+        }
+
+        if remove_dir_if_exists(&venv_dir).await.with_context(|| {
+            format!(
+                "failed to remove model runtime directory: {}",
+                venv_dir.display()
+            )
+        })? {
+            removed_paths.push(venv_dir.to_string_lossy().to_string());
         }
 
         self.set_model_downloaded_impl(&model_info.base_model, &model_info.model_version, false)
@@ -367,4 +363,18 @@ fn parse_detected_device_type(output: &str) -> Option<HardwareType> {
         .rev()
         .find_map(|line| line.trim().strip_prefix("DEVICE_TYPE|"))
         .and_then(|value| value.trim().parse::<HardwareType>().ok())
+}
+
+async fn remove_dir_if_exists(path: &Path) -> Result<bool> {
+    if !fs::try_exists(path)
+        .await
+        .with_context(|| format!("failed to inspect directory: {}", path.display()))?
+    {
+        return Ok(false);
+    }
+
+    fs::remove_dir_all(path)
+        .await
+        .with_context(|| format!("failed to remove directory: {}", path.display()))?;
+    Ok(true)
 }

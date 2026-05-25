@@ -30,8 +30,11 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell vite to ignore watching `src-tauri`
-      ignored: ['**/src-tauri/**']
+      // 3. tell vite to ignore watching `src-tauri` and `src-model`
+      //    `src-model` contains Python venvs and downloaded model weights that can
+      //    create tens of thousands of files during runtime initialisation, causing
+      //    the chokidar watcher to exhaust the Node.js / V8 heap (OOM / Full GC).
+      ignored: ['**/src-tauri/**', '**/src-model/**']
     }
   }
 }));

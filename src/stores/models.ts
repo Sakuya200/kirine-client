@@ -105,6 +105,7 @@ export const useModelStore = defineStore('models', () => {
   const reinstallModel = async (modelId: number, device: HardwareType = HardwareType.Cpu) => {
     const uninstalled = await uninstallModel(modelId);
     if (!uninstalled) {
+      uiStore.notifyWarning('模型卸载失败，无法继续重装，请重试卸载。', 4200);
       return null;
     }
 
