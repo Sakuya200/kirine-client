@@ -30,6 +30,7 @@ const navIcons: Record<string, Component> = {
   [HistoryTaskType.ModelTraining]: MicrophoneIcon,
   [HistoryTaskType.TextToSpeech]: SpeakerWaveIcon,
   [HistoryTaskType.VoiceClone]: MusicalNoteIcon,
+  [HistoryTaskType.VoiceDesign]: SpeakerWaveIcon,
   models: ServerStackIcon,
   speakers: UserGroupIcon,
   history: ClockIcon,

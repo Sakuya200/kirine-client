@@ -7,6 +7,7 @@ mod supported_models;
 mod training;
 mod tts;
 mod voice_clone;
+mod voice_design;
 
 use std::{
     collections::HashMap,
@@ -32,14 +33,16 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType,
+            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
+            HistoryTaskType,
             ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
             SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
-            VoiceClonePipelineRequest,
+            VoiceClonePipelineRequest, VoiceDesignPipelineRequest,
         },
         Service,
     },
@@ -141,6 +144,10 @@ impl Service for LocalService {
         self.read_voice_clone_audio_impl(history_id).await
     }
 
+    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset> {
+        self.read_voice_design_audio_impl(history_id).await
+    }
+
     async fn delete_history_record(
         &self,
         history_id: i64,
@@ -176,6 +183,13 @@ impl Service for LocalService {
         payload: CreateVoiceCloneTaskPayload,
     ) -> Result<VoiceCloneTaskResult> {
         self.create_voice_clone_task_impl(payload).await
+    }
+
+    async fn create_voice_design_task(
+        &self,
+        payload: CreateVoiceDesignTaskPayload,
+    ) -> Result<VoiceDesignTaskResult> {
+        self.create_voice_design_task_impl(payload).await
     }
 }
 
@@ -323,6 +337,39 @@ impl LocalService {
 
             if let Err(err) = result {
                 tracing::error!(error = %err, "local training pipeline failed");
+            }
+        });
+
+        Ok(())
+    }
+
+    pub(crate) fn start_voice_design_inference(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+    ) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::VoiceDesign,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_voice_design_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    VoiceDesignPipelineRequest { task_id },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local voice design pipeline failed");
             }
         });
 

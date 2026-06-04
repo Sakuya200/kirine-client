@@ -6,6 +6,7 @@ pub mod script_paths;
 pub mod training;
 pub mod tts;
 pub mod voice_clone;
+pub mod voice_design;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -54,6 +55,11 @@ pub(crate) struct TtsPipelineRequest {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VoiceClonePipelineRequest {
+    pub task_id: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VoiceDesignPipelineRequest {
     pub task_id: i64,
 }
 
@@ -126,6 +132,13 @@ pub(crate) trait ModelTaskPipeline: Send + Sync {
         base_model: String,
         service: &LocalService,
         request: VoiceClonePipelineRequest,
+    ) -> Result<()>;
+
+    async fn run_voice_design_pipeline(
+        &self,
+        base_model: String,
+        service: &LocalService,
+        request: VoiceDesignPipelineRequest,
     ) -> Result<()>;
 }
 

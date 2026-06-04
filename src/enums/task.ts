@@ -1,13 +1,15 @@
 export enum HistoryTaskType {
   ModelTraining = 'model-training',
   TextToSpeech = 'text-to-speech',
-  VoiceClone = 'voice-clone'
+  VoiceClone = 'voice-clone',
+  VoiceDesign = 'voice-design'
 }
 
 export const HISTORY_TASK_ROUTE_PATH: Record<HistoryTaskType, string> = {
   [HistoryTaskType.ModelTraining]: `/${HistoryTaskType.ModelTraining}`,
   [HistoryTaskType.TextToSpeech]: `/${HistoryTaskType.TextToSpeech}`,
-  [HistoryTaskType.VoiceClone]: `/${HistoryTaskType.VoiceClone}`
+  [HistoryTaskType.VoiceClone]: `/${HistoryTaskType.VoiceClone}`,
+  [HistoryTaskType.VoiceDesign]: `/${HistoryTaskType.VoiceDesign}`
 };
 
 export const HISTORY_TASK_REPLAY_QUERY_KEY = 'replayTaskId';
@@ -26,5 +28,6 @@ export const getHistoryTaskReplayId = (value: string | null | Array<string | nul
 export const HISTORY_TASK_TYPE_TEXT: Record<HistoryTaskType, string> = {
   [HistoryTaskType.ModelTraining]: '模型微调',
   [HistoryTaskType.TextToSpeech]: '文本转语音',
-  [HistoryTaskType.VoiceClone]: '声音克隆'
+  [HistoryTaskType.VoiceClone]: '声音克隆',
+  [HistoryTaskType.VoiceDesign]: '音色设计'
 };

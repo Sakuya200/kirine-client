@@ -12,11 +12,13 @@ use crate::{
         local::entity::{
             task_history as task_history_entity, training_task as training_task_entity,
             tts_task as tts_task_entity, voice_clone_task as voice_clone_task_entity,
+            voice_design_task as voice_design_task_entity,
         },
         models::{
             HistoryRecord, HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail,
             TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
+            VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
         LocalService,
     },
@@ -63,6 +65,7 @@ impl LocalService {
             HistoryTaskType::TextToSpeech => self.load_tts_detail(history_id).await,
             HistoryTaskType::ModelTraining => self.load_model_training_detail(history_id).await,
             HistoryTaskType::VoiceClone => self.load_voice_clone_detail(history_id).await,
+            HistoryTaskType::VoiceDesign => self.load_voice_design_detail(history_id).await,
         }
     }
 
@@ -154,6 +157,18 @@ impl LocalService {
                     )
                     .filter(voice_clone_task_entity::Column::HistoryId.eq(history_id))
                     .filter(voice_clone_task_entity::Column::Deleted.eq(0))
+                    .exec(&tx)
+                    .await?;
+            }
+            HistoryTaskType::VoiceDesign => {
+                voice_design_task_entity::Entity::update_many()
+                    .col_expr(voice_design_task_entity::Column::Deleted, Expr::value(1))
+                    .col_expr(
+                        voice_design_task_entity::Column::ModifyTime,
+                        Expr::value(modify_time.clone()),
+                    )
+                    .filter(voice_design_task_entity::Column::HistoryId.eq(history_id))
+                    .filter(voice_design_task_entity::Column::Deleted.eq(0))
                     .exec(&tx)
                     .await?;
             }
@@ -349,6 +364,69 @@ impl LocalService {
         })
     }
 
+    pub(crate) async fn read_voice_design_audio_impl(
+        &self,
+        history_id: i64,
+    ) -> Result<VoiceDesignAudioAsset> {
+        let history = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::TaskType.eq(HistoryTaskType::VoiceDesign.as_str()))
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+
+        let status = parse_task_status(&history.status)?;
+
+        if status != TaskStatus::Completed {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "当前任务尚未完成，无法读取音频",
+            )
+            .into());
+        }
+
+        let row = voice_design_task_entity::Entity::find()
+            .filter(voice_design_task_entity::Column::HistoryId.eq(history_id))
+            .filter(voice_design_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到音色设计任务文件"))?;
+
+        let output_file_path = row.output_file_path.unwrap_or_default();
+        let normalized_output_file_path = output_file_path.trim();
+        let format = row
+            .format
+            .parse::<TextToSpeechFormat>()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+        if normalized_output_file_path.is_empty() {
+            return Err(
+                io::Error::new(io::ErrorKind::NotFound, "当前任务没有可读取的音频文件").into(),
+            );
+        }
+
+        let resolved_output_file_path = resolve_task_path(
+            std::path::Path::new(self.data_dir()),
+            normalized_output_file_path,
+        );
+
+        let bytes = tokio::fs::read(&resolved_output_file_path)
+            .await
+            .map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("读取音频文件失败: {}", resolved_output_file_path.display()),
+                )
+            })?;
+
+        Ok(VoiceDesignAudioAsset {
+            task_id: history_id,
+            file_name: row.file_name,
+            content_type: content_type_for_format(format).to_string(),
+            bytes,
+        })
+    }
+
     pub(crate) async fn load_tts_detail(&self, history_id: i64) -> Result<serde_json::Value> {
         let row = tts_task_entity::Entity::find()
             .filter(tts_task_entity::Column::HistoryId.eq(history_id))
@@ -434,6 +512,38 @@ impl LocalService {
             ref_audio_name: row.ref_audio_name,
             ref_audio_path: row.ref_audio_path,
             ref_text: row.ref_text,
+            text: row.text,
+            model_params: serde_json::from_str(&row.model_params_json)?,
+            char_count: row.char_count as usize,
+            file_name: row.file_name,
+            output_file_path: row.output_file_path.unwrap_or_default(),
+        })?)
+    }
+
+    pub(crate) async fn load_voice_design_detail(
+        &self,
+        history_id: i64,
+    ) -> Result<serde_json::Value> {
+        let row = voice_design_task_entity::Entity::find()
+            .filter(voice_design_task_entity::Column::HistoryId.eq(history_id))
+            .filter(voice_design_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到音色设计任务详情"))?;
+
+        Ok(serde_json::to_value(VoiceDesignTaskDetail {
+            base_model: row.base_model,
+            model_version: row.model_version,
+            language: row
+                .language
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            format: row
+                .format
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            export_audio_name: row.export_audio_name,
+            prompt: row.prompt,
             text: row.text,
             model_params: serde_json::from_str(&row.model_params_json)?,
             char_count: row.char_count as usize,

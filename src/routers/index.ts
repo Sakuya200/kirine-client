@@ -8,6 +8,7 @@ import NotFoundView from '@/views/NotFoundView.vue';
 import SettingsView from '@/views/SettingsView.vue';
 import SpeakersView from '@/views/SpeakersView.vue';
 import TextToSpeechView from '@/views/TextToSpeechView.vue';
+import VoiceDesignView from '@/views/VoiceDesignView.vue';
 import VoiceCloneView from '@/views/VoiceCloneView.vue';
 
 export const appRoutes = [
@@ -28,6 +29,12 @@ export const appRoutes = [
     name: HistoryTaskType.VoiceClone,
     meta: { title: '声音克隆' },
     component: VoiceCloneView
+  },
+  {
+    path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.VoiceDesign],
+    name: HistoryTaskType.VoiceDesign,
+    meta: { title: '音色设计' },
+    component: VoiceDesignView
   },
   {
     path: '/models',
