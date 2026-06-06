@@ -630,7 +630,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="音色设计" description="输入音色描述与目标台词，生成符合指定风格的语音音频。" eyebrow="音色设计" />
+    <PageHeader title="音色设计" description="输入音色描述与目标台词，生成符合指定风格的语音音频。" eyebrow="Voice-Design" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 

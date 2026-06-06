@@ -249,6 +249,32 @@ class VoxCpm2VoiceCloneParams:
         )
 
 
+@dataclass
+class VoxCpm2VoiceDesignParams:
+    common: CommonTaskArgs
+    init_model_path: str
+    text: str
+    instruct: str
+    cfg_value: float
+    inference_timesteps: int
+    language: str
+    output_path: str
+    runtime: RuntimeOptions
+
+    def to_namespace(self) -> Namespace:
+        return Namespace(
+            init_model_path=self.init_model_path,
+            text=self.text,
+            instruct=self.instruct,
+            cfg_value=self.cfg_value,
+            inference_timesteps=self.inference_timesteps,
+            language=self.language,
+            output_path=self.output_path,
+            logging_dir=self.runtime.logging_dir,
+            device=self.runtime.device,
+        )
+
+
 def load_tts_params(path: str | Path) -> VoxCpm2TtsParams:
     params = ParamsEntity.from_file(path)
     args = params.tts_args()
@@ -276,6 +302,23 @@ def load_voice_clone_params(path: str | Path) -> VoxCpm2VoiceCloneParams:
         ref_text=args.ref_text or "",
         text=args.text,
         style_prompt=str(params.model_param_str("stylePrompt", "") or ""),
+        cfg_value=_parse_float_with_default(params.model_param_str("cfgValue", None), 2.0),
+        inference_timesteps=int(params.model_param_int("inferenceTimesteps", None) or 10),
+        language=args.language or "auto",
+        output_path=args.output_path,
+        runtime=_normalize_runtime(params.runtime),
+    )
+
+
+def load_voice_design_params(path: str | Path) -> VoxCpm2VoiceDesignParams:
+    params = ParamsEntity.from_file(path)
+    args = params.voice_design_args()
+
+    return VoxCpm2VoiceDesignParams(
+        common=args.common,
+        init_model_path=_resolve_model_path(args.common),
+        text=args.text,
+        instruct=args.instruct or "",
         cfg_value=_parse_float_with_default(params.model_param_str("cfgValue", None), 2.0),
         inference_timesteps=int(params.model_param_int("inferenceTimesteps", None) or 10),
         language=args.language or "auto",

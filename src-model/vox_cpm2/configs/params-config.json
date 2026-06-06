@@ -261,5 +261,37 @@
         "description": "VoxCPM2 声音克隆阶段的采样步数。"
       }
     ]
+  },
+  {
+    "task": "voice-design",
+    "base-model": "vox_cpm2",
+    "params": [
+      {
+        "name": "cfgValue",
+        "type": "string",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "CFG 值",
+          "min": 0.1,
+          "step": 0.1
+        },
+        "required": true,
+        "defaultValue": "2.0",
+        "description": "VoxCPM2 音色设计阶段的 classifier-free guidance 强度。"
+      },
+      {
+        "name": "inferenceTimesteps",
+        "type": "number",
+        "componentType": "input-number",
+        "componentProps": {
+          "label": "推理步数",
+          "min": 1,
+          "step": 1
+        },
+        "required": true,
+        "defaultValue": 10,
+        "description": "VoxCPM2 音色设计阶段的采样步数。"
+      }
+    ]
   }
 ]
