@@ -5,20 +5,40 @@
       "modelName": "Qwen3-TTS",
       "modelVersion": "1.7B",
       "downloadType": "HF-Like",
-      "requiredModelNameList": ["Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-1.7B-CustomVoice"],
-      "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"],
+      "requiredModelNameList": [
+        "Qwen3-TTS-12Hz-1.7B-Base",
+        "Qwen3-TTS-Tokenizer-12Hz",
+        "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+      ],
+      "requiredModelRepoIdList": [
+        "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "Qwen/Qwen3-TTS-Tokenizer-12Hz",
+        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+      ],
       "supportedDevices": ["cpu", "cuda"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "voice-design"]
     },
     {
       "baseModel": "qwen3_tts",
       "modelName": "Qwen3-TTS",
       "modelVersion": "0.6B",
       "downloadType": "HF-Like",
-      "requiredModelNameList": ["Qwen3-TTS-12Hz-0.6B-Base", "Qwen3-TTS-Tokenizer-12Hz", "Qwen3-TTS-12Hz-0.6B-CustomVoice"],
-      "requiredModelRepoIdList": ["Qwen/Qwen3-TTS-12Hz-0.6B-Base", "Qwen/Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"],
+      "requiredModelNameList": [
+        "Qwen3-TTS-12Hz-0.6B-Base",
+        "Qwen3-TTS-Tokenizer-12Hz",
+        "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "Qwen3-TTS-12Hz-0.6B-VoiceDesign"
+      ],
+      "requiredModelRepoIdList": [
+        "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+        "Qwen/Qwen3-TTS-Tokenizer-12Hz",
+        "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "Qwen/Qwen3-TTS-12Hz-0.6B-VoiceDesign"
+      ],
       "supportedDevices": ["cpu", "cuda"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training", "voice-design"]
     }
   ],
   "speakers": [

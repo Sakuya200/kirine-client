@@ -230,6 +230,41 @@ class ModelParamsLoaderTests(unittest.TestCase):
         self.assertEqual(params.runtime.attn_implementation, "sdpa")
         self.assertEqual(params.to_namespace().attn_implementation, "sdpa")
 
+    def test_vox_voice_design_loader_parses_cfg_and_timesteps(self):
+        module = load_module("vox_cpm2.params")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            latest_checkpoint = temp_root / "models" / "speaker_d" / "checkpoints" / "lora" / "latest"
+            latest_checkpoint.mkdir(parents=True, exist_ok=True)
+            payload_path = temp_root / "vox-voice-design.json"
+            payload = {
+                "version": "1.0.0",
+                "base_model": "vox_cpm2",
+                "model_version": "2B",
+                "kind": "VoiceDesign",
+                "runtime": {"device": "cpu"},
+                "args": {
+                    "VoiceDesign": {
+                        "model_root_path": str(temp_root / "models"),
+                        "speaker_dir_name": "speaker_d",
+                        "model_params_json": {"cfgValue": "2.5", "inferenceTimesteps": 14},
+                        "text": "你好，欢迎使用 VoxCPM2。",
+                        "language": "chinese",
+                        "instruct": "年轻女性，声音温柔甜美",
+                        "output_path": str(temp_root / "voice_design.wav"),
+                    }
+                },
+            }
+            payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            params = module.load_voice_design_params(payload_path)
+
+        self.assertEqual(params.cfg_value, 2.5)
+        self.assertEqual(params.inference_timesteps, 14)
+        self.assertEqual(params.instruct, "年轻女性，声音温柔甜美")
+        self.assertEqual(params.init_model_path, str(latest_checkpoint.resolve()))
+
 
 if __name__ == "__main__":
     unittest.main()

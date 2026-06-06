@@ -13,8 +13,9 @@ mod m20260511_000004_remove_task_history_error_message;
 mod m20260512_000005_rename_model_scale_to_model_version;
 mod m20260521_000006_rename_model_training_task_model_name_to_speaker_name;
 mod m20260522_000007_add_task_device_and_model_supported_devices;
+mod m20260604_000008_add_voice_design_tasks;
 
-const LOCAL_SCHEMA_VERSION: &str = "24";
+const LOCAL_SCHEMA_VERSION: &str = "25";
 
 pub(crate) struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
                 m20260521_000006_rename_model_training_task_model_name_to_speaker_name::Migration,
             ),
             Box::new(m20260522_000007_add_task_device_and_model_supported_devices::Migration),
+            Box::new(m20260604_000008_add_voice_design_tasks::Migration),
         ]
     }
 }

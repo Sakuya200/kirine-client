@@ -93,6 +93,20 @@ export interface VoiceCloneTaskDetail {
   outputFilePath: string;
 }
 
+export interface VoiceDesignTaskDetail {
+  baseModel: BaseModel;
+  modelVersion: string;
+  language: AppLanguage;
+  format: TextToSpeechFormat;
+  exportAudioName: string;
+  prompt: string;
+  text: string;
+  modelParams: Record<string, unknown>;
+  charCount: number;
+  fileName: string;
+  outputFilePath: string;
+}
+
 export interface ModelInfo {
   id: number;
   baseModel: BaseModel;
@@ -128,4 +142,9 @@ export interface VoiceCloneHistoryRecord extends HistoryRecordBase {
   detail: VoiceCloneTaskDetail;
 }
 
-export type HistoryRecord = ModelTrainingHistoryRecord | TextToSpeechHistoryRecord | VoiceCloneHistoryRecord;
+export interface VoiceDesignHistoryRecord extends HistoryRecordBase {
+  taskType: HistoryTaskType.VoiceDesign;
+  detail: VoiceDesignTaskDetail;
+}
+
+export type HistoryRecord = ModelTrainingHistoryRecord | TextToSpeechHistoryRecord | VoiceCloneHistoryRecord | VoiceDesignHistoryRecord;

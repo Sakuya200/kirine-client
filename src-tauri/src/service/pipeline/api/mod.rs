@@ -12,6 +12,7 @@ pub(crate) enum PythonScriptTaskKind {
     Training,
     TextToSpeech,
     VoiceClone,
+    VoiceDesign,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -67,10 +68,24 @@ pub(crate) struct VoiceCloneArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VoiceDesignArgs {
+    pub model_root_path: String,
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    #[serde(default)]
+    pub model_params_json: serde_json::Value,
+    pub text: String,
+    pub language: String,
+    pub instruct: String,
+    pub output_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum PythonScriptTaskArgs {
     Training(TrainingArgs),
     TextToSpeech(TTSArgs),
     VoiceClone(VoiceCloneArgs),
+    VoiceDesign(VoiceDesignArgs),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

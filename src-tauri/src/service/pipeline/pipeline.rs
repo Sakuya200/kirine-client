@@ -5,8 +5,10 @@ use crate::{
         local::LocalService,
         pipeline::{
             training::run_common_training_pipeline, tts::run_common_tts_pipeline,
-            voice_clone::run_common_voice_clone_pipeline, ModelTaskPipeline,
+            voice_clone::run_common_voice_clone_pipeline,
+            voice_design::run_common_voice_design_pipeline, ModelTaskPipeline,
             TrainingPipelineRequest, TtsPipelineRequest, VoiceClonePipelineRequest,
+            VoiceDesignPipelineRequest,
         },
     },
     Result,
@@ -47,5 +49,14 @@ impl ModelTaskPipeline for CommonModelTaskPipeline {
         request: VoiceClonePipelineRequest,
     ) -> Result<()> {
         run_common_voice_clone_pipeline(service, request, &base_model).await
+    }
+
+    async fn run_voice_design_pipeline(
+        &self,
+        base_model: String,
+        service: &LocalService,
+        request: VoiceDesignPipelineRequest,
+    ) -> Result<()> {
+        run_common_voice_design_pipeline(service, request, &base_model).await
     }
 }

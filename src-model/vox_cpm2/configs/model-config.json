@@ -8,7 +8,7 @@
       "requiredModelNameList": ["VoxCPM2"],
       "requiredModelRepoIdList": ["openbmb/VoxCPM2"],
       "supportedDevices": ["cpu", "cuda"],
-      "supportedFeatureList": ["text-to-speech", "voice-clone", "model-training"]
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "voice-design", "model-training"]
     }
   ],
   "speakers": []

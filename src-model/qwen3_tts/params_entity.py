@@ -10,6 +10,7 @@ class TaskKind(str, Enum):
     TRAINING = "Training"
     TEXT_TO_SPEECH = "TextToSpeech"
     VOICE_CLONE = "VoiceClone"
+    VOICE_DESIGN = "VoiceDesign"
 
     @classmethod
     def from_value(cls, value: object) -> "TaskKind":
@@ -188,13 +189,34 @@ class VoiceCloneArgs:
 
 
 @dataclass(frozen=True)
+class VoiceDesignArgs:
+    common: CommonTaskArgs
+    text: str
+    language: str | None
+    instruct: str | None
+    output_path: str
+
+    @classmethod
+    def from_mapping(cls, value: dict[str, object]) -> "VoiceDesignArgs":
+        return cls(
+            common=CommonTaskArgs.from_mapping(value),
+            text=_coerce_required_str(value.get("text"), "args.VoiceDesign.text"),
+            language=_coerce_optional_str(value.get("language")),
+            instruct=_coerce_optional_str(value.get("instruct")),
+            output_path=_coerce_required_str(
+                value.get("output_path"), "args.VoiceDesign.output_path"
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class ParamsEntity:
     version: str
     base_model: str
     model_version: str
     kind: TaskKind
     runtime: RuntimeOptions
-    args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs
+    args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "ParamsEntity":
@@ -203,13 +225,15 @@ class ParamsEntity:
         nested_args = _expect_mapping(raw_args.get(kind.value), f"args.{kind.value}")
 
         if kind is TaskKind.TRAINING:
-            parsed_args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs = TrainingArgs.from_mapping(
+            parsed_args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs = TrainingArgs.from_mapping(
                 nested_args
             )
         elif kind is TaskKind.TEXT_TO_SPEECH:
             parsed_args = TextToSpeechArgs.from_mapping(nested_args)
-        else:
+        elif kind is TaskKind.VOICE_CLONE:
             parsed_args = VoiceCloneArgs.from_mapping(nested_args)
+        else:
+            parsed_args = VoiceDesignArgs.from_mapping(nested_args)
 
         return cls(
             version=str(payload.get("version") or "1.0.0"),
@@ -273,6 +297,12 @@ class ParamsEntity:
         self.ensure_kind(TaskKind.VOICE_CLONE)
         if not isinstance(self.args, VoiceCloneArgs):
             raise TypeError("Malformed params payload: voice-clone args were not parsed")
+        return self.args
+
+    def voice_design_args(self) -> VoiceDesignArgs:
+        self.ensure_kind(TaskKind.VOICE_DESIGN)
+        if not isinstance(self.args, VoiceDesignArgs):
+            raise TypeError("Malformed params payload: voice-design args were not parsed")
         return self.args
 
     def model_param(self, key: str, default: object = None) -> object:

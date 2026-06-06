@@ -10,10 +10,12 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType,
+            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
+            HistoryTaskType,
             ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
             SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -102,6 +104,10 @@ impl Service for RemoteService {
         biz::unsupported("read_voice_clone_audio")
     }
 
+    async fn read_voice_design_audio(&self, _history_id: i64) -> Result<VoiceDesignAudioAsset> {
+        biz::unsupported("read_voice_design_audio")
+    }
+
     async fn delete_history_record(
         &self,
         _history_id: i64,
@@ -137,5 +143,12 @@ impl Service for RemoteService {
         _payload: CreateVoiceCloneTaskPayload,
     ) -> Result<VoiceCloneTaskResult> {
         biz::unsupported("create_voice_clone_task")
+    }
+
+    async fn create_voice_design_task(
+        &self,
+        _payload: CreateVoiceDesignTaskPayload,
+    ) -> Result<VoiceDesignTaskResult> {
+        biz::unsupported("create_voice_design_task")
     }
 }

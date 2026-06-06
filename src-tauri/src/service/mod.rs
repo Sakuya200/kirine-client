@@ -5,10 +5,11 @@ use crate::{
     config::{EnvConfig, HardwareType, StorageMode},
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, HistoryRecord, HistoryTaskType, ImportModelAsSpeakerPayload,
-        ModelInfo, ModelMutationResult, ModelTrainingTaskResult, SpeakerInfo,
-        TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-        UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
+        HistoryTaskType, ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult,
+        ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+        UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
     },
     Result,
 };
@@ -65,6 +66,7 @@ pub trait Service: Send + Sync {
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;
     async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset>;
     async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset>;
+    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset>;
     async fn delete_history_record(
         &self,
         history_id: i64,
@@ -84,6 +86,10 @@ pub trait Service: Send + Sync {
         &self,
         payload: CreateVoiceCloneTaskPayload,
     ) -> Result<VoiceCloneTaskResult>;
+    async fn create_voice_design_task(
+        &self,
+        payload: CreateVoiceDesignTaskPayload,
+    ) -> Result<VoiceDesignTaskResult>;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {

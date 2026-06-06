@@ -12,10 +12,12 @@ QWEN3_VARIANT_MODEL_NAMES = {
     "1.7B": {
         "base": "Qwen3-TTS-12Hz-1.7B-Base",
         "custom": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        "voice_design": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     },
     "0.6B": {
         "base": "Qwen3-TTS-12Hz-0.6B-Base",
         "custom": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "voice_design": "Qwen3-TTS-12Hz-0.6B-VoiceDesign",
     },
 }
 
@@ -143,6 +145,19 @@ def _resolve_qwen3_inference_model_path(
     return str(_resolve_latest_qwen3_checkpoint(inference_root))
 
 
+def _resolve_qwen3_voice_design_model_path(
+    params: ParamsEntity,
+) -> str:
+    common = params.common
+    model_version = _infer_qwen3_model_version(params)
+    candidate = _resolve_locator_candidate(
+        common,
+        QWEN3_VARIANT_MODEL_NAMES[model_version]["voice_design"],
+        prefer_speaker_dir_name=False,
+    )
+    return _require_resolved_path(candidate, "voice design model path")
+
+
 def _resolve_qwen3_training_model_path(
     params: ParamsEntity,
 ) -> str:
@@ -248,6 +263,29 @@ class Qwen3VoiceCloneParams:
         )
 
 
+@dataclass
+class Qwen3VoiceDesignParams:
+    common: CommonTaskArgs
+    init_model_path: str
+    text: str
+    language: str
+    instruct: str
+    output_path: str
+    runtime: RuntimeOptions
+
+    def to_namespace(self) -> Namespace:
+        return Namespace(
+            init_model_path=self.init_model_path,
+            text=self.text,
+            language=self.language,
+            instruct=self.instruct,
+            output_path=self.output_path,
+            logging_dir=self.runtime.logging_dir,
+            device=self.runtime.device,
+            attn_implementation=self.runtime.attn_implementation,
+        )
+
+
 def load_tts_params(path: str | Path) -> Qwen3TtsParams:
     params = ParamsEntity.from_file(path)
     args = params.tts_args()
@@ -276,5 +314,20 @@ def load_voice_clone_params(path: str | Path) -> Qwen3VoiceCloneParams:
         language=args.language or "Auto",
         output_path=args.output_path,
         text=args.text,
+        runtime=_normalize_runtime(params.runtime),
+    )
+
+
+def load_voice_design_params(path: str | Path) -> Qwen3VoiceDesignParams:
+    params = ParamsEntity.from_file(path)
+    args = params.voice_design_args()
+
+    return Qwen3VoiceDesignParams(
+        common=args.common,
+        init_model_path=_resolve_qwen3_voice_design_model_path(params),
+        text=args.text,
+        language=args.language or "Auto",
+        instruct=args.instruct or "",
+        output_path=args.output_path,
         runtime=_normalize_runtime(params.runtime),
     )

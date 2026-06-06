@@ -87,6 +87,7 @@ pub enum HistoryTaskType {
     ModelTraining,
     TextToSpeech,
     VoiceClone,
+    VoiceDesign,
 }
 
 impl HistoryTaskType {
@@ -95,6 +96,7 @@ impl HistoryTaskType {
             Self::ModelTraining => "model-training",
             Self::TextToSpeech => "text-to-speech",
             Self::VoiceClone => "voice-clone",
+            Self::VoiceDesign => "voice-design",
         }
     }
 
@@ -103,6 +105,7 @@ impl HistoryTaskType {
             Self::ModelTraining => "model_training",
             Self::TextToSpeech => "tts",
             Self::VoiceClone => "voice_clone",
+            Self::VoiceDesign => "voice_design",
         }
     }
 }
@@ -205,6 +208,7 @@ impl FromStr for HistoryTaskType {
             "model-training" => Ok(Self::ModelTraining),
             "text-to-speech" => Ok(Self::TextToSpeech),
             "voice-clone" => Ok(Self::VoiceClone),
+            "voice-design" => Ok(Self::VoiceDesign),
             other => Err(format!("不支持的历史任务类型: {}", other)),
         }
     }
@@ -480,6 +484,22 @@ pub struct VoiceCloneTaskDetail {
     pub output_file_path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceDesignTaskDetail {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
+    pub prompt: String,
+    pub text: String,
+    pub model_params: Value,
+    pub char_count: usize,
+    pub file_name: String,
+    pub output_file_path: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
@@ -548,6 +568,15 @@ pub struct VoiceCloneAudioAsset {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceDesignAudioAsset {
+    pub task_id: i64,
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTrainingFileInput {
@@ -597,6 +626,20 @@ pub struct CreateVoiceCloneTaskPayload {
     pub model_params: Value,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateVoiceDesignTaskPayload {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
+    pub device: HardwareType,
+    pub prompt: String,
+    pub text: String,
+    pub model_params: Value,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTrainingTaskResult {
@@ -623,6 +666,25 @@ pub struct VoiceCloneTaskResult {
     pub export_audio_name: String,
     pub duration_seconds: i64,
     pub ref_text: String,
+    pub text: String,
+    pub model_params: Value,
+    pub created_at: String,
+    pub status: TaskStatus,
+    pub output_file_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceDesignTaskResult {
+    pub task_id: i64,
+    pub file_name: String,
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub format: TextToSpeechFormat,
+    pub export_audio_name: String,
+    pub duration_seconds: i64,
+    pub prompt: String,
     pub text: String,
     pub model_params: Value,
     pub created_at: String,

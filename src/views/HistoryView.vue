@@ -25,7 +25,8 @@ const taskTypeOptions: Array<{ value: TaskTypeFilterValue; label: string }> = [
   { value: 'all', label: '全部任务类型' },
   { value: HistoryTaskType.ModelTraining, label: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.ModelTraining] },
   { value: HistoryTaskType.TextToSpeech, label: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.TextToSpeech] },
-  { value: HistoryTaskType.VoiceClone, label: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceClone] }
+  { value: HistoryTaskType.VoiceClone, label: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceClone] },
+  { value: HistoryTaskType.VoiceDesign, label: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceDesign] }
 ];
 
 const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
@@ -169,11 +170,15 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="历史任务" description="统一查看模型微调、文本转语音与声音克隆任务，支持筛选、搜索、详情查看与删除。" eyebrow="Task History" />
+    <PageHeader
+      title="历史任务"
+      description="统一查看模型微调、文本转语音、声音克隆与音色设计任务，支持筛选、搜索、详情查看与删除。"
+      eyebrow="Task History"
+    />
 
     <BaseLoadingBanner v-if="historyBusyLabel" :label="historyBusyLabel" />
 
-    <PanelCard title="任务列表" subtitle="统一展示模型微调、文本转语音与声音克隆任务。">
+    <PanelCard title="任务列表" subtitle="统一展示模型微调、文本转语音、声音克隆与音色设计任务。">
       <template #actions>
         <BaseButton tone="ghost" :loading="isLoading" @click="loadHistory">
           <ArrowPathIcon v-if="!isLoading" class="h-4 w-4" aria-hidden="true" />

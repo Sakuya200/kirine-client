@@ -17,6 +17,7 @@ const TRAINING_OUTPUT_JSONL_NAME: &str = "train.jsonl";
 const TRAINING_PARAMS_JSON_NAME: &str = "training.params.json";
 const TTS_PARAMS_JSON_NAME: &str = "tts.params.json";
 const VOICE_CLONE_PARAMS_JSON_NAME: &str = "voice_clone.params.json";
+const VOICE_DESIGN_PARAMS_JSON_NAME: &str = "voice_design.params.json";
 const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_audio";
 
 pub(crate) fn task_sample_dir(
@@ -76,6 +77,10 @@ pub(crate) fn voice_clone_params_json_path(sample_root: &Path) -> PathBuf {
     sample_root.join(VOICE_CLONE_PARAMS_JSON_NAME)
 }
 
+pub(crate) fn voice_design_params_json_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(VOICE_DESIGN_PARAMS_JSON_NAME)
+}
+
 pub(crate) fn training_reference_audio_path(sample_root: &Path, extension: &str) -> PathBuf {
     sample_root.join(format!(
         "{}{}",
@@ -111,5 +116,6 @@ const fn task_log_file_prefix(task_type: HistoryTaskType) -> &'static str {
         HistoryTaskType::ModelTraining => "training",
         HistoryTaskType::TextToSpeech => "tts",
         HistoryTaskType::VoiceClone => "voice-clone",
+        HistoryTaskType::VoiceDesign => "voice-design",
     }
 }

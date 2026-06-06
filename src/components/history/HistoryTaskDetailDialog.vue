@@ -12,6 +12,7 @@ import StatusPill from '@/components/common/StatusPill.vue';
 import ModelTrainingTaskDetailForm from '@/components/form/ModelTrainingTaskDetailForm.vue';
 import TextToSpeechTaskDetailForm from '@/components/form/TextToSpeechTaskDetailForm.vue';
 import VoiceCloneTaskDetailForm from '@/components/form/VoiceCloneTaskDetailForm.vue';
+import VoiceDesignTaskDetailForm from '@/components/form/VoiceDesignTaskDetailForm.vue';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
@@ -146,6 +147,7 @@ const requestCancel = (record: HistoryRecord | null) => {
         <div class="mt-4">
           <ModelTrainingTaskDetailForm v-if="record.taskType === HistoryTaskType.ModelTraining" :record="record" />
           <VoiceCloneTaskDetailForm v-else-if="record.taskType === HistoryTaskType.VoiceClone" :record="record" />
+          <VoiceDesignTaskDetailForm v-else-if="record.taskType === HistoryTaskType.VoiceDesign" :record="record" />
           <TextToSpeechTaskDetailForm v-else :record="record" />
         </div>
       </section>

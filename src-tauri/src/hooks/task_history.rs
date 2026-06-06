@@ -3,8 +3,9 @@ use tauri::{AppHandle, State};
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-        HistoryRecord, HistoryTaskType, ModelTrainingTaskResult, TextToSpeechAudioAsset,
-        TextToSpeechTaskResult, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+        CreateVoiceDesignTaskPayload, HistoryRecord, HistoryTaskType, ModelTrainingTaskResult,
+        TextToSpeechAudioAsset, TextToSpeechTaskResult, VoiceCloneAudioAsset,
+        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
     },
     ServiceState,
 };
@@ -75,6 +76,20 @@ pub async fn get_voice_clone_audio(
 }
 
 #[tauri::command]
+pub async fn get_voice_design_audio(
+    history_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<VoiceDesignAudioAsset, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .read_voice_design_audio(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub async fn save_text_to_speech_audio_as(
     history_id: i64,
     app: AppHandle,
@@ -102,6 +117,23 @@ pub async fn save_voice_clone_audio_as(
         .service()
         .map_err(|err| err.to_string())?
         .read_voice_clone_audio(history_id)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+}
+
+#[tauri::command]
+pub async fn save_voice_design_audio_as(
+    history_id: i64,
+    app: AppHandle,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<bool, String> {
+    let asset = state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .read_voice_design_audio(history_id)
         .await
         .map_err(|err| err.to_string())?;
 
@@ -199,6 +231,20 @@ pub async fn create_voice_clone_task(
         .service()
         .map_err(|err| err.to_string())?
         .create_voice_clone_task(payload)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn create_voice_design_task(
+    payload: CreateVoiceDesignTaskPayload,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<VoiceDesignTaskResult, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .create_voice_design_task(payload)
         .await
         .map_err(|err| err.to_string())
 }
