@@ -1,0 +1,12 @@
+[submodule "src-model/qwen3_tts"]
+	path = src-model/qwen3_tts
+	url = https://github.com/Sakuya200/kirine-client-qwen3-tts-adapter.git
+[submodule "src-model/vox_cpm2"]
+	path = src-model/vox_cpm2
+	url = https://github.com/Sakuya200/kirine-client-vox-cpm2-adapter.git
+[submodule "src-model/moss_tts_local"]
+	path = src-model/moss_tts_local
+	url = https://github.com/Sakuya200/kirine-client-moss-tts-local-adapter.git
+[submodule "src-model/gpt_sovits_cpufast"]
+	path = src-model/gpt_sovits_cpufast
+	url = https://github.com/Sakuya200/kirine-client-gpt-sovits-cpufast-adapter.git
