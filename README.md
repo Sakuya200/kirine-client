@@ -154,9 +154,21 @@ src-tauri/resources/
 ### D3. 克隆与初始化
 
 ```bash
-git clone <repo_url>
+git clone --recurse-submodules <repo_url>
 cd kirine-client
 npm install
+```
+
+如果你已经完成过普通 `git clone`，需要额外执行一次子模块初始化：
+
+```bash
+git submodule update --init --recursive
+```
+
+当某个模型适配器子项目有更新时，在主仓库中执行：
+
+```bash
+git submodule update --remote --recursive
 ```
 
 完成后，按 D2 节说明准备好 `src-tauri/resources/` 下的文件。
