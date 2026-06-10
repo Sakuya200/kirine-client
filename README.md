@@ -22,14 +22,14 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 
 ## 3. 当前模型支持
 
-| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 设备支持 |
-| --- | --- | --- | --- | --- | --- |
-| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | CPU / CUDA |
-| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | CPU / CUDA |
-| VoxCPM2 | 2B | ✓ | ✓ | ✓ | CPU / CUDA |
-| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | CPU / CUDA |
-| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | CPU |
-| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | CPU |
+| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 音色设计 | 设备支持 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | CPU |
+| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | — | CPU |
 
 ## 4. 快速上手
 
