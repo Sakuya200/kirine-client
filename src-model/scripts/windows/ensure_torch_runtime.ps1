@@ -189,7 +189,7 @@ function Get-CudaVersion {
             continue
         }
 
-        if ($output -match 'CUDA Version:\s*([0-9]+)\.([0-9]+)') {
+        if ($output -match 'CUDA.*?Version:\s*([0-9]+)\.([0-9]+)') {
             return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2] }
         }
 

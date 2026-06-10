@@ -170,7 +170,7 @@ function Get-CudaVersion {
             continue
         }
 
-        if ($output -match 'CUDA Version:\s*([0-9]+)\.([0-9]+)') {
+        if ($output -match 'CUDA.*?Version:\s*([0-9]+)\.([0-9]+)') {
             $major = [int]$Matches[1]
             $minor = [int]$Matches[2]
             Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] detected CUDA $major.$minor via $($commandSpec.Command)"
