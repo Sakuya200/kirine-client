@@ -1,0 +1,15 @@
+{
+  "models": [
+    {
+      "baseModel": "dots_tts",
+      "modelName": "Dots.TTS",
+      "modelVersion": "2B",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["dots_tts"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cpu"],
+      "supportedFeatureList": ["text-to-speech", "voice-clone", "training"]
+    }
+  ],
+  "speakers": []
+}
