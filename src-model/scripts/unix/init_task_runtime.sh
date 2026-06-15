@@ -52,6 +52,34 @@ fi
 TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
 VENV_DIR="$MODEL_ROOT/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+USE_CONDA=0
+
+# --- conda support ---
+check_conda() {
+    if command -v conda >/dev/null 2>&1; then
+        USE_CONDA=1
+        return 0
+    fi
+    return 1
+}
+
+resolve_conda_env_path() {
+    conda_env_path=$(conda env list --json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    envs = json.load(sys.stdin)
+    for ep in envs.get('envs', []):
+        import os
+        name = os.path.basename(ep)
+        if name == sys.argv[1]:
+            print(ep)
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" "$1" 2>/dev/null) || true
+    printf '%s\n' "$conda_env_path"
+}
 
 ensure_task_log_file() {
     if [ -z "$TASK_LOG_FILE" ]; then
@@ -96,6 +124,26 @@ detect_python() {
 
 ensure_env() {
     if [ -x "$VENV_PYTHON" ]; then
+        return 0
+    fi
+
+    if [ "$USE_CONDA" -eq 1 ]; then
+        append_log "[init-task-runtime] creating conda environment '$BASE_MODEL'"
+        run_checked "create conda environment" conda create -y -n "$BASE_MODEL" python=3.12
+
+        conda_env_path=$(resolve_conda_env_path "$BASE_MODEL")
+        if [ -z "$conda_env_path" ]; then
+            echo "[init-task-runtime] conda environment '$BASE_MODEL' was not created." >&2
+            return 65
+        fi
+
+        VENV_DIR="$conda_env_path"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+        if [ ! -x "$VENV_PYTHON" ]; then
+            echo "[init-task-runtime] python executable not found in conda environment at $VENV_PYTHON." >&2
+            return 65
+        fi
+
         return 0
     fi
 
@@ -300,6 +348,15 @@ install_compatible_torch_cuda() {
 }
 
 ensure_task_log_file
+check_conda
+
+if [ "$USE_CONDA" -eq 1 ]; then
+    conda_env_path=$(resolve_conda_env_path "$BASE_MODEL")
+    if [ -n "$conda_env_path" ]; then
+        VENV_DIR="$conda_env_path"
+        VENV_PYTHON="$VENV_DIR/bin/python"
+    fi
+fi
 
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
     echo "[init-task-runtime] Requirements file not found: $REQUIREMENTS_FILE" >&2

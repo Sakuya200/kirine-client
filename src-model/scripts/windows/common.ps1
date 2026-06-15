@@ -147,6 +147,174 @@ function Get-BootstrapPythonCommand {
     return $null
 }
 
+function Get-CondaExecutable {
+    $condaCommand = Get-Command conda -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -ne $condaCommand) {
+        return $condaCommand.Source
+    }
+
+    $candidatePaths = @(
+        Join-Path $env:USERPROFILE 'miniforge3\Scripts\conda.exe',
+        Join-Path $env:USERPROFILE 'miniforge3\condabin\conda.bat',
+        Join-Path $env:USERPROFILE 'anaconda3\Scripts\conda.exe',
+        Join-Path $env:USERPROFILE 'anaconda3\condabin\conda.bat',
+        Join-Path $env:USERPROFILE 'miniconda3\Scripts\conda.exe',
+        Join-Path $env:USERPROFILE 'miniconda3\condabin\conda.bat',
+        Join-Path $env:ProgramData 'miniforge3\Scripts\conda.exe',
+        Join-Path $env:ProgramData 'anaconda3\Scripts\conda.exe',
+        Join-Path $env:ProgramData 'miniconda3\Scripts\conda.exe'
+    )
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path -LiteralPath $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    return $null
+}
+
+function Test-CondaEnvironment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvironmentName
+    )
+
+    $condaExe = Get-CondaExecutable
+    if ($null -eq $condaExe) {
+        return $false
+    }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $condaExe env list --json 2>$null | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            return $false
+        }
+
+        $envList = $output | ConvertFrom-Json
+        $envPaths = $envList.envs
+        if ($null -eq $envPaths) {
+            return $false
+        }
+
+        foreach ($envPath in $envPaths) {
+            $envName = Split-Path -Leaf $envPath
+            if ($envName -eq $EnvironmentName) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Get-CondaEnvironmentPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvironmentName
+    )
+
+    $condaExe = Get-CondaExecutable
+    if ($null -eq $condaExe) {
+        return $null
+    }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $condaExe env list --json 2>$null | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+
+        $envList = $output | ConvertFrom-Json
+        $envPaths = $envList.envs
+        if ($null -eq $envPaths) {
+            return $null
+        }
+
+        foreach ($envPath in $envPaths) {
+            $envName = Split-Path -Leaf $envPath
+            if ($envName -eq $EnvironmentName) {
+                return $envPath
+            }
+        }
+
+        return $null
+    }
+    catch {
+        return $null
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Invoke-CondaCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvironmentName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $condaExe = Get-CondaExecutable
+    if ($null -eq $condaExe) {
+        throw "[conda] conda executable not found but Invoke-CondaCommand was called. This is a bug — callers should check conda availability first."
+    }
+
+    $fullArguments = @('run', '--name', $EnvironmentName, $Command) + $Arguments
+    $previousErrorActionPreference = $ErrorActionPreference
+    $previousPythonIoEncoding = $env:PYTHONIOENCODING
+    $previousPythonUtf8 = $env:PYTHONUTF8
+    $exitCode = 0
+
+    try {
+        $ErrorActionPreference = 'Continue'
+        $env:PYTHONIOENCODING = 'utf-8'
+        $env:PYTHONUTF8 = '1'
+        & $condaExe @fullArguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        $env:PYTHONIOENCODING = $previousPythonIoEncoding
+        $env:PYTHONUTF8 = $previousPythonUtf8
+    }
+
+    return @{
+        ExitCode = $exitCode
+    }
+}
+
+function Resolve-PythonCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BaseModel,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VenvPython
+    )
+
+    if (Test-CondaEnvironment -EnvironmentName $BaseModel) {
+        return @('conda', 'run', '--name', $BaseModel, 'python', '--')
+    }
+
+    return @($VenvPython)
+}
+
 function Invoke-ExternalCommand {
     param(
         [Parameter(Mandatory = $true)]

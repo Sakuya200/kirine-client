@@ -52,6 +52,37 @@ fi
 MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
 VENV_DIR="$MODEL_ROOT/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+USE_CONDA=0
+CONDA_ENV_FOUND=0
+
+check_conda() {
+    if command -v conda >/dev/null 2>&1; then
+        USE_CONDA=1
+
+        conda_env_path=$(conda env list --json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    envs = json.load(sys.stdin)
+    for ep in envs.get('envs', []):
+        import os
+        name = os.path.basename(ep)
+        if name == sys.argv[1]:
+            print(ep)
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" "$BASE_MODEL" 2>/dev/null) || true
+
+        if [ -n "$conda_env_path" ] && [ -f "$conda_env_path/bin/python" ]; then
+            VENV_DIR="$conda_env_path"
+            VENV_PYTHON="$VENV_DIR/bin/python"
+            CONDA_ENV_FOUND=1
+        fi
+    fi
+}
+
+check_conda
 
 ensure_task_log_file() {
     if [ -z "$TASK_LOG_FILE" ]; then
@@ -177,7 +208,11 @@ for required_value in "$MODEL_ID_LIST_JSON" "$MODEL_NAME_LIST_JSON" "$TARGET_ROO
 done
 
 if [ ! -x "$VENV_PYTHON" ]; then
-    echo "[download-models] Python virtual environment is missing at $VENV_PYTHON. Run init-task-runtime first." >&2
+    if [ "$CONDA_ENV_FOUND" -eq 1 ]; then
+        echo "[download-models] conda environment '$BASE_MODEL' python not found: $VENV_PYTHON. Please run init-task-runtime first." >&2
+    else
+        echo "[download-models] Python virtual environment is missing at $VENV_PYTHON. Run init-task-runtime first." >&2
+    fi
     exit 65
 fi
 
