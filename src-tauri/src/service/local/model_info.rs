@@ -13,7 +13,9 @@ use crate::{
         models::{ModelDownloadType, ModelInfo, ModelMutationResult},
         pipeline::{
             model_artifacts::{resolve_model_download_paths, validate_model_artifact_paths},
-            script_paths::{resolve_src_model_root, src_model_venv_python_path, ScriptPlatform},
+            script_paths::{
+                resolve_src_model_root, src_model_begin_llm_task_script_path, ScriptPlatform,
+            },
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
@@ -116,14 +118,14 @@ impl LocalService {
         let platform = ScriptPlatform::current();
         let init_script_path = src_model_root.join(platform.init_task_runtime_relative_path());
         let download_script_path = src_model_root.join(platform.download_models_relative_path());
-        let venv_python_path = src_model_venv_python_path(&src_model_root, &model_info.base_model);
+        let begin_llm_task_script_path = src_model_begin_llm_task_script_path(&src_model_root);
         let use_cpu_mode = device == HardwareType::Cpu;
         let bootstrap_paths = PipelineBootstrapPaths {
             base_model: &model_info.base_model,
             model_version: &model_info.model_version,
             log_dir: &log_dir,
             src_model_root: &src_model_root,
-            venv_python_path: &venv_python_path,
+            begin_llm_task_script_path: &begin_llm_task_script_path,
             init_task_runtime_script_path: &init_script_path,
             download_models_script_path: &download_script_path,
         };

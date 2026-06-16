@@ -40,10 +40,10 @@ use super::{
         PythonScriptTaskKind, TrainingArgs,
     },
     model_paths::speaker_model_dir,
-    run_pipeline_stage_shell_script, run_python_params_file_invocation_cancellable,
+    run_llm_task_invocation_cancellable, run_pipeline_stage_shell_script,
     script_paths::{
-        resolve_src_model_root, src_model_model_python_script_path,
-        src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
+        resolve_src_model_root, src_model_begin_llm_task_script_path,
+        src_model_model_python_script_path, src_model_transcode_script_path, ScriptPlatform,
     },
 };
 
@@ -72,7 +72,7 @@ pub(crate) struct LoadedTrainingTaskParams {
 pub(crate) struct CommonTrainingPaths {
     pub src_model_root: PathBuf,
     pub model_root_path: PathBuf,
-    pub venv_python_path: PathBuf,
+    pub begin_llm_task_script_path: PathBuf,
     pub ensure_torch_runtime_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
     pub train_python_script_path: PathBuf,
@@ -89,7 +89,7 @@ pub(crate) struct ResolvedTrainingPaths {
     pub model_version: String,
     pub src_model_root: PathBuf,
     pub model_root_path: PathBuf,
-    pub venv_python_path: PathBuf,
+    pub begin_llm_task_script_path: PathBuf,
     pub ensure_torch_runtime_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
     pub train_python_script_path: PathBuf,
@@ -222,7 +222,6 @@ pub(crate) async fn run_common_training_pipeline(
             &paths.base_model,
             &paths.model_version,
             &paths.src_model_root,
-            &paths.venv_python_path,
             &paths.ensure_torch_runtime_script_path,
             task_id,
             &log_dir,
@@ -267,7 +266,7 @@ pub(crate) async fn run_common_training_pipeline(
         let invocation = build_shared_training_invocation(base_model, &invocation_context)?;
 
         run_training_python_command(
-            &paths.venv_python_path,
+            &paths.begin_llm_task_script_path,
             &paths.train_python_script_path,
             &paths.src_model_root,
             &paths.model_root_path,
@@ -397,7 +396,7 @@ pub(crate) fn resolve_training_paths_base(
         model_version: model_version.to_string(),
         src_model_root: common_paths.src_model_root,
         model_root_path: common_paths.model_root_path,
-        venv_python_path: common_paths.venv_python_path,
+        begin_llm_task_script_path: common_paths.begin_llm_task_script_path,
         ensure_torch_runtime_script_path: common_paths.ensure_torch_runtime_script_path,
         transcode_script_path: common_paths.transcode_script_path,
         train_python_script_path: common_paths.train_python_script_path,
@@ -418,7 +417,7 @@ pub(crate) fn resolve_common_training_paths(
     let platform = ScriptPlatform::current();
     let src_model_root = resolve_src_model_root(service.app_dir())?;
     let model_root_path = src_model_root.join("base-models");
-    let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
+    let begin_llm_task_script_path = src_model_begin_llm_task_script_path(&src_model_root);
     let ensure_torch_runtime_script_path =
         src_model_root.join(platform.ensure_torch_runtime_relative_path());
     let transcode_script_path = src_model_transcode_script_path(&src_model_root);
@@ -458,7 +457,7 @@ pub(crate) fn resolve_common_training_paths(
     Ok(CommonTrainingPaths {
         src_model_root,
         model_root_path,
-        venv_python_path,
+        begin_llm_task_script_path,
         ensure_torch_runtime_script_path,
         transcode_script_path,
         train_python_script_path,
@@ -496,7 +495,6 @@ pub(crate) async fn prepare_training_model_env(
     base_model: &str,
     model_version: &str,
     src_model_root: &Path,
-    venv_python_path: &Path,
     ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
@@ -510,13 +508,6 @@ pub(crate) async fn prepare_training_model_env(
             "模型 {}:{} 未安装，请先在模型管理页安装后再执行任务",
             base_model,
             model_version
-        );
-    }
-
-    if !venv_python_path.exists() {
-        anyhow::bail!(
-            "训练运行时未准备完成，缺少 Python 虚拟环境: {}。请在模型管理页重新安装模型。",
-            venv_python_path.display()
         );
     }
 
@@ -548,7 +539,6 @@ pub(crate) async fn prepare_training_model_env_for_paths(
     base_model: &str,
     model_version: &str,
     src_model_root: &Path,
-    venv_python_path: &Path,
     ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
@@ -559,7 +549,6 @@ pub(crate) async fn prepare_training_model_env_for_paths(
         base_model,
         model_version,
         src_model_root,
-        venv_python_path,
         ensure_torch_runtime_script_path,
         task_id,
         log_dir,
@@ -732,7 +721,7 @@ pub(crate) fn parse_common_training_model_params(
 }
 
 pub(crate) async fn run_training_python_command(
-    venv_python_path: &Path,
+    begin_llm_task_script_path: &Path,
     train_python_script_path: &Path,
     src_model_root: &Path,
     model_root_path: &Path,
@@ -743,22 +732,19 @@ pub(crate) async fn run_training_python_command(
     label: &str,
     cancel_rx: &mut watch::Receiver<bool>,
 ) -> Result<LoggedCommandResult> {
-    if !venv_python_path.exists() {
+    if !begin_llm_task_script_path.exists() {
         anyhow::bail!(
-            "Training venv python not found: {}",
-            venv_python_path.display()
+            "任务执行脚本不存在: {}",
+            begin_llm_task_script_path.display()
         );
     }
     if !model_root_path.exists() {
-        anyhow::bail!(
-            "Training model root path not found: {}",
-            model_root_path.display()
-        );
+        anyhow::bail!("训练模型根路径不存在: {}", model_root_path.display());
     }
 
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::ModelTraining, task_id);
-    run_python_params_file_invocation_cancellable(
-        venv_python_path,
+    run_llm_task_invocation_cancellable(
+        begin_llm_task_script_path,
         train_python_script_path,
         src_model_root,
         label,

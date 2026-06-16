@@ -27,7 +27,6 @@ use crate::{
     utils::{
         file_ops::remove_file_if_exists,
         process::{
-            run_logged_python_script, run_logged_python_script_cancellable,
             run_logged_shell_script, run_logged_shell_script_cancellable, LoggedCommandResult,
         },
     },
@@ -96,7 +95,7 @@ pub(crate) struct PipelineBootstrapPaths<'a> {
     pub model_version: &'a str,
     pub log_dir: &'a Path,
     pub src_model_root: &'a Path,
-    pub venv_python_path: &'a Path,
+    pub begin_llm_task_script_path: &'a Path,
     pub init_task_runtime_script_path: &'a Path,
     pub download_models_script_path: &'a Path,
 }
@@ -183,11 +182,9 @@ where
     )
     .await?;
 
-    ensure_required_path_exists(paths.venv_python_path, "虚拟环境 Python")?;
     info!(
         base_model = %paths.base_model,
         model_version = %paths.model_version,
-        venv_python = %paths.venv_python_path.display(),
         "本地模型运行时环境校验完成"
     );
     Ok(())
@@ -272,13 +269,14 @@ where
                 download_log_path.to_string_lossy().to_string(),
             ];
 
-            run_logged_python_script(
-                paths.venv_python_path,
+            run_logged_shell_script(
+                paths.begin_llm_task_script_path,
                 &script_path,
                 paths.src_model_root,
                 download_label.as_ref(),
                 &download_log_path,
                 "python script completed successfully",
+                ScriptPlatform::current().shell_base_args(),
                 script_args,
             )
             .await?;
@@ -311,8 +309,8 @@ pub(crate) fn resolve_model_task_pipeline(
     Ok(&COMMON_TASK_PIPELINE)
 }
 
-pub(crate) async fn run_python_params_file_invocation(
-    python_path: &Path,
+pub(crate) async fn run_llm_task_invocation(
+    begin_llm_task_script_path: &Path,
     script_path: &Path,
     current_dir: &Path,
     label: &str,
@@ -322,23 +320,30 @@ pub(crate) async fn run_python_params_file_invocation(
 ) -> Result<()> {
     invocation.write_to_json_file(params_json_path)?;
 
-    run_logged_python_script(
-        python_path,
+    run_logged_shell_script(
+        begin_llm_task_script_path,
         script_path,
         current_dir,
         label,
         task_log_path,
         "python command completed successfully",
+        ScriptPlatform::current().shell_base_args(),
         vec![
             "--params-file".to_string(),
             params_json_path.to_string_lossy().to_string(),
+            "--log-path".to_string(),
+            task_log_path.to_string_lossy().to_string(),
+            "--base-model".to_string(),
+            invocation.base_model.clone(),
+            "--model-version".to_string(),
+            invocation.model_version.clone(),
         ],
     )
     .await
 }
 
-pub(crate) async fn run_python_params_file_invocation_cancellable(
-    python_path: &Path,
+pub(crate) async fn run_llm_task_invocation_cancellable(
+    begin_llm_task_script_path: &Path,
     script_path: &Path,
     current_dir: &Path,
     label: &str,
@@ -348,17 +353,25 @@ pub(crate) async fn run_python_params_file_invocation_cancellable(
     cancel_rx: &mut watch::Receiver<bool>,
 ) -> Result<LoggedCommandResult> {
     invocation.write_to_json_file(params_json_path)?;
+    let platform = ScriptPlatform::current();
 
-    run_logged_python_script_cancellable(
-        python_path,
+    run_logged_shell_script_cancellable(
+        begin_llm_task_script_path,
         script_path,
         current_dir,
         label,
         task_log_path,
         "python command completed successfully",
+        platform.shell_base_args(),
         vec![
             "--params-file".to_string(),
             params_json_path.to_string_lossy().to_string(),
+            "--log-path".to_string(),
+            task_log_path.to_string_lossy().to_string(),
+            "--base-model".to_string(),
+            invocation.base_model.clone(),
+            "--model-version".to_string(),
+            invocation.model_version.clone(),
         ],
         cancel_rx,
     )
