@@ -32,10 +32,11 @@ $useConda = $false
 $condaExe = Get-CondaExecutable
 if ($null -ne $condaExe) {
     $useConda = $true
-    $condaEnvPath = Get-CondaEnvironmentPath -EnvironmentName $baseModel
-    if ($null -ne $condaEnvPath) {
+    $condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+    $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+    if (Test-Path -LiteralPath $condaEnvPython) {
         $venvDir = $condaEnvPath
-        $venvPython = Join-Path $venvDir 'python.exe'
+        $venvPython = $condaEnvPython
     }
 }
 
@@ -428,7 +429,9 @@ function Install-CompatibleTorchCuda {
 
 function Ensure-PythonEnvironment {
     if ($useConda) {
-        if (Test-Path -LiteralPath $venvPython) {
+        $condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+        $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+        if (Test-Path -LiteralPath $condaEnvPython) {
             return
         }
 
@@ -437,21 +440,15 @@ function Ensure-PythonEnvironment {
             throw '[init-task-runtime] conda disappeared between detection and environment creation. This should not happen.'
         }
 
-        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] creating conda environment '$baseModel'"
-        Invoke-LoggedCommand -Description 'create conda environment' -Command $condaExeSaved -Arguments @('create', '-y', '-n', $baseModel, 'python=3.12')
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] creating conda environment at $condaEnvPath"
+        Invoke-LoggedCommand -Description 'create conda environment' -Command $condaExeSaved -Arguments @('create', '-y', '--prefix', $condaEnvPath, 'python=3.12')
 
-        $condaEnvPath = Get-CondaEnvironmentPath -EnvironmentName $baseModel
-        if ($null -eq $condaEnvPath) {
-            throw "[init-task-runtime] conda environment '$baseModel' was not created."
+        if (-not (Test-Path -LiteralPath $condaEnvPython)) {
+            throw "[init-task-runtime] python executable not found in conda environment at $condaEnvPython."
         }
 
         $script:venvDir = $condaEnvPath
-        $script:venvPython = Join-Path $condaEnvPath 'python.exe'
-
-        if (-not (Test-Path -LiteralPath $script:venvPython)) {
-            throw "[init-task-runtime] python executable not found in conda environment at $($script:venvPython)."
-        }
-
+        $script:venvPython = $condaEnvPython
         return
     }
 

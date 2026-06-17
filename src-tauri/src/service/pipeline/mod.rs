@@ -248,11 +248,25 @@ where
             .await?;
         }
         ModelDownloadType::Custom => {
-            let script_path = self::model_artifacts::resolve_custom_model_download_script_path(
-                paths.src_model_root,
-                model_info,
-            )?;
-            let script_args = vec![
+            let download_script_path =
+                self::model_artifacts::resolve_custom_model_download_script_path(
+                    paths.src_model_root,
+                    model_info,
+                )?;
+            let platform = ScriptPlatform::current();
+
+            let mut begin_llm_args = vec![
+                "--base-model".to_string(),
+                paths.base_model.to_string(),
+                "--script-path".to_string(),
+                download_script_path.to_string_lossy().to_string(),
+                "--log-path".to_string(),
+                paths.log_dir.to_string_lossy().to_string(),
+                "--task-log-file".to_string(),
+                download_log_path.to_string_lossy().to_string(),
+                "--".to_string(),
+            ];
+            begin_llm_args.extend(vec![
                 "--base-model".to_string(),
                 paths.base_model.to_string(),
                 "--model-version".to_string(),
@@ -267,17 +281,17 @@ where
                 paths.log_dir.to_string_lossy().to_string(),
                 "--task-log-file".to_string(),
                 download_log_path.to_string_lossy().to_string(),
-            ];
+            ]);
 
             run_logged_shell_script(
+                Path::new(platform.shell_program()),
                 paths.begin_llm_task_script_path,
-                &script_path,
                 paths.src_model_root,
                 download_label.as_ref(),
                 &download_log_path,
                 "python script completed successfully",
-                ScriptPlatform::current().shell_base_args(),
-                script_args,
+                platform.shell_base_args(),
+                begin_llm_args,
             )
             .await?;
         }
@@ -319,24 +333,27 @@ pub(crate) async fn run_llm_task_invocation(
     invocation: &PythonScriptInvocationSpec,
 ) -> Result<()> {
     invocation.write_to_json_file(params_json_path)?;
+    let platform = ScriptPlatform::current();
 
     run_logged_shell_script(
+        Path::new(platform.shell_program()),
         begin_llm_task_script_path,
-        script_path,
         current_dir,
         label,
         task_log_path,
         "python command completed successfully",
-        ScriptPlatform::current().shell_base_args(),
+        platform.shell_base_args(),
         vec![
+            "--base-model".to_string(),
+            invocation.base_model.clone(),
+            "--script-path".to_string(),
+            script_path.to_string_lossy().to_string(),
             "--params-file".to_string(),
             params_json_path.to_string_lossy().to_string(),
             "--log-path".to_string(),
             task_log_path.to_string_lossy().to_string(),
-            "--base-model".to_string(),
-            invocation.base_model.clone(),
-            "--model-version".to_string(),
-            invocation.model_version.clone(),
+            "--task-log-file".to_string(),
+            task_log_path.to_string_lossy().to_string(),
         ],
     )
     .await
@@ -356,22 +373,24 @@ pub(crate) async fn run_llm_task_invocation_cancellable(
     let platform = ScriptPlatform::current();
 
     run_logged_shell_script_cancellable(
+        Path::new(platform.shell_program()),
         begin_llm_task_script_path,
-        script_path,
         current_dir,
         label,
         task_log_path,
         "python command completed successfully",
         platform.shell_base_args(),
         vec![
+            "--base-model".to_string(),
+            invocation.base_model.clone(),
+            "--script-path".to_string(),
+            script_path.to_string_lossy().to_string(),
             "--params-file".to_string(),
             params_json_path.to_string_lossy().to_string(),
             "--log-path".to_string(),
             task_log_path.to_string_lossy().to_string(),
-            "--base-model".to_string(),
-            invocation.base_model.clone(),
-            "--model-version".to_string(),
-            invocation.model_version.clone(),
+            "--task-log-file".to_string(),
+            task_log_path.to_string_lossy().to_string(),
         ],
         cancel_rx,
     )

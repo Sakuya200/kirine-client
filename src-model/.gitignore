@@ -3,3 +3,4 @@ venv
 **/__pycache__
 tests/training-data
 base-models
+**/conda_env

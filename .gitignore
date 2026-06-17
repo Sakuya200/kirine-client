@@ -26,3 +26,6 @@ dist-ssr
 data
 models
 resources
+
+# Conda environments
+**/conda_env

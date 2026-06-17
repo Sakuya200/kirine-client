@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $srcModelRoot = Get-SrcModelRoot -ScriptPath $PSCommandPath
-$modelRoot = $null
 $venvDir = $null
 $venvPython = $null
 $scriptPath = $null
@@ -11,8 +10,15 @@ $paramsFile = $null
 $logPath = $null
 $taskLogFile = $null
 
+$scriptArgs = $args
+$forwardedScriptArgs = @()
+$separatorIndex = [Array]::IndexOf($scriptArgs, '--')
+if ($separatorIndex -ge 0) {
+    $forwardedScriptArgs = $scriptArgs[($separatorIndex + 1)..($scriptArgs.Length - 1)]
+    $scriptArgs = $scriptArgs[0..($separatorIndex - 1)]
+}
 try {
-    $parsed = Parse-CliArguments -Arguments $args -OptionsWithValues @('--base-model', '--params-file', '--log-path', '--task-log-file') -ActionName 'begin-llm-task'
+    $parsed = Parse-CliArguments -Arguments $scriptArgs -OptionsWithValues @('--base-model', '--params-file', '--script-path', '--log-path', '--task-log-file') -ActionName 'begin-llm-task'
 }
 catch {
     Write-Error $_.Exception.Message
@@ -30,28 +36,19 @@ if ([string]::IsNullOrWhiteSpace($scriptPath)) {
     exit 64
 }
 $paramsFile = $parsed['--params-file']
-if ([string]::IsNullOrWhiteSpace($paramsFile)) {
-    Write-Error 'Missing --params-file argument.'
-    exit 64
-}
 $logPath = $parsed['--log-path']
 $taskLogFile = $parsed['--task-log-file']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.'
-
-
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
 $venvDir = Join-Path $modelRoot 'venv'
 $venvPython = Join-Path $venvDir 'Scripts\python.exe'
 
-$condaExe = Get-CondaExecutable
-$condaEnvPath = $null
-if ($null -ne $condaExe) {
-    $condaEnvPath = Get-CondaEnvironmentPath -EnvironmentName $baseModel
-    if ($null -ne $condaEnvPath) {
-        $venvDir = $condaEnvPath
-        $venvPython = Join-Path $venvDir 'python.exe'
-    }
+$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+if (Test-Path -LiteralPath $condaEnvPython) {
+    $venvDir = $condaEnvPath
+    $venvPython = $condaEnvPython
 }
 
 function Invoke-LoggedCommand {
@@ -92,25 +89,42 @@ function Invoke-LoggedCommand {
 }
 
 Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Starting LLM task with base model '$baseModel'."
-$pythonCommand = Resolve-PythonCommand -BaseModel $baseModel -VenvPython $venvPython
+
+if (-not (Test-Path -LiteralPath $scriptPath)) {
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: Script not found: $scriptPath"
+    exit 1
+}
+
+if (-not (Test-Path -LiteralPath $venvPython)) {
+    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: Python executable not found: $venvPython"
+    exit 1
+}
+
+Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] executing script: $scriptPath"
+
 try {
-    Invoke-LoggedCommand -Description "Running Python command" -Command $pythonCommand[0] -Arguments (
-        $pythonCommand[1..($pythonCommand.Length - 1)],
+    # NOTE: --log-path / --task-log-file are intentionally NOT forwarded to
+    # the target Python script.  They are consumed by this wrapper for its
+    # own task-log output (Append-TaskLog / Out-File above).  The params-file
+    # entry scripts (voice_clone/tts/training/voice_design across all models)
+    # only accept --params-file and would fail with argparse "unrecognized
+    # arguments" if these were passed through.  Scripts that genuinely need
+    # them (e.g. download.py) receive them via the forwarded args after `--`.
+    $pythonArgs = @(
         '-X', 'utf8',
         '-X', 'faulthandler',
         '-u',
-        $scriptPath,
-        '--params-file', $paramsFile,
-        '--log-path', $logPath,
-        '--task-log-file', $taskLogFile
+        $scriptPath
     )
+    if (-not [string]::IsNullOrWhiteSpace($paramsFile)) {
+        $pythonArgs += @('--params-file', $paramsFile)
+    }
+    $pythonArgs += $forwardedScriptArgs
+    Invoke-LoggedCommand -Description "Running Python command" -Command $venvPython -Arguments $pythonArgs
 }
 catch {
     Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: $_"
-    $exitCode = 1
+    exit 1
 }
-else {
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Completed LLM task successfully."
-}
-
-
+Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Completed LLM task successfully."
+exit 0

@@ -24,13 +24,12 @@ $venvPython = Join-Path $modelRoot 'venv\Scripts\python.exe'
 $taskLogFile = $parsed['--task-log-file']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.'
 
-$condaExe = Get-CondaExecutable
-$condaEnvPath = $null
-if ($null -ne $condaExe) {
-    $condaEnvPath = Get-CondaEnvironmentPath -EnvironmentName $baseModel
-    if ($null -ne $condaEnvPath) {
-        $venvPython = Join-Path $condaEnvPath 'python.exe'
-    }
+$useConda = $false
+$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+if (Test-Path -LiteralPath $condaEnvPython) {
+    $useConda = $true
+    $venvPython = $condaEnvPython
 }
 
 function Get-TorchInstallArguments {
@@ -330,8 +329,8 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath $venvPython)) {
-        if ($null -ne $condaEnvPath) {
-            throw "[ensure-torch-runtime] conda environment '$baseModel' python not found: $venvPython. Please run init-task-runtime first."
+        if ($useConda) {
+            throw "[ensure-torch-runtime] conda environment python not found: $venvPython. Please run init-task-runtime first."
         }
         else {
             throw "[ensure-torch-runtime] Python virtual environment not found: $venvPython. Please install model from model management first."
