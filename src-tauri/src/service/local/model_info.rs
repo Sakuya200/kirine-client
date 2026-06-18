@@ -241,19 +241,23 @@ impl LocalService {
         let model_info = map_model_info(row.clone())?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
         let venv_dir = src_model_root.join(&model_info.base_model).join("venv");
+        let conda_env_dir = src_model_root
+            .join(&model_info.base_model)
+            .join("conda_env");
         let artifacts_root = src_model_root.join("base-models");
         let shared_artifacts = self.collect_shared_artifact_names(model_id).await?;
         let mut removed_paths = Vec::new();
         let mut preserved_paths = Vec::new();
 
+        // 针对直接在src-model/base-models/下的模型文件或目录，只有在没有其他模型依赖时才删除
         for artifact_name in &model_info.required_model_name_list {
             let artifact_path = artifacts_root.join(artifact_name);
-            if shared_artifacts.contains(artifact_name) {
-                preserved_paths.push(artifact_path.to_string_lossy().to_string());
+            if !artifact_path.exists() {
                 continue;
             }
 
-            if !artifact_path.exists() {
+            if shared_artifacts.contains(artifact_name) {
+                preserved_paths.push(artifact_path.to_string_lossy().to_string());
                 continue;
             }
 
@@ -276,6 +280,24 @@ impl LocalService {
             removed_paths.push(artifact_path.to_string_lossy().to_string());
         }
 
+        // 针对通过 git clone 或其他方式下载到模型专用目录下的文件或目录，如果没有多个模型依赖则删除整个目录
+        let git_project_dir = artifacts_root.join(&model_info.base_model);
+        if git_project_dir.exists() {
+            if shared_artifacts.contains(&model_info.base_model) {
+                preserved_paths.push(git_project_dir.to_string_lossy().to_string());
+            } else {
+                fs::remove_dir_all(&git_project_dir)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to remove model artifact directory: {}",
+                            git_project_dir.display()
+                        )
+                    })?;
+                removed_paths.push(git_project_dir.to_string_lossy().to_string());
+            }
+        }
+
         if remove_dir_if_exists(&venv_dir).await.with_context(|| {
             format!(
                 "failed to remove model runtime directory: {}",
@@ -283,6 +305,18 @@ impl LocalService {
             )
         })? {
             removed_paths.push(venv_dir.to_string_lossy().to_string());
+        }
+
+        if remove_dir_if_exists(&conda_env_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to remove model runtime directory: {}",
+                    conda_env_dir.display()
+                )
+            })?
+        {
+            removed_paths.push(conda_env_dir.to_string_lossy().to_string());
         }
 
         self.set_model_downloaded_impl(&model_info.base_model, &model_info.model_version, false)
