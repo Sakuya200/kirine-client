@@ -148,6 +148,13 @@ function Get-BootstrapPythonCommand {
 }
 
 function Get-CondaExecutable {
+    # Only probe the conda CLI on PATH. We deliberately do NOT search common
+    # install locations under $env:USERPROFILE / $env:ProgramData: doing so
+    # previously relied on a comma-separated Join-Path list that PowerShell
+    # parsed incorrectly (the comma bound adjacent Join-Path calls into a single
+    # array argument, crashing with "Cannot convert System.Object[] to
+    # ChildPath"). When conda is not on PATH we return $null and let callers
+    # fall back to a plain venv.
     $condaCommand = @(Get-Command conda -CommandType Application -ErrorAction SilentlyContinue)
     if ($condaCommand.Count -gt 0) {
         $selected = ($condaCommand | Where-Object { $_.Source -like '*.exe' } | Select-Object -First 1)
@@ -156,24 +163,6 @@ function Get-CondaExecutable {
         }
 
         return $selected.Source
-    }
-
-    $candidatePaths = @(
-        Join-Path $env:USERPROFILE 'miniforge3\Scripts\conda.exe',
-        Join-Path $env:USERPROFILE 'miniforge3\condabin\conda.bat',
-        Join-Path $env:USERPROFILE 'anaconda3\Scripts\conda.exe',
-        Join-Path $env:USERPROFILE 'anaconda3\condabin\conda.bat',
-        Join-Path $env:USERPROFILE 'miniconda3\Scripts\conda.exe',
-        Join-Path $env:USERPROFILE 'miniconda3\condabin\conda.bat',
-        Join-Path $env:ProgramData 'miniforge3\Scripts\conda.exe',
-        Join-Path $env:ProgramData 'anaconda3\Scripts\conda.exe',
-        Join-Path $env:ProgramData 'miniconda3\Scripts\conda.exe'
-    )
-
-    foreach ($candidatePath in $candidatePaths) {
-        if (Test-Path -LiteralPath $candidatePath) {
-            return $candidatePath
-        }
     }
 
     return $null
@@ -204,7 +193,10 @@ function Resolve-PythonCommand {
         if ($null -ne $condaExe) {
             return @($condaExe, 'run', '--prefix', $condaEnvPath, 'python', '--')
         }
-        return @('conda', 'run', '--prefix', $condaEnvPath, 'python', '--')
+        # conda env exists but the conda CLI is not on PATH. Invoke the env's
+        # python.exe directly rather than emitting a bare 'conda' token that the
+        # caller cannot resolve.
+        return @($condaPython)
     }
 
     return @($VenvPython)
