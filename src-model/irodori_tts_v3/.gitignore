@@ -1,0 +1,4 @@
+venv/
+conda_env/
+__pycache__/
+*.pyc
