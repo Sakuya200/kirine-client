@@ -41,15 +41,13 @@ $taskLogFile = $parsed['--task-log-file']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.'
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
-$venvDir = Join-Path $modelRoot 'venv'
-$venvPython = Join-Path $venvDir 'Scripts\python.exe'
-
-$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
-$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
-if (Test-Path -LiteralPath $condaEnvPython) {
-    $venvDir = $condaEnvPath
-    $venvPython = $condaEnvPython
-}
+# Use whichever Python environment already exists in the model directory
+# (conda_env or venv). This keeps an older venv-based install working even
+# after conda is later installed, instead of routing execution through a
+# conda_env that was never set up for this model.
+$pyEnv = Resolve-ModelPythonEnvironment -ModelRoot $modelRoot
+$venvDir = $pyEnv.EnvDir
+$venvPython = $pyEnv.Python
 
 function Invoke-LoggedCommand {
     param(

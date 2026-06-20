@@ -25,20 +25,14 @@ if ([string]::IsNullOrWhiteSpace($baseModel)) {
 $modelRoot = Join-Path $srcModelRoot $baseModel
 $requirementsFile = Join-Path $modelRoot 'requirements.txt'
 $torchRequirementsFile = Join-Path $modelRoot 'requirements-torch.txt'
-$venvDir = Join-Path $modelRoot 'venv'
-$venvPython = Join-Path $venvDir 'Scripts\python.exe'
-$useConda = $false
-
-$condaExe = Get-CondaExecutable
-if ($null -ne $condaExe) {
-    $useConda = $true
-    $condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
-    $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
-    if (Test-Path -LiteralPath $condaEnvPython) {
-        $venvDir = $condaEnvPath
-        $venvPython = $condaEnvPython
-    }
-}
+# Prefer the environment that already exists on disk (venv or conda_env).
+# Only when neither exists do we fall back to conda-CLI detection to decide
+# which one to create — this keeps an existing venv working after the user
+# installs conda instead of migrating to a fresh conda_env.
+$pyEnv = Resolve-ModelPythonEnvironment -ModelRoot $modelRoot
+$venvDir = $pyEnv.EnvDir
+$venvPython = $pyEnv.Python
+$useConda = ($pyEnv.Backend -eq 'conda')
 
 if (-not [string]::IsNullOrWhiteSpace($parsed['--requirements-file'])) {
     $requirementsFile = $parsed['--requirements-file']

@@ -20,17 +20,14 @@ if ([string]::IsNullOrWhiteSpace($baseModel)) {
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
 $torchRequirementsFile = Join-Path $modelRoot 'requirements-torch.txt'
-$venvPython = Join-Path $modelRoot 'venv\Scripts\python.exe'
 $taskLogFile = $parsed['--task-log-file']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.'
 
-$useConda = $false
-$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
-$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
-if (Test-Path -LiteralPath $condaEnvPython) {
-    $useConda = $true
-    $venvPython = $condaEnvPython
-}
+# Prefer the environment that already exists on disk so an older venv-based
+# install keeps working after conda is later installed.
+$pyEnv = Resolve-ModelPythonEnvironment -ModelRoot $modelRoot
+$venvPython = $pyEnv.Python
+$useConda = ($pyEnv.Backend -eq 'conda')
 
 function Get-TorchInstallArguments {
     param(
