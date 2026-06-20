@@ -47,10 +47,10 @@ impl ScriptPlatform {
         }
     }
 
-    pub(crate) const fn venv_python_relative_path(self) -> &'static str {
+    pub(crate) const fn begin_llm_task_relative_path(self) -> &'static str {
         match self {
-            Self::Windows => "venv/Scripts/python.exe",
-            Self::Unix => "venv/bin/python",
+            Self::Windows => "scripts/windows/begin_llm_task.ps1",
+            Self::Unix => "scripts/unix/begin_llm_task.sh",
         }
     }
 
@@ -92,10 +92,8 @@ pub(crate) fn src_model_model_python_script_path(
     llm_model_python_script_path(base_model, src_model_root, script_name)
 }
 
-pub(crate) fn src_model_venv_python_path(src_model_root: &Path, base_model: &str) -> PathBuf {
-    src_model_root
-        .join(base_model)
-        .join(ScriptPlatform::current().venv_python_relative_path())
+pub(crate) fn src_model_begin_llm_task_script_path(src_model_root: &Path) -> PathBuf {
+    src_model_root.join(ScriptPlatform::current().begin_llm_task_relative_path())
 }
 
 pub(crate) fn resolve_src_model_root(app_dir: &Path) -> Result<PathBuf> {

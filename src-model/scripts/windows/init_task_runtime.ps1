@@ -27,6 +27,18 @@ $requirementsFile = Join-Path $modelRoot 'requirements.txt'
 $torchRequirementsFile = Join-Path $modelRoot 'requirements-torch.txt'
 $venvDir = Join-Path $modelRoot 'venv'
 $venvPython = Join-Path $venvDir 'Scripts\python.exe'
+$useConda = $false
+
+$condaExe = Get-CondaExecutable
+if ($null -ne $condaExe) {
+    $useConda = $true
+    $condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+    $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+    if (Test-Path -LiteralPath $condaEnvPython) {
+        $venvDir = $condaEnvPath
+        $venvPython = $condaEnvPython
+    }
+}
 
 if (-not [string]::IsNullOrWhiteSpace($parsed['--requirements-file'])) {
     $requirementsFile = $parsed['--requirements-file']
@@ -170,7 +182,7 @@ function Get-CudaVersion {
             continue
         }
 
-        if ($output -match 'CUDA Version:\s*([0-9]+)\.([0-9]+)') {
+        if ($output -match 'CUDA.*?Version:\s*([0-9]+)\.([0-9]+)') {
             $major = [int]$Matches[1]
             $minor = [int]$Matches[2]
             Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] detected CUDA $major.$minor via $($commandSpec.Command)"
@@ -415,7 +427,31 @@ function Install-CompatibleTorchCuda {
     throw "[init-task-runtime] Unable to initialize a working PyTorch CUDA runtime for the detected CUDA environment. Tried $($failedTags -join ', '). Re-run with --cpu-mode if you want a CPU-only environment."
 }
 
-function Ensure-Venv {
+function Ensure-PythonEnvironment {
+    if ($useConda) {
+        $condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+        $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+        if (Test-Path -LiteralPath $condaEnvPython) {
+            return
+        }
+
+        $condaExeSaved = Get-CondaExecutable
+        if ($null -eq $condaExeSaved) {
+            throw '[init-task-runtime] conda disappeared between detection and environment creation. This should not happen.'
+        }
+
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[init-task-runtime] creating conda environment at $condaEnvPath"
+        Invoke-LoggedCommand -Description 'create conda environment' -Command $condaExeSaved -Arguments @('create', '-y', '--prefix', $condaEnvPath, 'python=3.12')
+
+        if (-not (Test-Path -LiteralPath $condaEnvPython)) {
+            throw "[init-task-runtime] python executable not found in conda environment at $condaEnvPython."
+        }
+
+        $script:venvDir = $condaEnvPath
+        $script:venvPython = $condaEnvPython
+        return
+    }
+
     if (Test-Path -LiteralPath $venvPython) {
         return
     }
@@ -444,7 +480,7 @@ try {
         throw "[init-task-runtime] Requirements file not found: $requirementsFile"
     }
 
-    Ensure-Venv
+    Ensure-PythonEnvironment
 
     if ($parsed['--cpu-mode']) {
         Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] CPU mode enabled; skipping CUDA detection'

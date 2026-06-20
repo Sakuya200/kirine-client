@@ -147,6 +147,61 @@ function Get-BootstrapPythonCommand {
     return $null
 }
 
+function Get-CondaExecutable {
+    # Only probe the conda CLI on PATH. We deliberately do NOT search common
+    # install locations under $env:USERPROFILE / $env:ProgramData: doing so
+    # previously relied on a comma-separated Join-Path list that PowerShell
+    # parsed incorrectly (the comma bound adjacent Join-Path calls into a single
+    # array argument, crashing with "Cannot convert System.Object[] to
+    # ChildPath"). When conda is not on PATH we return $null and let callers
+    # fall back to a plain venv.
+    $condaCommand = @(Get-Command conda -CommandType Application -ErrorAction SilentlyContinue)
+    if ($condaCommand.Count -gt 0) {
+        $selected = ($condaCommand | Where-Object { $_.Source -like '*.exe' } | Select-Object -First 1)
+        if ($null -eq $selected) {
+            $selected = $condaCommand[0]
+        }
+
+        return $selected.Source
+    }
+
+    return $null
+}
+
+function Get-CondaEnvPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelRoot
+    )
+
+    return Join-Path $ModelRoot 'conda_env'
+}
+
+function Resolve-PythonCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VenvPython
+    )
+
+    $condaEnvPath = Get-CondaEnvPath -ModelRoot $ModelRoot
+    $condaPython = Join-Path $condaEnvPath 'python.exe'
+    if (Test-Path -LiteralPath $condaPython) {
+        $condaExe = Get-CondaExecutable
+        if ($null -ne $condaExe) {
+            return @($condaExe, 'run', '--prefix', $condaEnvPath, 'python', '--')
+        }
+        # conda env exists but the conda CLI is not on PATH. Invoke the env's
+        # python.exe directly rather than emitting a bare 'conda' token that the
+        # caller cannot resolve.
+        return @($condaPython)
+    }
+
+    return @($VenvPython)
+}
+
 function Invoke-ExternalCommand {
     param(
         [Parameter(Mandatory = $true)]

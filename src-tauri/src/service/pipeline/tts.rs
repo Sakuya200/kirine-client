@@ -32,11 +32,11 @@ use crate::{
             },
             model_artifacts::MODEL_ARTIFACTS_DIR,
             model_paths::speaker_model_dir,
-            run_pipeline_stage_shell_script_cancellable,
-            run_python_params_file_invocation_cancellable,
+            run_llm_task_invocation_cancellable, run_pipeline_stage_shell_script_cancellable,
             script_paths::{
-                resolve_src_model_root, src_model_model_python_script_path,
-                src_model_transcode_script_path, src_model_venv_python_path, ScriptPlatform,
+                resolve_src_model_root, src_model_begin_llm_task_script_path,
+                src_model_model_python_script_path, src_model_transcode_script_path,
+                ScriptPlatform,
             },
             CommonRuntimeOptions, TtsPipelineRequest,
         },
@@ -81,7 +81,7 @@ pub(crate) struct ResolvedTtsPaths {
     pub base_model: String,
     pub model_version: String,
     pub src_model_root: PathBuf,
-    pub venv_python_path: PathBuf,
+    pub begin_llm_task_script_path: PathBuf,
     pub ensure_torch_runtime_script_path: PathBuf,
     pub tts_python_script_path: PathBuf,
     pub transcode_script_path: PathBuf,
@@ -166,7 +166,6 @@ pub(crate) async fn run_common_tts_pipeline(
             &paths.base_model,
             &paths.model_version,
             &paths.src_model_root,
-            &paths.venv_python_path,
             &paths.ensure_torch_runtime_script_path,
             task_id,
             &log_dir,
@@ -197,7 +196,7 @@ pub(crate) async fn run_common_tts_pipeline(
         let invocation = build_shared_tts_invocation(&paths.base_model, &invocation_context);
 
         let command_result = run_tts_python_command(
-            &paths.venv_python_path,
+            &paths.begin_llm_task_script_path,
             &paths.tts_python_script_path,
             &paths.src_model_root,
             &paths.params_json_path,
@@ -433,7 +432,6 @@ pub(crate) async fn prepare_tts_model_env(
     base_model: &str,
     model_version: &str,
     src_model_root: &Path,
-    venv_python_path: &Path,
     ensure_torch_runtime_script_path: &Path,
     task_id: i64,
     log_dir: &Path,
@@ -473,21 +471,6 @@ pub(crate) async fn prepare_tts_model_env(
         return Ok(LoggedCommandResult::Cancelled);
     }
 
-    ensure_required_tts_runtime_files(venv_python_path, ensure_torch_runtime_script_path)?;
-    Ok(LoggedCommandResult::Completed)
-}
-
-fn ensure_required_tts_runtime_files(
-    venv_python_path: &Path,
-    ensure_torch_runtime_script_path: &Path,
-) -> Result<()> {
-    if !venv_python_path.exists() {
-        bail!(
-            "TTS 运行时未准备完成，缺少 Python 虚拟环境: {}。请在模型管理页重新安装模型。",
-            venv_python_path.display()
-        );
-    }
-
     if !ensure_torch_runtime_script_path.exists() {
         bail!(
             "TTS Torch 运行时校验脚本不存在: {}",
@@ -495,7 +478,7 @@ fn ensure_required_tts_runtime_files(
         );
     }
 
-    Ok(())
+    Ok(LoggedCommandResult::Completed)
 }
 
 pub(crate) fn validate_tts_environment(
@@ -504,7 +487,6 @@ pub(crate) fn validate_tts_environment(
     output_file_path: &str,
 ) -> Result<()> {
     for (label, path) in [
-        ("TTS venv python", paths.venv_python_path.as_path()),
         (
             "TTS ensure-torch-runtime script",
             paths.ensure_torch_runtime_script_path.as_path(),
@@ -545,7 +527,7 @@ pub(crate) fn resolve_tts_paths_base(
     src_model_root: PathBuf,
 ) -> Result<ResolvedTtsPaths> {
     let platform = ScriptPlatform::current();
-    let venv_python_path = src_model_venv_python_path(&src_model_root, base_model);
+    let begin_llm_task_script_path = src_model_begin_llm_task_script_path(&src_model_root);
     let ensure_torch_runtime_script_path =
         src_model_root.join(platform.ensure_torch_runtime_relative_path());
     let tts_python_script_path =
@@ -562,7 +544,7 @@ pub(crate) fn resolve_tts_paths_base(
         base_model: base_model.to_string(),
         model_version: model_version.to_string(),
         src_model_root,
-        venv_python_path,
+        begin_llm_task_script_path,
         ensure_torch_runtime_script_path,
         tts_python_script_path,
         transcode_script_path,
@@ -581,7 +563,7 @@ pub(crate) fn resolve_tts_paths(
 }
 
 pub(crate) async fn run_tts_python_command(
-    venv_python_path: &Path,
+    begin_llm_task_script_path: &Path,
     tts_python_script_path: &Path,
     src_model_root: &Path,
     params_json_path: &Path,
@@ -602,8 +584,8 @@ pub(crate) async fn run_tts_python_command(
     );
 
     let task_log_path = task_log_file_path(log_dir, HistoryTaskType::TextToSpeech, task_id);
-    let result = run_python_params_file_invocation_cancellable(
-        venv_python_path,
+    let result = run_llm_task_invocation_cancellable(
+        begin_llm_task_script_path,
         tts_python_script_path,
         src_model_root,
         run_label,

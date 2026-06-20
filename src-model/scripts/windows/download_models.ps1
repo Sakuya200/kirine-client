@@ -25,6 +25,15 @@ $modelRoot = Join-Path $srcModelRoot $baseModel
 $venvDir = Join-Path $modelRoot 'venv'
 $venvPython = Join-Path $venvDir 'Scripts\python.exe'
 
+$useConda = $false
+$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
+$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+if (Test-Path -LiteralPath $condaEnvPython) {
+    $useConda = $true
+    $venvDir = $condaEnvPath
+    $venvPython = $condaEnvPython
+}
+
 $modelIdListJson = $parsed['--model-id-list']
 $modelNameListJson = $parsed['--model-name-list']
 $targetRootDir = $parsed['--target-root-dir']
@@ -247,7 +256,12 @@ function Download-Model {
 
 try {
     if (-not (Test-Path -LiteralPath $venvPython)) {
-        throw "[download-models] Python virtual environment is missing at $venvPython. Run init-task-runtime first."
+        if ($useConda) {
+            throw "[download-models] conda environment python not found: $venvPython. Please run init-task-runtime first."
+        }
+        else {
+            throw "[download-models] Python virtual environment is missing at $venvPython. Run init-task-runtime first."
+        }
     }
 
     if (-not (Test-Path -LiteralPath $targetRootDir)) {

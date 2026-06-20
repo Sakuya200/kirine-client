@@ -10,3 +10,9 @@
 [submodule "src-model/gpt_sovits_cpufast"]
 	path = src-model/gpt_sovits_cpufast
 	url = https://github.com/Sakuya200/kirine-client-gpt-sovits-cpufast-adapter.git
+[submodule "src-model/dots_tts"]
+	path = src-model/dots_tts
+	url = https://github.com/Sakuya200/kirine-client-dots-tts-adapter.git
+[submodule "src-model/irodori_tts_v3"]
+	path = src-model/irodori_tts_v3
+	url = https://github.com/Sakuya200/kirine-client-irodori-tts-v3-adapter.git

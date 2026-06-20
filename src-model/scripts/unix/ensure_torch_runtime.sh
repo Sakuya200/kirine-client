@@ -63,6 +63,36 @@ run_checked() {
 MODEL_ROOT="$SRC_MODEL_ROOT/$BASE_MODEL"
 TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
 VENV_PYTHON="$MODEL_ROOT/venv/bin/python"
+USE_CONDA=0
+CONDA_ENV_FOUND=0
+
+check_conda() {
+    if command -v conda >/dev/null 2>&1; then
+        USE_CONDA=1
+
+        conda_env_path=$(conda env list --json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    envs = json.load(sys.stdin)
+    for ep in envs.get('envs', []):
+        import os
+        name = os.path.basename(ep)
+        if name == sys.argv[1]:
+            print(ep)
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" "$BASE_MODEL" 2>/dev/null) || true
+
+        if [ -n "$conda_env_path" ] && [ -f "$conda_env_path/bin/python" ]; then
+            VENV_PYTHON="$conda_env_path/bin/python"
+            CONDA_ENV_FOUND=1
+        fi
+    fi
+}
+
+check_conda
 
 ensure_torch_requirements_file() {
     if [ ! -f "$TORCH_REQUIREMENTS_FILE" ]; then
@@ -72,7 +102,11 @@ ensure_torch_requirements_file() {
 }
 
 if [ ! -x "$VENV_PYTHON" ]; then
-    echo "[ensure-torch-runtime] Python virtual environment not found: $VENV_PYTHON. Please install model from model management first." >&2
+    if [ "$CONDA_ENV_FOUND" -eq 1 ]; then
+        echo "[ensure-torch-runtime] conda environment '$BASE_MODEL' python not found: $VENV_PYTHON. Please run init-task-runtime first." >&2
+    else
+        echo "[ensure-torch-runtime] Python virtual environment not found: $VENV_PYTHON. Please install model from model management first." >&2
+    fi
     exit 1
 fi
 

@@ -550,36 +550,6 @@ pub async fn run_logged_command_cancellable(
     ))
 }
 
-pub async fn run_logged_python_script(
-    python_path: &Path,
-    script_path: &Path,
-    current_dir: &Path,
-    label: &str,
-    task_log_path: &Path,
-    success_message: &str,
-    script_args: Vec<String>,
-) -> Result<()> {
-    let mut args = vec![
-        "-X".to_string(),
-        "utf8".to_string(),
-        "-X".to_string(),
-        "faulthandler".to_string(),
-        "-u".to_string(),
-        script_path.to_string_lossy().to_string(),
-    ];
-    args.extend(script_args);
-
-    run_logged_command(
-        python_path,
-        &args,
-        current_dir,
-        label,
-        task_log_path,
-        success_message,
-    )
-    .await
-}
-
 pub async fn run_logged_shell_script(
     shell_program: &Path,
     script_path: &Path,
@@ -621,38 +591,6 @@ pub async fn run_logged_shell_script_cancellable(
     run_logged_command_cancellable(
         shell_program,
         &shell_args,
-        current_dir,
-        label,
-        task_log_path,
-        success_message,
-        cancel_rx,
-    )
-    .await
-}
-
-pub async fn run_logged_python_script_cancellable(
-    python_path: &Path,
-    script_path: &Path,
-    current_dir: &Path,
-    label: &str,
-    task_log_path: &Path,
-    success_message: &str,
-    script_args: Vec<String>,
-    cancel_rx: &mut watch::Receiver<bool>,
-) -> Result<LoggedCommandResult> {
-    let mut args = vec![
-        "-X".to_string(),
-        "utf8".to_string(),
-        "-X".to_string(),
-        "faulthandler".to_string(),
-        "-u".to_string(),
-        script_path.to_string_lossy().to_string(),
-    ];
-    args.extend(script_args);
-
-    run_logged_command_cancellable(
-        python_path,
-        &args,
         current_dir,
         label,
         task_log_path,

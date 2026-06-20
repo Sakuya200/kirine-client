@@ -12,6 +12,9 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 
 1. **Python 3.12.x**：用于本地模型的运行环境初始化与任务执行，建议统一使用 3.12.x 版本。
 2. **Git**：用于部分模型的资源获取流程，特别是 GPT-SoVITS-CPUFast。
+3. **Conda（可选）**：Miniconda 或 Anaconda。若系统 PATH 中可检测到 `conda` 命令，应用会优先为每个模型创建独立的 conda 环境（`<模型目录>/conda_env`），否则回退到标准 `venv`。不安装 Conda 也能正常使用全部功能。
+
+> 国内用户建议先阅读第 9 节《国内网络环境配置建议》，为 pip / conda / git 配置镜像源与代理，可显著提升依赖安装与模型资源下载的成功率与速度。
 
 ## 2. 使用前须知
 
@@ -22,14 +25,16 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 
 ## 3. 当前模型支持
 
-| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 设备支持 |
-| --- | --- | --- | --- | --- | --- |
-| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | CPU / CUDA |
-| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | CPU / CUDA |
-| VoxCPM2 | 2B | ✓ | ✓ | ✓ | CPU / CUDA |
-| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | CPU / CUDA |
-| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | CPU |
-| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | CPU |
+| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 音色设计 | 设备支持 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Irodori-TTS-V3 | 500M | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| Dots.TTS | 2B | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
+| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | CPU |
+| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | — | CPU |
 
 ## 4. 快速上手
 
@@ -99,14 +104,20 @@ if is_g2pw:
 
 ## 7. 已支持模型项目指引
 
-1. Qwen3-TTS
+1. Irodori-TTS-V3
+   - 项目入口（GitHub）：https://github.com/Aratako/Irodori-TTS
+   - 模型仓库（Hugging Face）：https://huggingface.co/Aratako
+2. Dots.TTS
+   - 项目入口（GitHub）：https://github.com/rednote-hilab/dots.tts
+   - 模型仓库（Hugging Face）：https://huggingface.co/rednote-hilab
+3. Qwen3-TTS
    - 项目入口（GitHub）：https://github.com/QwenLM/Qwen3-TTS
    - 模型仓库（Hugging Face）：https://huggingface.co/Qwen
-2. VoxCPM2
+4. VoxCPM2
    - 模型仓库（Hugging Face）：https://huggingface.co/openbmb/VoxCPM2
-3. MOSS-TTS Local
+5. MOSS-TTS Local
    - 模型仓库（Hugging Face）：https://huggingface.co/OpenMOSS-Team
-4. GPT-SoVITS-CPUFast
+6. GPT-SoVITS-CPUFast
    - 项目仓库（GitHub）：https://github.com/baicai-1145/GPT-SoVITS-CPUFast
 
 ## 8. 常见问题
@@ -116,6 +127,83 @@ if is_g2pw:
 **任务长时间无进展**：检查页面通知栏是否有错误提示，或查看配置中 `log_dir` 下对应任务的日志文件。若为首次安装、首次推理或切换了设备类型，启动耗时增加是正常的。
 
 **flash-attn 相关报错**：Windows 环境下通常缺少稳定官方支持，建议保持默认的 `sdpa`。
+
+## 9. 国内网络环境配置建议
+
+Kirine Client 在首次安装模型、首次推理时会从 PyPI 下载 Python 依赖，从 GitHub 克隆部分模型源码，从 Hugging Face 下载模型权重。这些资源在国内网络下经常出现超时或失败，建议提前为 **pip**、**conda**、**git** 配置国内镜像源，必要时再为 GitHub / Hugging Face 配置代理。
+
+> 以下配置在终端中执行一次即可全局生效（写入用户配置文件）。命令行中的 `#` 注释无需输入。
+
+### 9.1 pip 镜像源
+
+将 pip 默认源切换为清华 TUNA 镜像，并提升可信主机超时时间：
+
+```bash
+# 写入用户级 pip 配置（Windows / macOS / Linux 通用）
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+pip config set global.timeout 120
+```
+
+备选镜像（任选其一，替换上面的 `index-url` 即可）：
+
+- 阿里云：`https://mirrors.aliyun.com/pypi/simple/`
+- 中科大：`https://pypi.mirrors.ustc.edu.cn/simple/`
+- 腾讯云：`https://mirrors.cloud.tencent.com/pypi/simple/`
+
+### 9.2 conda 镜像源
+
+若使用 Conda 管理环境，建议配置清华镜像。执行后会在 `~/.condarc`（Windows 为 `C:\Users\<用户名>\.condarc`）中写入配置：
+
+```bash
+# 逐条执行
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge
+conda config --set show_channel_urls yes
+```
+
+如需恢复官方源：`conda config --remove-key channels`（或直接删除 `.condarc`）。
+
+### 9.3 git 镜像与代理
+
+GitHub 克隆速度慢或失败时，有两种常用方案。
+
+**方案 A：使用 GitHub 镜像加速（无需代理）**
+
+将 `github.com` 替换为镜像域名即可，例如：
+
+```bash
+# 原始
+git clone https://github.com/rednote-hilab/dots.tts
+# 使用镜像（任选其一，可用性随时间变化）
+git clone https://ghproxy.com/https://github.com/rednote-hilab/dots.tts
+git clone https://mirror.ghproxy.com/https://github.com/rednote-hilab/dots.tts
+```
+
+**方案 B：为 git 配置 HTTP / HTTPS 代理（需自备代理端口）**
+
+如果你本地有可用的代理客户端（如监听 `127.0.0.1:7890`），可为 git 单独设置代理：
+
+```bash
+# 设置代理（把 7890 换成你的实际端口）
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+
+# 取消代理
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+```
+
+### 9.4 Hugging Face 下载加速
+
+模型权重通过 `huggingface_hub` 下载，国内可通过 `hf-mirror.com` 镜像加速。在启动 Kirine Client **之前**设置环境变量，应用及其子进程会继承该变量：
+
+**Windows（永久生效，写入用户环境变量）：**
+
+```powershell
+[Environment]::SetEnvironmentVariable("HF_ENDPOINT", "https://hf-mirror.com", "User")
+```
 
 ---
 
