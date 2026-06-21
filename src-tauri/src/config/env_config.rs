@@ -1,5 +1,4 @@
 use anyhow::Context;
-use config::Config;
 use serde::{Deserialize, Serialize};
 use std::{
     env::{current_dir, current_exe},
@@ -167,41 +166,28 @@ pub fn load_configs() -> Result<EnvConfig> {
 fn load_configs_from_path(config_path: &Path) -> Result<EnvConfig> {
     println!("[startup] 开始加载配置文件信息");
 
-    let mut builder = Config::builder();
-    let config_name = config_path.to_str().ok_or_else(|| {
-        let error = io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "配置文件路径包含非法 UTF-8 字符",
-        );
-        eprintln!(
-            "[startup] 配置文件路径无效: path={}, error={}",
-            config_path.display(),
-            error
-        );
-        error
-    })?;
-    builder = builder.add_source(config::File::new(config_name, config::FileFormat::Toml));
-    let settings = builder
-        .build()
+    let content = fs::read_to_string(config_path)
         .map_err(|err| {
-            eprintln!("[startup] 配置文件加载失败: {err}");
+            eprintln!(
+                "[startup] 配置文件读取失败: path={}, error={}",
+                config_path.display(),
+                err
+            );
             err
         })
-        .with_context(|| format!("从 {} 加载配置文件失败", config_path.display()))?;
+        .with_context(|| format!("读取配置文件失败: {}", config_path.display()))?;
 
-    let env_config = settings
-        .try_deserialize::<EnvConfig>()
+    let mut env_config: EnvConfig = toml::from_str(&content)
         .map_err(|err| {
             eprintln!("[startup] 配置文件解析失败: {err:?}");
             err
         })
         .with_context(|| format!("将 {} 解析为 EnvConfig 失败", config_path.display()))?;
-    let mut normalized_config = env_config;
-    materialize_config_defaults(&mut normalized_config)?;
-    save_configs_to_path(&normalized_config, config_path)?;
-    println!("[startup] 配置文件加载完成: {:?}", normalized_config);
+    materialize_config_defaults(&mut env_config)?;
+    save_configs_to_path(&env_config, config_path)?;
+    println!("[startup] 配置文件加载完成: {:?}", env_config);
 
-    Ok(normalized_config)
+    Ok(env_config)
 }
 
 pub fn save_configs(env_config: &EnvConfig) -> Result<()> {
