@@ -34,11 +34,10 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
             CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
-            HistoryTaskType,
-            ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
-            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
-            VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            HistoryTaskType, ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult,
+            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,

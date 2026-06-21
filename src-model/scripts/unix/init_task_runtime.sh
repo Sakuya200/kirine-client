@@ -3,6 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' && cd -- "$(dirname "$0")" && pwd)
 SRC_MODEL_ROOT=$(CDPATH='' && cd -- "$SCRIPT_DIR/../.." && pwd)
+. "$SCRIPT_DIR/common.sh"
 BASE_MODEL=""
 MODEL_ROOT=""
 REQUIREMENTS_FILE=""
@@ -50,36 +51,17 @@ if [ -z "$REQUIREMENTS_FILE" ]; then
     REQUIREMENTS_FILE="$MODEL_ROOT/requirements.txt"
 fi
 TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
-VENV_DIR="$MODEL_ROOT/venv"
-VENV_PYTHON="$VENV_DIR/bin/python"
+
+# Prefer the environment that already exists on disk (venv or conda_env). Only when neither exists
+# do we fall back to conda-CLI detection to decide which one to create — this keeps an existing
+# venv working after the user installs conda instead of migrating to a fresh conda_env.
+resolve_model_python_environment "$MODEL_ROOT"
+VENV_DIR="$PY_ENV_DIR"
+VENV_PYTHON="$PY_PYTHON"
 USE_CONDA=0
-
-# --- conda support ---
-check_conda() {
-    if command -v conda >/dev/null 2>&1; then
-        USE_CONDA=1
-        return 0
-    fi
-    return 1
-}
-
-resolve_conda_env_path() {
-    conda_env_path=$(conda env list --json 2>/dev/null | python3 -c "
-import json, sys
-try:
-    envs = json.load(sys.stdin)
-    for ep in envs.get('envs', []):
-        import os
-        name = os.path.basename(ep)
-        if name == sys.argv[1]:
-            print(ep)
-            sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" "$1" 2>/dev/null) || true
-    printf '%s\n' "$conda_env_path"
-}
+if [ "$PY_BACKEND" = "conda" ]; then
+    USE_CONDA=1
+fi
 
 ensure_task_log_file() {
     if [ -z "$TASK_LOG_FILE" ]; then
@@ -109,41 +91,33 @@ ensure_torch_requirements_file() {
     fi
 }
 
-detect_python() {
-    if command -v python3 >/dev/null 2>&1; then
-        printf '%s\n' "python3"
-        return 0
-    fi
-    if command -v python >/dev/null 2>&1; then
-        printf '%s\n' "python"
-        return 0
-    fi
-
-    return 1
-}
-
 ensure_env() {
     if [ -x "$VENV_PYTHON" ]; then
         return 0
     fi
 
     if [ "$USE_CONDA" -eq 1 ]; then
-        append_log "[init-task-runtime] creating conda environment '$BASE_MODEL'"
-        run_checked "create conda environment" conda create -y -n "$BASE_MODEL" python=3.12
+        conda_env_path=$(get_conda_env_path "$MODEL_ROOT")
+        conda_env_python="$conda_env_path/bin/python"
+        if [ -x "$conda_env_python" ]; then
+            return 0
+        fi
 
-        conda_env_path=$(resolve_conda_env_path "$BASE_MODEL")
-        if [ -z "$conda_env_path" ]; then
-            echo "[init-task-runtime] conda environment '$BASE_MODEL' was not created." >&2
+        conda_exe=$(get_conda_executable) || {
+            echo "[init-task-runtime] conda disappeared between detection and environment creation. This should not happen." >&2
+            return 65
+        }
+
+        append_log "[init-task-runtime] creating conda environment at $conda_env_path"
+        run_checked "create conda environment" "$conda_exe" create -y --prefix "$conda_env_path" python=3.12
+
+        if [ ! -x "$conda_env_python" ]; then
+            echo "[init-task-runtime] python executable not found in conda environment at $conda_env_python." >&2
             return 65
         fi
 
         VENV_DIR="$conda_env_path"
-        VENV_PYTHON="$VENV_DIR/bin/python"
-        if [ ! -x "$VENV_PYTHON" ]; then
-            echo "[init-task-runtime] python executable not found in conda environment at $VENV_PYTHON." >&2
-            return 65
-        fi
-
+        VENV_PYTHON="$conda_env_python"
         return 0
     fi
 
@@ -348,15 +322,6 @@ install_compatible_torch_cuda() {
 }
 
 ensure_task_log_file
-check_conda
-
-if [ "$USE_CONDA" -eq 1 ]; then
-    conda_env_path=$(resolve_conda_env_path "$BASE_MODEL")
-    if [ -n "$conda_env_path" ]; then
-        VENV_DIR="$conda_env_path"
-        VENV_PYTHON="$VENV_DIR/bin/python"
-    fi
-fi
 
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
     echo "[init-task-runtime] Requirements file not found: $REQUIREMENTS_FILE" >&2

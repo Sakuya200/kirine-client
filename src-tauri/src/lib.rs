@@ -29,6 +29,18 @@ pub use service::models::HistoryTaskType;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 安装版以 NSIS 安装完成页“打开应用”等方式启动时，进程工作目录可能不是安装目录，
+    // 而启动期的配置/src-model/本地服务路径均按相对路径解析，会导致找不到文件而闪退。
+    // 发布构建下将工作目录锚定到可执行文件所在目录，保证相对路径解析与开发期一致。
+    if !cfg!(debug_assertions) {
+        if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+        {
+            let _ = std::env::set_current_dir(&exe_dir);
+        }
+    }
+
     let service_closed = Arc::new(AtomicBool::new(false));
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

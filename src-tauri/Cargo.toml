@@ -45,7 +45,6 @@ time = { version = "0.3.47", features = [
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 async-trait = "0.1.89"
-config = { version = "0.15.19", features = ["toml"] }
 tracing-appender = "0.2.4"
 toml = "0.8"
 anyhow = "1.0"

@@ -22,17 +22,12 @@ if ([string]::IsNullOrWhiteSpace($baseModel)) {
 }
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
-$venvDir = Join-Path $modelRoot 'venv'
-$venvPython = Join-Path $venvDir 'Scripts\python.exe'
-
-$useConda = $false
-$condaEnvPath = Get-CondaEnvPath -ModelRoot $modelRoot
-$condaEnvPython = Join-Path $condaEnvPath 'python.exe'
-if (Test-Path -LiteralPath $condaEnvPython) {
-    $useConda = $true
-    $venvDir = $condaEnvPath
-    $venvPython = $condaEnvPython
-}
+# Prefer the environment that already exists on disk so an older venv-based
+# install keeps working after conda is later installed.
+$pyEnv = Resolve-ModelPythonEnvironment -ModelRoot $modelRoot
+$venvDir = $pyEnv.EnvDir
+$venvPython = $pyEnv.Python
+$useConda = ($pyEnv.Backend -eq 'conda')
 
 $modelIdListJson = $parsed['--model-id-list']
 $modelNameListJson = $parsed['--model-name-list']

@@ -177,6 +177,68 @@ function Get-CondaEnvPath {
     return Join-Path $ModelRoot 'conda_env'
 }
 
+function Resolve-ModelPythonEnvironment {
+    # Resolve which Python environment a model directory should use.
+    #
+    # Selection order — we always prefer an environment that already exists on
+    # disk, so a model that was set up with a plain venv keeps using that venv
+    # even after the user later installs conda. Migrating an existing working
+    # environment just because conda became available on PATH previously caused
+    # init-task-runtime to create a fresh (often incomplete) conda_env and break.
+    #
+    #   1. conda_env/python.exe present  -> existing conda env
+    #   2. venv/Scripts/python.exe present -> existing venv
+    #   3. neither present               -> conda if the conda CLI is on PATH,
+    #                                       otherwise venv (Exists = $false;
+    #                                       caller is responsible for creation)
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelRoot
+    )
+
+    $venvDir = Join-Path $ModelRoot 'venv'
+    $venvPython = Join-Path $venvDir 'Scripts\python.exe'
+    $condaEnvPath = Get-CondaEnvPath -ModelRoot $ModelRoot
+    $condaEnvPython = Join-Path $condaEnvPath 'python.exe'
+
+    if (Test-Path -LiteralPath $condaEnvPython) {
+        return @{
+            Backend = 'conda'
+            EnvDir  = $condaEnvPath
+            Python  = $condaEnvPython
+            Exists  = $true
+        }
+    }
+
+    if (Test-Path -LiteralPath $venvPython) {
+        return @{
+            Backend = 'venv'
+            EnvDir  = $venvDir
+            Python  = $venvPython
+            Exists  = $true
+        }
+    }
+
+    # Neither environment exists yet — pick the one to create. Prefer conda
+    # when its CLI is available; otherwise fall back to a plain venv.
+    $condaExe = Get-CondaExecutable
+    if ($null -ne $condaExe) {
+        return @{
+            Backend = 'conda'
+            EnvDir  = $condaEnvPath
+            Python  = $condaEnvPython
+            Exists  = $false
+        }
+    }
+
+    return @{
+        Backend = 'venv'
+        EnvDir  = $venvDir
+        Python  = $venvPython
+        Exists  = $false
+    }
+}
+
 function Resolve-PythonCommand {
     param(
         [Parameter(Mandatory = $true)]
