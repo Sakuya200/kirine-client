@@ -6,6 +6,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
+import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { AppLanguage } from '@/enums/language';
@@ -75,7 +76,6 @@ const importLanguageOptions: Array<{ value: AppLanguage; label: string }> = [
 
 const selectedSpeaker = computed(() => speakerStore.speakers.find(speaker => speaker.id === selectedSpeakerId.value) ?? null);
 const deleteTarget = computed(() => speakerStore.speakers.find(speaker => speaker.id === deleteTargetId.value) ?? null);
-const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
 const canSaveSpeaker = computed(() => editForm.name.trim().length > 0 && editForm.description.trim().length > 0);
 const canImportSpeaker = computed(
   () =>
@@ -86,23 +86,17 @@ const canImportSpeaker = computed(
     importForm.description.trim().length > 0
 );
 
-const filteredSpeakers = computed(() => {
-  const keyword = trimmedKeyword.value;
+const onKeywordInput = () => {
+  speakerStore.setFilter({ keyword: searchKeyword.value.trim() });
+};
 
-  return speakerStore.speakers
-    .filter(speaker => {
-      const matchesKeyword =
-        !keyword ||
-        speaker.name.toLowerCase().includes(keyword) ||
-        speaker.description.toLowerCase().includes(keyword) ||
-        speakerStore.getLanguageLabel(speaker).toLowerCase().includes(keyword);
-      const matchesLanguage = selectedLanguage.value === 'all' || speaker.languages.includes(selectedLanguage.value);
-      const matchesStatus = selectedStatus.value === 'all' || speaker.status === selectedStatus.value;
+const onLanguageChange = (value: LanguageFilterValue) => {
+  speakerStore.setFilter({ language: value === 'all' ? null : value });
+};
 
-      return matchesKeyword && matchesLanguage && matchesStatus;
-    })
-    .sort((left, right) => right.modifyTime.localeCompare(left.modifyTime));
-});
+const onStatusChange = (value: StatusFilterValue) => {
+  speakerStore.setFilter({ status: value === 'all' ? null : value });
+};
 
 const statusLabelMap: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Ready]: SPEAKER_STATUS_TEXT[SpeakerStatus.Ready],
@@ -320,13 +314,14 @@ onMounted(async () => {
           v-model="searchKeyword"
           class="min-w-0 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 sm:col-span-2 xl:col-span-1"
           placeholder="搜索名称、语言或备注"
+          @input="onKeywordInput"
         />
-        <BaseListbox v-model="selectedLanguage" :options="languageOptions" />
-        <BaseListbox v-model="selectedStatus" :options="statusOptions" />
+        <BaseListbox :model-value="selectedLanguage" :options="languageOptions" @update:model-value="onLanguageChange($event as LanguageFilterValue)" />
+        <BaseListbox :model-value="selectedStatus" :options="statusOptions" @update:model-value="onStatusChange($event as StatusFilterValue)" />
       </div>
 
-      <div v-if="filteredSpeakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="speaker in filteredSpeakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
+      <div v-if="speakerStore.speakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <article v-for="speaker in speakerStore.speakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
@@ -362,6 +357,19 @@ onMounted(async () => {
 
       <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
         {{ speakerStore.isLoading ? '正在加载说话人列表...' : '当前筛选条件下没有匹配的说话人。' }}
+      </div>
+
+      <div v-if="speakerStore.speakers.length > 0" class="mt-4">
+        <BasePagination
+          :current-page="speakerStore.page"
+          :page-size="speakerStore.pageSize"
+          :page-size-options="[9, 18, 27]"
+          :total-items="speakerStore.total"
+          :disabled="speakerStore.isLoading"
+          :loading="speakerStore.isLoading"
+          @update:current-page="speakerStore.setPage"
+          @update:page-size="speakerStore.setPageSize"
+        />
       </div>
     </PanelCard>
 

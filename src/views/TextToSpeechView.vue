@@ -26,6 +26,7 @@ import {
   type TextToSpeechSpeakerOption
 } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -519,7 +520,7 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.TextToSpeech, 5);
     generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is TtsResult => item !== null)

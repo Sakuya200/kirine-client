@@ -6,7 +6,10 @@ const MAX_CLIENT_ERROR_MESSAGE_CHARS: usize = 420;
 fn truncate_client_error_message(message: String) -> String {
     let trimmed = message.trim();
     let mut chars = trimmed.chars();
-    let head = chars.by_ref().take(MAX_CLIENT_ERROR_MESSAGE_CHARS).collect::<String>();
+    let head = chars
+        .by_ref()
+        .take(MAX_CLIENT_ERROR_MESSAGE_CHARS)
+        .collect::<String>();
 
     if chars.next().is_some() {
         format!("{}...", head)

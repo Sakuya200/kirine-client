@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
+import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
@@ -15,6 +16,24 @@ const isMutating = ref(false);
 const mutatingModelId = ref<number | null>(null);
 const mutatingAction = ref<'install' | 'uninstall' | 'reinstall' | null>(null);
 const uninstallTargetId = ref<number | null>(null);
+
+// 模型目录数量有限，采用前端分页：loadModels 仍经 PageRequest 与 Rust 交互取全，
+// 此处仅对已加载的 items 做切片展示，不破坏 modelStore getter（业务页依赖全量）。
+const page = ref(1);
+const pageSize = ref(10);
+const pagedItems = computed(() => {
+  const start = (page.value - 1) * pageSize.value;
+  return modelStore.items.slice(start, start + pageSize.value);
+});
+const totalItems = computed(() => modelStore.items.length);
+
+const onSetPage = (next: number) => {
+  page.value = next;
+};
+const onSetPageSize = (next: number) => {
+  pageSize.value = next;
+  page.value = 1;
+};
 
 const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
 const modelBusyLabel = computed(() => {
@@ -117,7 +136,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in modelStore.items" :key="item.id" class="border-b border-brand-50 text-slate-700 align-middle">
+            <tr v-for="item in pagedItems" :key="item.id" class="border-b border-brand-50 text-slate-700 align-middle">
               <td class="py-3 align-middle font-medium text-slate-900">{{ item.modelName }}</td>
               <td class="py-3 align-middle">{{ item.modelVersion }}</td>
               <td class="py-3 align-middle">
@@ -181,6 +200,18 @@ onMounted(async () => {
 
       <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
         {{ modelStore.isLoading ? '正在加载模型列表...' : '当前没有可展示的模型信息。' }}
+      </div>
+
+      <div v-if="modelStore.items.length > 0" class="mt-4">
+        <BasePagination
+          :current-page="page"
+          :page-size="pageSize"
+          :total-items="totalItems"
+          :disabled="isMutating"
+          :loading="modelStore.isLoading"
+          @update:current-page="onSetPage"
+          @update:page-size="onSetPageSize"
+        />
       </div>
     </PanelCard>
 

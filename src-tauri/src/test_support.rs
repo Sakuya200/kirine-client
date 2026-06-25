@@ -10,16 +10,19 @@ use crate::{
     service::entity::{speaker, task_history, training_task, tts_task, voice_clone_task},
     service::{
         models::{
-            AppLanguage, CreateModelTrainingTaskPayload, CreateSpeakerPayload,
-            CreateTextToSpeechTaskPayload, HistoryRecord, ModelInfo, ModelTrainingFileInput,
+            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
+            HistoryRecord, HistoryRecordSummary, ModelInfo, ModelTrainingFileInput,
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, SpeakerInfo, SpeakerSource, SpeakerStatus, TextToSpeechFormat,
-            TextToSpeechTaskResult, UpdateSpeakerPayload,
+            ModelTrainingTaskResult, SpeakerInfo, SpeakerPageResult, SpeakerSource,
+            TextToSpeechFormat, TextToSpeechTaskResult, UpdateSpeakerPayload,
         },
         LocalService, Service,
     },
     Result,
 };
+
+// 测试需要构造分页 / 筛选请求，但 `service` 模块为私有，这里对外暴露必要类型。
+pub use crate::service::models::{AppLanguage, PageRequest, SpeakerFilter, SpeakerStatus};
 
 pub struct LocalServiceHarness {
     root_dir: PathBuf,
@@ -47,7 +50,7 @@ impl LocalServiceHarness {
     }
 
     pub async fn speakers_query_succeeds(&self) -> Result<bool> {
-        self.service.list_speaker_infos().await?;
+        self.service.list_speaker_infos(PageRequest::default()).await?;
         Ok(true)
     }
 
@@ -66,15 +69,45 @@ impl LocalServiceHarness {
     }
 
     pub async fn list_speakers(&self) -> Result<Vec<SpeakerInfo>> {
-        self.service.list_speaker_infos().await
+        self.service
+            .list_speaker_infos(PageRequest {
+                page: 1,
+                page_size: 1000,
+                filter: None,
+            })
+            .await
+            .map(|result| result.items)
+    }
+
+    /// 以分页请求获取说话人，返回完整 `SpeakerPageResult`（含统计），
+    /// 用于覆盖分页 / 筛选 / 统计逻辑。
+    pub async fn list_speakers_paged(
+        &self,
+        request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult> {
+        self.service.list_speaker_infos(request).await
     }
 
     pub async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
-        self.service.list_model_infos().await
+        self.service
+            .list_model_infos(PageRequest {
+                page: 1,
+                page_size: 1000,
+                filter: None,
+            })
+            .await
+            .map(|result| result.items)
     }
 
-    pub async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
-        self.service.list_history_records().await
+    pub async fn list_history_records(&self) -> Result<Vec<HistoryRecordSummary>> {
+        self.service
+            .list_history_records(PageRequest {
+                page: 1,
+                page_size: 1000,
+                filter: None,
+            })
+            .await
+            .map(|result| result.items)
     }
 
     pub async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
@@ -213,7 +246,25 @@ impl LocalServiceHarness {
 
     pub async fn shutdown(self) -> Result<()> {
         self.service.close().await?;
-        fs::remove_dir_all(self.root_dir)?;
+        // SQLite 启用 WAL 模式时会产生 -shm/-wal 旁路文件，连接关闭后 Windows 上
+        // 可能仍被 OS 短暂占用，立即 remove_dir_all 会偶发 os error 32。重试等待句柄释放；
+        // 若最终仍失败则按 best-effort 放行，避免临时文件清理阻断测试断言结果。
+        for attempt in 0..15 {
+            match fs::remove_dir_all(&self.root_dir) {
+                Ok(()) => return Ok(()),
+                Err(_) if attempt < 14 => {
+                    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                }
+                Err(err) => {
+                    log::warn!(
+                        "failed to remove test root dir after retries: {}: {}",
+                        self.root_dir.display(),
+                        err
+                    );
+                    return Ok(());
+                }
+            }
+        }
         Ok(())
     }
 

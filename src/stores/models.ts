@@ -6,7 +6,7 @@ import { HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, ModelInfo, ModelMutationResult } from '@/types/domain';
+import type { BaseModel, ModelInfo, ModelMutationResult, Page } from '@/types/domain';
 
 const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   id: typeof item.id === 'number' ? item.id : 0,
@@ -55,8 +55,11 @@ export const useModelStore = defineStore('models', () => {
     isLoading.value = true;
 
     try {
-      const result = await invoke<ModelInfo[]>('list_model_infos');
-      items.value = Array.isArray(result) ? result.map(normalizeModelInfo) : [];
+      const result = await invoke<Page<ModelInfo>>('list_model_infos', {
+        request: { page: 1, pageSize: 500, filter: null }
+      });
+      const rawItems = Array.isArray(result?.items) ? result.items : [];
+      items.value = rawItems.map(normalizeModelInfo);
     } catch (error) {
       items.value = [];
       uiStore.notifyError(formatErrorMessage('加载模型列表失败', error));

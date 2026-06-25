@@ -516,6 +516,21 @@ pub struct HistoryRecord {
     pub detail: serde_json::Value,
 }
 
+/// 历史任务列表摘要（不含 detail/task_log，用于分页列表查询，消除 N+1 全量抓取）
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRecordSummary {
+    pub id: i64,
+    pub task_type: HistoryTaskType,
+    pub title: String,
+    pub speaker: String,
+    pub status: TaskStatus,
+    pub duration_seconds: i64,
+    pub device: HardwareType,
+    pub create_time: String,
+    pub modify_time: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {
@@ -690,4 +705,90 @@ pub struct VoiceDesignTaskResult {
     pub created_at: String,
     pub status: TaskStatus,
     pub output_file_path: String,
+}
+
+/// 通用分页查询请求结构体（统一前后端分页请求对象）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRequest<T> {
+    pub page: u32,
+    pub page_size: u32,
+    pub filter: Option<T>,
+}
+
+impl<T> Default for PageRequest<T> {
+    fn default() -> Self {
+        PageRequest {
+            page: 1,
+            page_size: 10,
+            filter: None,
+        }
+    }
+}
+
+/// 通用分页响应结构体
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
+}
+
+impl<T> Page<T> {
+    pub fn new(items: Vec<T>, total: u64, page: u32, page_size: u32) -> Self {
+        let total_pages = if page_size == 0 {
+            0
+        } else {
+            ((total as u32) + page_size - 1) / page_size
+        };
+        Page {
+            items,
+            total,
+            page,
+            page_size,
+            total_pages,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerFilter {
+    pub keyword: Option<String>,
+    pub status: Option<SpeakerStatus>,
+    pub language: Option<AppLanguage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelFilter {
+    pub keyword: Option<String>,
+    pub downloaded: Option<bool>,
+    pub feature: Option<HistoryTaskType>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryFilter {
+    pub keyword: Option<String>,
+    pub task_type: Option<HistoryTaskType>,
+    pub status: Option<TaskStatus>,
+}
+
+/// 说话人分页响应（附带统计，供页面统计卡使用）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerPageResult {
+    pub items: Vec<SpeakerInfo>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
+    pub ready_count: u64,
+    pub training_count: u64,
+    pub disabled_count: u64,
+    pub total_samples: u64,
 }

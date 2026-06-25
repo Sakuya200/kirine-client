@@ -41,6 +41,7 @@ import {
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -603,7 +604,7 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.ModelTraining, 5);
     recentTrainingHistory.value = records.filter(isModelTrainingHistoryRecord).slice(0, 5);
 
     if (notifyOnSuccess) {

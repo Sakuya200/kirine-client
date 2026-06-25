@@ -10,12 +10,13 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
-            HistoryTaskType,
-            ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult, ModelTrainingTaskResult,
-            SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
-            VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
+            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
+            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
+            VoiceDesignTaskResult,
         },
         Service,
     },
@@ -60,7 +61,10 @@ impl Service for RemoteService {
         biz::unsupported("import_model_as_speaker")
     }
 
-    async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>> {
+    async fn list_speaker_infos(
+        &self,
+        _request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult> {
         biz::unsupported("list_speaker_infos")
     }
 
@@ -72,7 +76,10 @@ impl Service for RemoteService {
         biz::unsupported("delete_speaker_info")
     }
 
-    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
+    async fn list_model_infos(
+        &self,
+        _request: PageRequest<ModelFilter>,
+    ) -> Result<Page<ModelInfo>> {
         biz::unsupported("list_model_infos")
     }
 
@@ -88,7 +95,10 @@ impl Service for RemoteService {
         biz::unsupported("uninstall_model")
     }
 
-    async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
+    async fn list_history_records(
+        &self,
+        _request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>> {
         biz::unsupported("list_history_records")
     }
 

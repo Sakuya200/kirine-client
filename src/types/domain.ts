@@ -148,3 +148,53 @@ export interface VoiceDesignHistoryRecord extends HistoryRecordBase {
 }
 
 export type HistoryRecord = ModelTrainingHistoryRecord | TextToSpeechHistoryRecord | VoiceCloneHistoryRecord | VoiceDesignHistoryRecord;
+
+/** 历史任务列表摘要（不含 detail/taskLog，用于分页列表查询） */
+export type HistoryRecordSummary = HistoryRecordBase;
+
+/** 统一分页请求结构（与 Rust 层 PageRequest<T> 对齐） */
+export interface PageRequest<TFilter> {
+  page: number;
+  pageSize: number;
+  filter?: TFilter | null;
+}
+
+/** 通用分页响应结构 */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface SpeakerFilter {
+  keyword?: string | null;
+  status?: SpeakerStatus | null;
+  language?: AppLanguage | null;
+}
+
+export interface ModelFilter {
+  keyword?: string | null;
+  downloaded?: boolean | null;
+  feature?: HistoryTaskType | null;
+}
+
+export interface HistoryFilter {
+  keyword?: string | null;
+  taskType?: HistoryTaskType | null;
+  status?: TaskStatus | null;
+}
+
+/** 说话人分页响应（附带统计，供页面统计卡使用） */
+export interface SpeakerPagedResult {
+  items: SpeakerProfile[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  readyCount: number;
+  trainingCount: number;
+  disabledCount: number;
+  totalSamples: number;
+}

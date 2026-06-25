@@ -20,6 +20,7 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -399,7 +400,7 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false, silent
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.VoiceDesign, 5);
     generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is VoiceDesignResult => item !== null)

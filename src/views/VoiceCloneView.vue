@@ -20,6 +20,7 @@ import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { useModelStore } from '@/stores/models';
@@ -534,7 +535,7 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {})
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.VoiceClone, 5);
     generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is VoiceCloneResult => item !== null)
