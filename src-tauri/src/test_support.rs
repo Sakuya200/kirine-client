@@ -1,27 +1,30 @@
 use std::{fs, path::PathBuf};
 
 use rand::random;
-use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, Schema};
 use sqlx::{sqlite::SqlitePoolOptions, Row};
 
-use crate::{
-    service::entity::{speaker, task_history, training_task, tts_task, voice_clone_task},
-    service::{
-        models::{
-            CreateSpeakerPayload, HistoryRecord, HistoryRecordSummary, ModelInfo, SpeakerInfo,
-            SpeakerPageResult, SpeakerSource, UpdateSpeakerPayload,
-        },
-        LocalService, Service,
-    },
-    Result,
+use crate::service::models::{
+    CreateSpeakerPayload, HistoryRecord, HistoryRecordSummary, HistoryTaskType, ModelInfo,
+    SpeakerInfo, SpeakerPageResult, SpeakerSource, TaskStatus, UpdateSpeakerPayload,
 };
+use crate::Result;
 
-// 测试需要构造分页 / 筛选请求，但 `service` 模块为私有，这里对外暴露必要类型。
+// `service` / `config` 模块在 lib.rs 中为私有，集成测试（外部 crate）无法直接命名其中的
+// 类型与纯函数。`test_support` 作为对外的公共测试桥接模块，统一重导出测试所需的类型与
+// 抽取出的纯函数 `build_llm_task_script_args`（规则4 参数契约验证）。
+pub use crate::config::HardwareType;
+pub use crate::service::models;
+pub use crate::service::pipeline::build_llm_task_script_args;
+pub use crate::service::{LocalService, Service};
 pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
 
+/// 临时库测试设施：每个 `LocalServiceHarness::new` 在 `std::env::temp_dir` 下创建独立
+/// 临时目录，经 `LocalService::from_paths` 走「建库 → 全量迁移 → sync 模型目录」链路，
+/// 所有 DB 操作落到该临时库（规则1&2）。`shutdown` 关闭连接并清理临时目录。
 pub struct LocalServiceHarness {
     root_dir: PathBuf,
     data_dir: PathBuf,
+    model_dir: PathBuf,
     service: LocalService,
 }
 
@@ -31,13 +34,32 @@ impl LocalServiceHarness {
         let data_dir = root_dir.join("data");
         let model_dir = root_dir.join("models");
         let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir).await?;
+            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone())
+                .await?;
 
         Ok(Self {
             root_dir,
             data_dir,
+            model_dir,
             service,
         })
+    }
+
+    /// 直接访问 `LocalService`，测试可调用任意 `Service` trait 方法（需 `use ...Service`）。
+    pub fn service(&self) -> &LocalService {
+        &self.service
+    }
+
+    pub fn app_dir(&self) -> &PathBuf {
+        &self.root_dir
+    }
+
+    pub fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    pub fn model_dir(&self) -> &PathBuf {
+        &self.model_dir
     }
 
     pub fn database_file_exists(&self) -> bool {
@@ -132,29 +154,212 @@ impl LocalServiceHarness {
         self.service.delete_speaker_info(id).await
     }
 
-    pub async fn shutdown(self) -> Result<()> {
-        self.service.close().await?;
-        // SQLite 启用 WAL 模式时会产生 -shm/-wal 旁路文件，连接关闭后 Windows 上
-        // 可能仍被 OS 短暂占用，立即 remove_dir_all 会偶发 os error 32。重试等待句柄释放；
-        // 若最终仍失败则按 best-effort 放行，避免临时文件清理阻断测试断言结果。
-        for attempt in 0..15 {
-            match fs::remove_dir_all(&self.root_dir) {
-                Ok(()) => return Ok(()),
-                Err(_) if attempt < 14 => {
-                    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-                }
-                Err(err) => {
-                    log::warn!(
-                        "failed to remove test root dir after retries: {}: {}",
-                        self.root_dir.display(),
-                        err
-                    );
-                    return Ok(());
-                }
-            }
-        }
+    // ---- 模型下载状态（覆盖 install/uninstall 的 DB 侧，不真正执行脚本） ----
+
+    pub async fn model_downloaded(
+        &self,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<bool> {
+        self.service
+            .model_downloaded_impl(base_model, model_version)
+            .await
+    }
+
+    pub async fn set_model_downloaded(
+        &self,
+        base_model: &str,
+        model_version: &str,
+        downloaded: bool,
+    ) -> Result<()> {
+        self.service
+            .set_model_downloaded_impl(base_model, model_version, downloaded)
+            .await
+    }
+
+    // ---- 历史记录种子（直接 SQL 插入，避免触发 create_*_task 的后台 pipeline） ----
+
+    const SEED_NOW: &'static str = "2026-06-27 10:00:00";
+
+    /// 插入一条 `task_history` 行。`task_type`/`status` 以 `as_str()`（kebab / lowercase）落库，
+    /// 与生产写入格式一致。`finished_time` 在终态时置为当前种子时间。
+    pub async fn seed_history(
+        &self,
+        id: i64,
+        task_type: HistoryTaskType,
+        title: &str,
+        status: TaskStatus,
+    ) -> Result<()> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        let finished = if status.is_finished() {
+            Some(Self::SEED_NOW)
+        } else {
+            None
+        };
+        sqlx::query(
+            r#"
+            INSERT INTO task_history (
+                id, task_type, title, speaker_id, speaker_name_snapshot, status,
+                duration_seconds, create_time, modify_time, finished_time, device, deleted
+            ) VALUES (?, ?, ?, NULL, '-', ?, 0, ?, ?, ?, 'cpu', 0)
+            "#,
+        )
+        .bind(id)
+        .bind(task_type.as_str())
+        .bind(title)
+        .bind(status.as_str())
+        .bind(Self::SEED_NOW)
+        .bind(Self::SEED_NOW)
+        .bind(finished)
+        .execute(&pool)
+        .await?;
+        pool.close().await;
         Ok(())
     }
+
+    pub async fn seed_tts_detail(
+        &self,
+        history_id: i64,
+        base_model: &str,
+        model_version: &str,
+        output_file_path: Option<&str>,
+    ) -> Result<()> {
+        self.seed_detail(
+            "tts_tasks",
+            history_id,
+            &[
+                ("speaker_id", None),
+                ("model_path", None),
+                ("base_model", Some(base_model)),
+                ("model_version", Some(model_version)),
+                ("language", Some("chinese")),
+                ("format", Some("wav")),
+                ("export_audio_name", Some("tts-export")),
+                ("text", Some("你好")),
+                ("model_params_json", Some("{}")),
+                ("file_name", Some("tts.wav")),
+                ("output_file_path", output_file_path),
+            ],
+            vec![("char_count", "2")],
+        )
+        .await
+    }
+
+    pub async fn seed_voice_clone_detail(
+        &self,
+        history_id: i64,
+        base_model: &str,
+        model_version: &str,
+        output_file_path: Option<&str>,
+    ) -> Result<()> {
+        self.seed_detail(
+            "voice_clone_tasks",
+            history_id,
+            &[
+                ("base_model", Some(base_model)),
+                ("model_version", Some(model_version)),
+                ("language", Some("chinese")),
+                ("format", Some("wav")),
+                ("export_audio_name", Some("vc-export")),
+                ("ref_audio_name", Some("ref.wav")),
+                ("ref_audio_path", Some("/tmp/ref.wav")),
+                ("ref_text", Some("参考")),
+                ("text", Some("生成")),
+                ("model_params_json", Some("{}")),
+                ("file_name", Some("vc.wav")),
+                ("output_file_path", output_file_path),
+            ],
+            vec![("char_count", "2")],
+        )
+        .await
+    }
+
+    pub async fn seed_voice_design_detail(
+        &self,
+        history_id: i64,
+        base_model: &str,
+        model_version: &str,
+        output_file_path: Option<&str>,
+    ) -> Result<()> {
+        self.seed_detail(
+            "voice_design_tasks",
+            history_id,
+            &[
+                ("base_model", Some(base_model)),
+                ("model_version", Some(model_version)),
+                ("language", Some("chinese")),
+                ("format", Some("wav")),
+                ("export_audio_name", Some("vd-export")),
+                ("prompt", Some("温柔")),
+                ("text", Some("生成")),
+                ("model_params_json", Some("{}")),
+                ("file_name", Some("vd.wav")),
+                ("output_file_path", output_file_path),
+            ],
+            vec![("char_count", "2")],
+        )
+        .await
+    }
+
+    pub async fn seed_training_detail(
+        &self,
+        history_id: i64,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<()> {
+        self.seed_detail(
+            "model_training_tasks",
+            history_id,
+            &[
+                ("language", Some("chinese")),
+                ("base_model", Some(base_model)),
+                ("model_version", Some(model_version)),
+                ("speaker_name", Some("训练说话人")),
+                ("description", Some("")),
+                ("model_params_json", Some("{}")),
+                ("samples_json", Some("[]")),
+                ("notes_json", Some("[]")),
+                ("output_speaker_id", None),
+            ],
+            vec![("sample_count", "1")],
+        )
+        .await
+    }
+
+    /// 通用 detail 行插入。`string_cols` 以绑定参数写入（`None` → NULL），
+    /// `int_cols` 以字符串字面量直接拼入 SQL（种子常量，非用户输入）。
+    async fn seed_detail(
+        &self,
+        table: &str,
+        history_id: i64,
+        string_cols: &[(&'static str, Option<&str>)],
+        int_cols: Vec<(&'static str, &'static str)>,
+    ) -> Result<()> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        let mut cols: Vec<&str> = vec!["history_id", "create_time", "modify_time", "deleted"];
+        cols.extend(string_cols.iter().map(|(name, _)| *name));
+        cols.extend(int_cols.iter().map(|(name, _)| *name));
+        let mut vals: Vec<String> = vec!["?".into(), "?".into(), "?".into(), "0".into()];
+        vals.extend(string_cols.iter().map(|_| "?".to_string()));
+        vals.extend(int_cols.iter().map(|(_, raw)| raw.to_string()));
+        let sql = format!(
+            "INSERT INTO {table} ({}) VALUES ({})",
+            cols.join(", "),
+            vals.join(", ")
+        );
+        let mut q = sqlx::query(&sql)
+            .bind(history_id)
+            .bind(Self::SEED_NOW)
+            .bind(Self::SEED_NOW);
+        for (_, value) in string_cols {
+            q = q.bind(value);
+        }
+        q.execute(&pool).await?;
+        pool.close().await;
+        Ok(())
+    }
+
+    // ---- DB 内省 helper ----
 
     pub async fn table_exists(&self, table_name: &str) -> Result<bool> {
         let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
@@ -186,7 +391,9 @@ impl LocalServiceHarness {
         history_id: i64,
     ) -> Result<Option<i64>> {
         let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let sql = format!("SELECT id FROM {table_name} WHERE history_id = ?");
+        let sql = format!(
+            "SELECT id FROM {table_name} WHERE history_id = ? AND deleted = 0"
+        );
         let row = sqlx::query(&sql)
             .bind(history_id)
             .fetch_optional(&pool)
@@ -196,61 +403,47 @@ impl LocalServiceHarness {
         Ok(row.map(|row| row.get::<i64, _>("id")))
     }
 
-    pub async fn new_with_legacy_schema(label: &str) -> Result<Self> {
-        let root_dir = test_root(label);
-        let data_dir = root_dir.join("data");
-        let model_dir = root_dir.join("models");
+    /// 读取 detail 行的 `output_file_path`（用于断言任务行写入了预期音频路径）。
+    pub async fn detail_output_file_path(
+        &self,
+        table_name: &str,
+        history_id: i64,
+    ) -> Result<Option<String>> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        let sql = format!(
+            "SELECT output_file_path FROM {table_name} WHERE history_id = ? AND deleted = 0"
+        );
+        let row = sqlx::query(&sql)
+            .bind(history_id)
+            .fetch_optional(&pool)
+            .await?;
+        pool.close().await;
 
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&model_dir)?;
-        seed_legacy_schema(&data_dir.join("app.db")).await?;
-
-        let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir).await?;
-
-        Ok(Self {
-            root_dir,
-            data_dir,
-            service,
-        })
+        Ok(row.and_then(|row| row.get::<Option<String>, _>("output_file_path")))
     }
 
-    pub async fn new_with_legacy_task_detail_schema(label: &str) -> Result<Self> {
-        let root_dir = test_root(label);
-        let data_dir = root_dir.join("data");
-        let model_dir = root_dir.join("models");
-
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&model_dir)?;
-        seed_legacy_task_detail_schema(&data_dir.join("app.db")).await?;
-
-        let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir).await?;
-
-        Ok(Self {
-            root_dir,
-            data_dir,
-            service,
-        })
-    }
-
-    pub async fn new_with_pre_refactor_schema(label: &str) -> Result<Self> {
-        let root_dir = test_root(label);
-        let data_dir = root_dir.join("data");
-        let model_dir = root_dir.join("models");
-
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&model_dir)?;
-        seed_pre_refactor_schema(&data_dir.join("app.db")).await?;
-
-        let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir).await?;
-
-        Ok(Self {
-            root_dir,
-            data_dir,
-            service,
-        })
+    pub async fn shutdown(self) -> Result<()> {
+        self.service.close().await?;
+        // SQLite 启用 WAL 模式时会产生 -shm/-wal 旁路文件，连接关闭后 Windows 上
+        // 可能仍被 OS 短暂占用，立即 remove_dir_all 会偶发 os error 32。重试等待句柄释放；
+        // 若最终仍失败则按 best-effort 放行，避免临时文件清理阻断测试断言结果。
+        for attempt in 0..15 {
+            match fs::remove_dir_all(&self.root_dir) {
+                Ok(()) => return Ok(()),
+                Err(_) if attempt < 14 => {
+                    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                }
+                Err(err) => {
+                    log::warn!(
+                        "failed to remove test root dir after retries: {}: {}",
+                        self.root_dir.display(),
+                        err
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -262,570 +455,6 @@ fn test_root(label: &str) -> PathBuf {
 fn sqlite_database_url(db_path: &PathBuf) -> String {
     let normalized = db_path.to_string_lossy().replace('\\', "/");
     format!("sqlite://{}?mode=rwc", normalized)
-}
-
-async fn open_database_connection(db_path: &PathBuf) -> Result<DatabaseConnection> {
-    Ok(Database::connect(&sqlite_database_url(db_path)).await?)
-}
-
-async fn create_table_from_entity<E>(db: &DatabaseConnection, entity: E) -> Result<()>
-where
-    E: EntityTrait,
-{
-    let backend = DbBackend::Sqlite;
-    let schema = Schema::new(backend);
-    let statement = backend.build(&schema.create_table_from_entity(entity));
-    db.execute(statement).await?;
-    Ok(())
-}
-
-async fn create_current_speakers_table(db_path: &PathBuf) -> Result<()> {
-    let db = open_database_connection(db_path).await?;
-    create_table_from_entity(&db, speaker::Entity).await
-}
-
-async fn create_current_task_history_table(db_path: &PathBuf) -> Result<()> {
-    let db = open_database_connection(db_path).await?;
-    create_table_from_entity(&db, task_history::Entity).await
-}
-
-#[allow(dead_code)]
-async fn create_current_task_detail_tables(db_path: &PathBuf) -> Result<()> {
-    let db = open_database_connection(db_path).await?;
-    create_table_from_entity(&db, tts_task::Entity).await?;
-    create_table_from_entity(&db, training_task::Entity).await?;
-    create_table_from_entity(&db, voice_clone_task::Entity).await
-}
-
-async fn create_legacy_task_detail_tables_from_entities(db_path: &PathBuf) -> Result<()> {
-    create_current_task_detail_tables(db_path).await
-}
-
-async fn seed_legacy_schema(db_path: &PathBuf) -> Result<()> {
-    if !db_path.exists() {
-        fs::File::create(db_path)?;
-    }
-
-    create_current_speakers_table(db_path).await?;
-
-    let pool = open_sqlite_pool(db_path).await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO speakers (
-            id, name, samples, base_model, description,
-            status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(1_i64)
-    .bind("Legacy Speaker")
-    .bind(2_i64)
-    .bind("qwen3_tts")
-    .bind("")
-    .bind("ready")
-    .bind("local")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE model_training_samples (
-            id INTEGER PRIMARY KEY,
-            file_path TEXT NOT NULL
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    pool.close().await;
-    Ok(())
-}
-
-async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
-    if !db_path.exists() {
-        fs::File::create(db_path)?;
-    }
-
-    create_current_speakers_table(db_path).await?;
-    create_current_task_history_table(db_path).await?;
-    create_legacy_task_detail_tables_from_entities(db_path).await?;
-
-    let pool = open_sqlite_pool(db_path).await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE app_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO speakers (
-            id, name, samples, base_model, description,
-            status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(1_i64)
-    .bind("Legacy Speaker")
-    .bind(2_i64)
-    .bind("qwen3_tts")
-    .bind("")
-    .bind("ready")
-    .bind("local")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    for (history_id, task_type, title) in [
-        (101_i64, "text_to_speech", "legacy-tts"),
-        (102_i64, "model_training", "legacy-training"),
-        (103_i64, "voice_clone", "legacy-voice-clone"),
-    ] {
-        sqlx::query(
-            r#"
-            INSERT INTO task_history (
-                id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(history_id)
-        .bind(task_type)
-        .bind(title)
-        .bind(Some(1_i64))
-        .bind("Legacy Speaker")
-        .bind("pending")
-        .bind(0_i64)
-        .bind("2026-04-01 10:00:00")
-        .bind("2026-04-01 10:00:00")
-        .bind(Option::<String>::None)
-        .bind(0_i64)
-        .execute(&pool)
-        .await?;
-    }
-
-    sqlx::query(
-        r#"
-        INSERT INTO tts_tasks (
-            history_id, speaker_id, model_path, base_model, model_version, language, format,
-            export_audio_name, text, model_params_json, char_count, file_name, output_file_path,
-            create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(101_i64)
-    .bind(1_i64)
-    .bind(Option::<String>::None)
-    .bind("qwen3_tts")
-    .bind("1.7B")
-    .bind("chinese")
-    .bind("wav")
-    .bind("legacy-tts")
-    .bind("hello")
-    .bind("{}")
-    .bind(5_i64)
-    .bind("legacy-tts.wav")
-    .bind(Option::<String>::None)
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO model_training_tasks (
-            history_id, language, base_model, model_version, model_name, model_params_json,
-            sample_count, samples_json, notes_json, output_speaker_id, create_time,
-            modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(102_i64)
-    .bind("chinese")
-    .bind("qwen3_tts")
-    .bind("1.7B")
-    .bind("legacy-model")
-    .bind("{}")
-    .bind(1_i64)
-    .bind("[]")
-    .bind("[]")
-    .bind(Some(1_i64))
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO voice_clone_tasks (
-            history_id, base_model, model_version, language, format, export_audio_name,
-            ref_audio_name, ref_audio_path, ref_text, text, model_params_json, char_count,
-            file_name, output_file_path, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(103_i64)
-    .bind("qwen3_tts")
-    .bind("1.7B")
-    .bind("chinese")
-    .bind("wav")
-    .bind("legacy-voice-clone")
-    .bind("ref.wav")
-    .bind("/tmp/ref.wav")
-    .bind("参考")
-    .bind("生成")
-    .bind("{}")
-    .bind(2_i64)
-    .bind("legacy-voice-clone.wav")
-    .bind(Option::<String>::None)
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    pool.close().await;
-    Ok(())
-}
-
-async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
-    if !db_path.exists() {
-        fs::File::create(db_path)?;
-    }
-
-    let pool = open_sqlite_pool(db_path).await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE app_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE speakers (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            samples INTEGER NOT NULL DEFAULT 0,
-            base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
-            description TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL,
-            source TEXT NOT NULL,
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE task_history (
-            id INTEGER PRIMARY KEY,
-            task_type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            speaker_id INTEGER,
-            speaker_name_snapshot TEXT NOT NULL,
-            status TEXT NOT NULL,
-            duration_seconds INTEGER NOT NULL DEFAULT 0,
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            finished_time TEXT,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE model_info (
-            id INTEGER PRIMARY KEY,
-            base_model TEXT NOT NULL,
-            model_name TEXT NOT NULL,
-            model_scale_list_json TEXT NOT NULL,
-            download_type TEXT NOT NULL DEFAULT 'HF-Like',
-            required_model_name_list_json TEXT NOT NULL,
-            required_model_repo_id_list_json TEXT NOT NULL,
-            supported_feature_list_json TEXT NOT NULL,
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            downloaded INTEGER NOT NULL DEFAULT 0,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE UNIQUE INDEX idx_model_info_base_model ON model_info (base_model)
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE tts_tasks (
-            id INTEGER PRIMARY KEY,
-            history_id INTEGER NOT NULL,
-            speaker_id INTEGER NOT NULL,
-            model_path TEXT,
-            base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
-            language TEXT NOT NULL,
-            format TEXT NOT NULL,
-            text TEXT NOT NULL,
-            voice_prompt TEXT NOT NULL DEFAULT '',
-            char_count INTEGER NOT NULL,
-            file_name TEXT NOT NULL,
-            output_file_path TEXT,
-            hardware_type TEXT NOT NULL DEFAULT 'cuda',
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE model_training_tasks (
-            id INTEGER PRIMARY KEY,
-            history_id INTEGER NOT NULL,
-            language TEXT NOT NULL,
-            base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
-            model_name TEXT NOT NULL,
-            sample_count INTEGER NOT NULL,
-            samples_json TEXT NOT NULL DEFAULT '[]',
-            notes_json TEXT NOT NULL DEFAULT '[]',
-            output_speaker_id INTEGER,
-            epoch_count INTEGER NOT NULL,
-            batch_size INTEGER NOT NULL,
-            gradient_accumulation_steps INTEGER NOT NULL DEFAULT 4,
-            enable_gradient_checkpointing INTEGER NOT NULL DEFAULT 0,
-            hardware_type TEXT NOT NULL DEFAULT 'cuda',
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        CREATE TABLE voice_clone_tasks (
-            id INTEGER PRIMARY KEY,
-            history_id INTEGER NOT NULL,
-            base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
-            language TEXT NOT NULL,
-            format TEXT NOT NULL DEFAULT 'wav',
-            ref_audio_name TEXT NOT NULL,
-            ref_audio_path TEXT NOT NULL,
-            ref_text TEXT NOT NULL,
-            text TEXT NOT NULL,
-            char_count INTEGER NOT NULL,
-            file_name TEXT NOT NULL,
-            output_file_path TEXT,
-            hardware_type TEXT NOT NULL DEFAULT 'cuda',
-            create_time TEXT NOT NULL,
-            modify_time TEXT NOT NULL,
-            deleted INTEGER NOT NULL DEFAULT 0
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO speakers (
-            id, name, samples, base_model, description,
-            status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(1_i64)
-    .bind("Legacy Speaker")
-    .bind(2_i64)
-    .bind("qwen3_tts")
-    .bind("")
-    .bind("ready")
-    .bind("local")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO model_info (
-            id, base_model, model_name, model_scale_list_json, download_type,
-            required_model_name_list_json, required_model_repo_id_list_json,
-            supported_feature_list_json, create_time, modify_time, downloaded, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(1_i64)
-    .bind("qwen3_tts")
-    .bind("Qwen3-TTS")
-    .bind(r#"["1.7B","0.6B"]"#)
-    .bind("HF-Like")
-    .bind(r#"["Qwen3-TTS-12Hz-1.7B-Base","Qwen3-TTS-Tokenizer-12Hz","Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
-    .bind(r#"["Qwen/Qwen3-TTS-12Hz-1.7B-Base","Qwen/Qwen3-TTS-Tokenizer-12Hz","Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]"#)
-    .bind(r#"["text_to_speech","voice_clone","model_training"]"#)
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(1_i64)
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    for (history_id, task_type, title) in [
-        (101_i64, "text_to_speech", "legacy-tts"),
-        (102_i64, "model_training", "legacy-training"),
-        (103_i64, "voice_clone", "legacy-voice-clone"),
-    ] {
-        sqlx::query(
-            r#"
-            INSERT INTO task_history (
-                id, task_type, title, speaker_id, speaker_name_snapshot, status,
-                duration_seconds, create_time, modify_time, finished_time, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(history_id)
-        .bind(task_type)
-        .bind(title)
-        .bind(Some(1_i64))
-        .bind("Legacy Speaker")
-        .bind("pending")
-        .bind(0_i64)
-        .bind("2026-04-01 10:00:00")
-        .bind("2026-04-01 10:00:00")
-        .bind(Option::<String>::None)
-        .bind(0_i64)
-        .execute(&pool)
-        .await?;
-    }
-
-    sqlx::query(
-        r#"
-        INSERT INTO tts_tasks (
-            id, history_id, speaker_id, model_path, base_model, language, format,
-            text, voice_prompt, char_count, file_name, output_file_path,
-            hardware_type, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(1_i64)
-    .bind(101_i64)
-    .bind(1_i64)
-    .bind(Option::<String>::None)
-    .bind("qwen3_tts")
-    .bind("chinese")
-    .bind("wav")
-    .bind("hello")
-    .bind("warm and natural")
-    .bind(5_i64)
-    .bind("legacy-tts.wav")
-    .bind(Option::<String>::None)
-    .bind("cuda")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO model_training_tasks (
-            id, history_id, language, base_model, model_name, sample_count, samples_json,
-            notes_json, output_speaker_id, epoch_count, batch_size,
-            gradient_accumulation_steps, enable_gradient_checkpointing,
-            hardware_type, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(2_i64)
-    .bind(102_i64)
-    .bind("chinese")
-    .bind("qwen3_tts")
-    .bind("legacy-model")
-    .bind(1_i64)
-    .bind("[]")
-    .bind("[]")
-    .bind(Some(1_i64))
-    .bind(12_i64)
-    .bind(3_i64)
-    .bind(6_i64)
-    .bind(1_i64)
-    .bind("cuda")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO voice_clone_tasks (
-            id, history_id, base_model, language, format, ref_audio_name, ref_audio_path,
-            ref_text, text, char_count, file_name, output_file_path,
-            hardware_type, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(3_i64)
-    .bind(103_i64)
-    .bind("qwen3_tts")
-    .bind("chinese")
-    .bind("wav")
-    .bind("ref.wav")
-    .bind("/tmp/ref.wav")
-    .bind("参考")
-    .bind("生成")
-    .bind(2_i64)
-    .bind("legacy-voice-clone.wav")
-    .bind(Option::<String>::None)
-    .bind("cuda")
-    .bind("2026-04-01 10:00:00")
-    .bind("2026-04-01 10:00:00")
-    .bind(0_i64)
-    .execute(&pool)
-    .await?;
-
-    pool.close().await;
-    Ok(())
 }
 
 async fn open_sqlite_pool(db_path: &PathBuf) -> Result<sqlx::SqlitePool> {
