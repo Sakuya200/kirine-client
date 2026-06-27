@@ -2,19 +2,14 @@ use std::{fs, path::PathBuf};
 
 use rand::random;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, Schema};
-use serde_json::Value;
 use sqlx::{sqlite::SqlitePoolOptions, Row};
 
 use crate::{
-    config::HardwareType,
     service::entity::{speaker, task_history, training_task, tts_task, voice_clone_task},
     service::{
         models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            HistoryRecord, HistoryRecordSummary, ModelInfo, ModelTrainingFileInput,
-            ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, SpeakerInfo, SpeakerPageResult, SpeakerSource,
-            TextToSpeechFormat, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            CreateSpeakerPayload, HistoryRecord, HistoryRecordSummary, ModelInfo, SpeakerInfo,
+            SpeakerPageResult, SpeakerSource, UpdateSpeakerPayload,
         },
         LocalService, Service,
     },
@@ -22,7 +17,7 @@ use crate::{
 };
 
 // 测试需要构造分页 / 筛选请求，但 `service` 模块为私有，这里对外暴露必要类型。
-pub use crate::service::models::{AppLanguage, PageRequest, SpeakerFilter, SpeakerStatus};
+pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
 
 pub struct LocalServiceHarness {
     root_dir: PathBuf,
@@ -58,7 +53,6 @@ impl LocalServiceHarness {
         self.service
             .create_speaker_info(CreateSpeakerPayload {
                 name: "SeaOrm Speaker".to_string(),
-                languages: vec![AppLanguage::Chinese, AppLanguage::English],
                 samples: 3,
                 base_model: "qwen3_tts".to_string(),
                 description: "created by test".to_string(),
@@ -122,112 +116,6 @@ impl LocalServiceHarness {
         let path = self.src_model_root();
         fs::create_dir_all(&path)?;
         Ok(path)
-    }
-
-    pub async fn tts_task_model_path(&self, history_id: i64) -> Result<Option<String>> {
-        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let row = sqlx::query(
-            "SELECT model_path FROM tts_tasks WHERE history_id = ? AND deleted = 0 ORDER BY id ASC LIMIT 1",
-        )
-        .bind(history_id)
-        .fetch_optional(&pool)
-        .await?;
-        pool.close().await;
-
-        Ok(row.and_then(|row| row.get::<Option<String>, _>("model_path")))
-    }
-
-    pub async fn create_vox_preset_tts_task(&self) -> Result<TextToSpeechTaskResult> {
-        let speaker = self
-            .list_speakers()
-            .await?
-            .into_iter()
-            .find(|speaker| {
-                speaker.base_model == "vox_cpm2" && speaker.source == SpeakerSource::Preset
-            })
-            .expect("expected built-in VoxCPM2 speaker to exist");
-
-        self.service
-            .create_text_to_speech_task(CreateTextToSpeechTaskPayload {
-                speaker_id: Some(speaker.id),
-                base_model: "vox_cpm2".to_string(),
-                model_version: "2B".to_string(),
-                language: AppLanguage::Chinese,
-                format: TextToSpeechFormat::Wav,
-                export_audio_name: "vox-preset-test".to_string(),
-                device: HardwareType::Cpu,
-                text: "测试 VoxCPM2 首次任务创建".to_string(),
-                model_params: serde_json::json!({
-                    "cfg_value": "2.0",
-                    "inference_timesteps": 10
-                }),
-            })
-            .await
-    }
-
-    pub async fn create_vox_training_task(&self) -> Result<ModelTrainingTaskResult> {
-        self.create_vox_training_task_with_params(serde_json::json!({
-            "useLora": true,
-            "loraRank": 24,
-            "loraAlpha": 48,
-            "loraDropout": "0.15",
-            "epochCount": 2,
-            "batchSize": 4,
-            "gradientAccumulationSteps": 1
-        }))
-        .await
-    }
-
-    pub async fn create_vox_training_task_with_params(
-        &self,
-        model_params: Value,
-    ) -> Result<ModelTrainingTaskResult> {
-        let sample_audio_path = self
-            .root_dir
-            .join("fixtures")
-            .join("vox-training-sample.wav");
-        if let Some(parent) = sample_audio_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&sample_audio_path, b"RIFFtestWAVEfmt ")?;
-
-        self.service
-            .create_model_training_task(CreateModelTrainingTaskPayload {
-                language: AppLanguage::Chinese,
-                base_model: "vox_cpm2".to_string(),
-                model_version: "2B".to_string(),
-                speaker_name: "vox_lora_test".to_string(),
-                description: "用于测试的 Vox 训练说话人".to_string(),
-                device: HardwareType::Cpu,
-                model_params,
-                samples: vec![ModelTrainingSampleInput {
-                    id: 1,
-                    sample_type: ModelTrainingSampleType::Single,
-                    title: "single sample".to_string(),
-                    detail: format!("音频文件 · {}", sample_audio_path.display()),
-                    transcript_preview: Some("测试训练样本".to_string()),
-                    primary_file: ModelTrainingFileInput {
-                        file_name: "vox-training-sample.wav".to_string(),
-                        file_kind: ModelTrainingFileKind::Audio,
-                        file_path: sample_audio_path.to_string_lossy().to_string(),
-                    },
-                    secondary_file: None,
-                }],
-            })
-            .await
-    }
-
-    pub async fn training_task_model_params_json(&self, history_id: i64) -> Result<Option<String>> {
-        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let row = sqlx::query(
-            "SELECT model_params_json FROM model_training_tasks WHERE history_id = ? AND deleted = 0 ORDER BY id ASC LIMIT 1",
-        )
-        .bind(history_id)
-        .fetch_optional(&pool)
-        .await?;
-        pool.close().await;
-
-        Ok(row.and_then(|row| row.get::<Option<String>, _>("model_params_json")))
     }
 
     pub async fn update_test_speaker(&self, id: i64) -> Result<SpeakerInfo> {
@@ -425,14 +313,13 @@ async fn seed_legacy_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description,
+            id, name, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
     .bind("Legacy Speaker")
-    .bind(r#"["chinese"]"#)
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")
@@ -484,14 +371,13 @@ async fn seed_legacy_task_detail_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description,
+            id, name, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
     .bind("Legacy Speaker")
-    .bind(r#"["chinese"]"#)
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")
@@ -640,7 +526,6 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
         CREATE TABLE speakers (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
-            languages_json TEXT NOT NULL,
             samples INTEGER NOT NULL DEFAULT 0,
             base_model TEXT NOT NULL DEFAULT 'qwen3_tts',
             description TEXT NOT NULL DEFAULT '',
@@ -783,14 +668,13 @@ async fn seed_pre_refactor_schema(db_path: &PathBuf) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO speakers (
-            id, name, languages_json, samples, base_model, description,
+            id, name, samples, base_model, description,
             status, source, create_time, modify_time, deleted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(1_i64)
     .bind("Legacy Speaker")
-    .bind(r#"["chinese"]"#)
     .bind(2_i64)
     .bind("qwen3_tts")
     .bind("")

@@ -2,7 +2,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { SpeakerStatus } from '@/enums/status';
 import { useUiStore } from '@/stores/ui';
@@ -10,7 +9,6 @@ import type { BaseModel, SpeakerFilter, SpeakerPagedResult, SpeakerProfile } fro
 
 interface CreateSpeakerPayload {
   name: string;
-  languages: string[];
   samples: number;
   baseModel: BaseModel;
   description: string;
@@ -30,7 +28,6 @@ interface ImportSpeakerPayload {
   sourceModelDirPath: string;
   name: string;
   description: string;
-  language: AppLanguage;
 }
 
 interface LoadSpeakersOptions {
@@ -39,7 +36,6 @@ interface LoadSpeakersOptions {
 }
 
 const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
-  const languages = Array.isArray(item.languages) ? item.languages : [];
   const safeStatus: SpeakerStatus =
     item.status === SpeakerStatus.Ready || item.status === SpeakerStatus.Training || item.status === SpeakerStatus.Disabled
       ? item.status
@@ -48,7 +44,6 @@ const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
   return {
     id: typeof item.id === 'number' ? item.id : 0,
     name: item.name?.trim() || '',
-    languages,
     samples: typeof item.samples === 'number' ? item.samples : 0,
     baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
     createTime: item.createTime ?? '',
@@ -74,7 +69,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
   const pageSize = ref(9);
   const total = ref(0);
   const totalPages = ref(1);
-  const filter = ref<SpeakerFilter>({ keyword: null, status: null, language: null });
+  const filter = ref<SpeakerFilter>({ keyword: null, status: null });
 
   // 统计（来自分页响应，不再依赖前端全量聚合）
   const stats = ref({ readyCount: 0, trainingCount: 0, disabledCount: 0, totalSamples: 0 });
@@ -189,7 +184,6 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('create_speaker_info', {
           payload: {
             name: payload.name,
-            languages: payload.languages,
             samples: payload.samples,
             baseModel: payload.baseModel,
             description: payload.description,
@@ -238,8 +232,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
             modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
             name: payload.name,
-            description: payload.description,
-            language: payload.language
+            description: payload.description
           }
         })
       );
@@ -275,9 +268,6 @@ export const useSpeakerStore = defineStore('speakers', () => {
     }
   };
 
-  const getLanguageLabel = (speaker: SpeakerProfile) =>
-    speaker.languages.map(language => APP_LANGUAGE_SHORT_LABELS[language as AppLanguage] ?? language).join(' / ');
-
   return {
     speakers,
     isLoading,
@@ -301,7 +291,6 @@ export const useSpeakerStore = defineStore('speakers', () => {
     setFilter,
     updateSpeaker,
     importSpeaker,
-    removeSpeaker,
-    getLanguageLabel
+    removeSpeaker
   };
 });

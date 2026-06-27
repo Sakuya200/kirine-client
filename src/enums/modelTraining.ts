@@ -1,4 +1,4 @@
-import { APP_LANGUAGE_SHORT_LABELS, AppLanguage } from './language';
+import { AppLanguage } from './language';
 
 export enum ModelTrainingSampleType {
   Single = 'single',
@@ -15,12 +15,6 @@ export interface ModelTrainingOption {
   label: string;
   value: AppLanguage;
 }
-
-export const MODEL_TRAINING_LANGUAGE_OPTIONS: ModelTrainingOption[] = [
-  { value: AppLanguage.Chinese, label: APP_LANGUAGE_SHORT_LABELS[AppLanguage.Chinese] },
-  { value: AppLanguage.English, label: APP_LANGUAGE_SHORT_LABELS[AppLanguage.English] },
-  { value: AppLanguage.Japanese, label: APP_LANGUAGE_SHORT_LABELS[AppLanguage.Japanese] }
-];
 
 export const MODEL_TRAINING_SAMPLE_TYPE_TEXT: Record<ModelTrainingSampleType, string> = {
   [ModelTrainingSampleType.Single]: '单样本',

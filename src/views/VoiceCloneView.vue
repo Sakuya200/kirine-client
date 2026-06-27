@@ -119,12 +119,8 @@ const form = reactive({
   text: '',
   modelParams: {} as Record<string, unknown>
 });
-const languageOptions = Object.values(AppLanguage).map(value => ({
-  label: APP_LANGUAGE_LABELS[value],
-  value
-}));
 const formatOptions = TEXT_TO_SPEECH_FORMATS;
-const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
+const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
@@ -164,6 +160,12 @@ const deviceOptions = computed(() =>
   modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const languageOptions = computed(() =>
+  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+    value: language,
+    label: APP_LANGUAGE_LABELS[language] ?? language
   }))
 );
 const activeVoiceCloneTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.VoiceClone));
@@ -286,6 +288,22 @@ watch(
 );
 
 watch(
+  languageOptions,
+  options => {
+    if (options.length === 0) {
+      form.language = AppLanguage.Chinese;
+      selectedLanguageOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.language) ?? options[0] ?? null;
+    form.language = (matched?.value ?? AppLanguage.Chinese) as AppLanguage;
+    selectedLanguageOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeVoiceCloneModelParams(nextBaseModel, form.modelParams);
@@ -370,7 +388,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.refText = result.refText;
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
-  selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
@@ -392,7 +410,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.refText = result.refText;
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
-  selectedLanguageOption.value = languageOptions.find(option => option.value === result.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
 
@@ -690,7 +708,7 @@ const resetForm = () => {
   form.refText = '';
   form.text = '';
   form.modelParams = {};
-  selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
@@ -699,7 +717,7 @@ const resetForm = () => {
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
-  selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();

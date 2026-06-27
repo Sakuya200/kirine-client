@@ -1,5 +1,5 @@
 use kirine_client_lib::{
-    test_support::{AppLanguage, LocalServiceHarness, PageRequest, SpeakerFilter, SpeakerStatus},
+    test_support::{LocalServiceHarness, PageRequest, SpeakerFilter, SpeakerStatus},
     Result,
 };
 
@@ -57,7 +57,6 @@ async fn speaker_crud_round_trip_uses_local_database() -> Result<()> {
             filter: Some(SpeakerFilter {
                 keyword: Some("SeaOrm".to_string()),
                 status: Some(SpeakerStatus::Ready),
-                language: Some(AppLanguage::Chinese),
             }),
         })
         .await?;

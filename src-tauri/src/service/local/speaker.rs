@@ -15,9 +15,9 @@ use crate::{
     service::{
         local::entity::speaker as speaker_entity,
         models::{
-            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType,
-            ModelInfo, PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-            SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
+            CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType, ModelInfo,
+            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, SpeakerSource,
+            SpeakerStatus, UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
         LocalService,
@@ -32,12 +32,6 @@ impl LocalService {
         payload: CreateSpeakerPayload,
     ) -> Result<SpeakerInfo> {
         let create_time = now_string()?;
-        let languages = if payload.languages.is_empty() {
-            vec![AppLanguage::Chinese]
-        } else {
-            payload.languages
-        };
-        let languages_json = serde_json::to_string(&languages)?;
         let name = payload.name.trim();
         let description = payload.description.trim();
         let status = payload.status;
@@ -46,7 +40,6 @@ impl LocalService {
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
             name: Set(name.to_string()),
-            languages_json: Set(languages_json),
             samples: Set(payload.samples as i64),
             base_model: Set(payload.base_model.as_str().to_string()),
             description: Set(description.to_string()),
@@ -83,11 +76,6 @@ impl LocalService {
             }
             if let Some(status) = filter.status {
                 condition = condition.add(speaker_entity::Column::Status.eq(status.as_str()));
-            }
-            if let Some(language) = filter.language {
-                // languages_json 存储 JSON 数组，按语言标识子串匹配
-                let pattern = format!("%\"{}\"%", language.as_str());
-                condition = condition.add(speaker_entity::Column::LanguagesJson.like(&pattern));
             }
         }
 
@@ -184,13 +172,11 @@ impl LocalService {
         self.find_supported_model_variant(base_model, model_version)
             .await?;
 
-        let languages_json = serde_json::to_string(&vec![payload.language])?;
         let txn = self.orm().begin().await?;
 
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
             name: Set(name.to_string()),
-            languages_json: Set(languages_json),
             samples: Set(0),
             base_model: Set(base_model.to_string()),
             description: Set(description.to_string()),
@@ -289,6 +275,7 @@ impl LocalService {
             )?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,
             supported_devices: serde_json::from_str(&row.supported_devices)?,
+            supported_languages: serde_json::from_str(&row.supported_languages)?,
             downloaded: row.downloaded,
             create_time: row.create_time,
             modify_time: row.modify_time,
@@ -337,11 +324,9 @@ struct SpeakerSampleSum {
 }
 
 fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
-    let languages = serde_json::from_str::<Vec<AppLanguage>>(&model.languages_json)?;
     Ok(SpeakerInfo {
         id: model.id,
         name: model.name,
-        languages,
         samples: model.samples as u32,
         base_model: model.base_model,
         create_time: model.create_time,

@@ -13,6 +13,8 @@ pub enum AppLanguage {
     English,
     #[serde(rename = "japanese", alias = "ja-JP")]
     Japanese,
+    #[serde(rename = "korean", alias = "ko-KR")]
+    Korean,
 }
 
 impl AppLanguage {
@@ -21,6 +23,7 @@ impl AppLanguage {
             Self::Chinese => "chinese",
             Self::English => "english",
             Self::Japanese => "japanese",
+            Self::Korean => "korean",
         }
     }
 }
@@ -39,6 +42,7 @@ impl FromStr for AppLanguage {
             "chinese" | "zh-CN" => Ok(Self::Chinese),
             "english" | "en-US" => Ok(Self::English),
             "japanese" | "ja-JP" => Ok(Self::Japanese),
+            "korean" | "ko-KR" => Ok(Self::Korean),
             other => Err(format!("不支持的语言类型: {}", other)),
         }
     }
@@ -362,7 +366,6 @@ impl FromStr for ModelTrainingFileKind {
 pub struct SpeakerInfo {
     pub id: i64,
     pub name: String,
-    pub languages: Vec<AppLanguage>,
     pub samples: u32,
     pub base_model: BaseModel,
     pub create_time: String,
@@ -376,7 +379,6 @@ pub struct SpeakerInfo {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSpeakerPayload {
     pub name: String,
-    pub languages: Vec<AppLanguage>,
     pub samples: u32,
     pub base_model: BaseModel,
     pub description: String,
@@ -400,7 +402,6 @@ pub struct ImportModelAsSpeakerPayload {
     pub source_model_dir_path: String,
     pub name: String,
     pub description: String,
-    pub language: AppLanguage,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +424,7 @@ pub struct ModelInfo {
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,
     pub supported_devices: Vec<HardwareType>,
+    pub supported_languages: Vec<AppLanguage>,
     pub downloaded: bool,
     pub create_time: String,
     pub modify_time: String,
@@ -759,7 +761,6 @@ impl<T> Page<T> {
 pub struct SpeakerFilter {
     pub keyword: Option<String>,
     pub status: Option<SpeakerStatus>,
-    pub language: Option<AppLanguage>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

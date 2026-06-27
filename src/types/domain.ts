@@ -12,7 +12,6 @@ export type SpeakerSource = 'local' | 'preset' | 'remote';
 export interface SpeakerProfile {
   id: number;
   name: string;
-  languages: string[];
   samples: number;
   baseModel: BaseModel;
   createTime: string;
@@ -116,6 +115,7 @@ export interface ModelInfo {
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];
   supportedDevices: HardwareType[];
+  supportedLanguages: AppLanguage[];
   downloaded: boolean;
   createTime: string;
   modifyTime: string;
@@ -171,7 +171,6 @@ export interface Page<T> {
 export interface SpeakerFilter {
   keyword?: string | null;
   status?: SpeakerStatus | null;
-  language?: AppLanguage | null;
 }
 
 export interface ModelFilter {

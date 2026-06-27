@@ -71,7 +71,6 @@ async fn create_speakers_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
                         .primary_key(),
                 )
                 .col(ColumnDef::new(Speakers::Name).string().not_null())
-                .col(ColumnDef::new(Speakers::LanguagesJson).text().not_null())
                 .col(
                     ColumnDef::new(Speakers::Samples)
                         .integer()
@@ -190,6 +189,12 @@ async fn create_model_info_node(manager: &SchemaManager<'_>) -> Result<(), DbErr
                         .text()
                         .not_null()
                         .default("[]"),
+                )
+                .col(
+                    ColumnDef::new(ModelInfo::SupportedLanguages)
+                        .text()
+                        .not_null()
+                        .default("[\"chinese\",\"english\",\"japanese\"]"),
                 )
                 .col(ColumnDef::new(ModelInfo::CreateTime).string().not_null())
                 .col(ColumnDef::new(ModelInfo::ModifyTime).string().not_null())
@@ -643,7 +648,6 @@ enum Speakers {
     Table,
     Id,
     Name,
-    LanguagesJson,
     Samples,
     BaseModel,
     Description,
@@ -683,6 +687,7 @@ enum ModelInfo {
     RequiredModelRepoIdListJson,
     SupportedFeatureListJson,
     SupportedDevices,
+    SupportedLanguages,
     CreateTime,
     ModifyTime,
     Downloaded,

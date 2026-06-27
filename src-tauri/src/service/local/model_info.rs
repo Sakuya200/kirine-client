@@ -13,7 +13,10 @@ use crate::{
     config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
-        models::{ModelDownloadType, ModelFilter, ModelInfo, ModelMutationResult, Page, PageRequest},
+        models::{
+            AppLanguage, ModelDownloadType, ModelFilter, ModelInfo, ModelMutationResult, Page,
+            PageRequest,
+        },
         pipeline::{
             model_artifacts::{resolve_model_download_paths, validate_model_artifact_paths},
             script_paths::{
@@ -417,6 +420,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,
         supported_devices: parse_json_field::<Vec<HardwareType>>(&row.supported_devices)?,
+        supported_languages: parse_json_field::<Vec<AppLanguage>>(&row.supported_languages)?,
         downloaded: row.downloaded,
         create_time: row.create_time,
         modify_time: row.modify_time,

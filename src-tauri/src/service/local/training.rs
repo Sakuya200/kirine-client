@@ -138,12 +138,10 @@ impl LocalService {
             selected_training_mode_label,
         );
 
-        let languages_json = serde_json::to_string(&vec![payload.language])?;
         let txn = self.orm().begin().await?;
         let speaker = speaker_entity::ActiveModel {
             id: NotSet,
             name: Set(speaker_name.clone()),
-            languages_json: Set(languages_json),
             samples: Set(0),
             base_model: Set(base_model.clone()),
             description: Set(speaker_description),
