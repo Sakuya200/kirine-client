@@ -20,6 +20,7 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useUiConfigStore } from '@/stores/uiConfig';
@@ -111,12 +112,8 @@ const form = reactive({
   modelParams: {} as Record<string, unknown>
 });
 
-const languageOptions = Object.values(AppLanguage).map(value => ({
-  label: APP_LANGUAGE_LABELS[value],
-  value
-}));
 const formatOptions = TEXT_TO_SPEECH_FORMATS;
-const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(languageOptions[0] ?? null);
+const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
@@ -146,6 +143,12 @@ const deviceOptions = computed(() =>
   modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const languageOptions = computed(() =>
+  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+    value: language,
+    label: APP_LANGUAGE_LABELS[language] ?? language
   }))
 );
 const activeVoiceDesignTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.VoiceDesign));
@@ -267,9 +270,17 @@ watch(
 );
 
 watch(
-  () => form.language,
-  next => {
-    selectedLanguageOption.value = languageOptions.find(option => option.value === next) ?? null;
+  languageOptions,
+  options => {
+    if (options.length === 0) {
+      form.language = AppLanguage.Chinese;
+      selectedLanguageOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.language) ?? options[0] ?? null;
+    form.language = (matched?.value ?? AppLanguage.Chinese) as AppLanguage;
+    selectedLanguageOption.value = matched;
   },
   { immediate: true }
 );
@@ -399,7 +410,7 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false, silent
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.VoiceDesign, 5);
     generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is VoiceDesignResult => item !== null)
@@ -608,7 +619,7 @@ const resetForm = () => {
   form.prompt = '';
   form.text = '';
   form.modelParams = {};
-  selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
@@ -617,7 +628,7 @@ const resetForm = () => {
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
-  selectedLanguageOption.value = languageOptions.find(option => option.value === form.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();

@@ -323,6 +323,31 @@ pub(crate) fn resolve_model_task_pipeline(
     Ok(&COMMON_TASK_PIPELINE)
 }
 
+/// 构造 `begin_llm_task` 包装器脚本的 CLI 参数向量。
+///
+/// 抽取为纯函数以便单元测试断言调用模型层脚本时的参数契约（规则4），
+/// 同时供 `run_llm_task_invocation` 与 `run_llm_task_invocation_cancellable` 共用。
+/// 标记为 `pub` 并经 `test_support` 重导出，供集成测试直接调用。
+pub fn build_llm_task_script_args(
+    script_path: &Path,
+    params_json_path: &Path,
+    task_log_path: &Path,
+    base_model: &str,
+) -> Vec<String> {
+    vec![
+        "--base-model".into(),
+        base_model.into(),
+        "--script-path".into(),
+        script_path.to_string_lossy().into(),
+        "--params-file".into(),
+        params_json_path.to_string_lossy().into(),
+        "--log-path".into(),
+        task_log_path.to_string_lossy().into(),
+        "--task-log-file".into(),
+        task_log_path.to_string_lossy().into(),
+    ]
+}
+
 pub(crate) async fn run_llm_task_invocation(
     begin_llm_task_script_path: &Path,
     script_path: &Path,
@@ -343,18 +368,12 @@ pub(crate) async fn run_llm_task_invocation(
         task_log_path,
         "python command completed successfully",
         platform.shell_base_args(),
-        vec![
-            "--base-model".to_string(),
-            invocation.base_model.clone(),
-            "--script-path".to_string(),
-            script_path.to_string_lossy().to_string(),
-            "--params-file".to_string(),
-            params_json_path.to_string_lossy().to_string(),
-            "--log-path".to_string(),
-            task_log_path.to_string_lossy().to_string(),
-            "--task-log-file".to_string(),
-            task_log_path.to_string_lossy().to_string(),
-        ],
+        build_llm_task_script_args(
+            script_path,
+            params_json_path,
+            task_log_path,
+            &invocation.base_model,
+        ),
     )
     .await
 }
@@ -380,18 +399,12 @@ pub(crate) async fn run_llm_task_invocation_cancellable(
         task_log_path,
         "python command completed successfully",
         platform.shell_base_args(),
-        vec![
-            "--base-model".to_string(),
-            invocation.base_model.clone(),
-            "--script-path".to_string(),
-            script_path.to_string_lossy().to_string(),
-            "--params-file".to_string(),
-            params_json_path.to_string_lossy().to_string(),
-            "--log-path".to_string(),
-            task_log_path.to_string_lossy().to_string(),
-            "--task-log-file".to_string(),
-            task_log_path.to_string_lossy().to_string(),
-        ],
+        build_llm_task_script_args(
+            script_path,
+            params_json_path,
+            task_log_path,
+            &invocation.base_model,
+        ),
         cancel_rx,
     )
     .await

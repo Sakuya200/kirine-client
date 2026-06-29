@@ -26,13 +26,12 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
-import { AppLanguage } from '@/enums/language';
+import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
   MODEL_TRAINING_ANNOTATION_FORMAT_TEXT,
   MODEL_TRAINING_AUDIO_FILE_EXTENSIONS,
-  MODEL_TRAINING_LANGUAGE_OPTIONS,
   MODEL_TRAINING_SAMPLE_TYPE_TEXT,
   ModelTrainingAnnotationFormat,
   ModelTrainingSampleType,
@@ -41,6 +40,7 @@ import {
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -98,7 +98,7 @@ const form = reactive({
   datasetArchiveFile: null as SelectedLocalFile | null,
   datasetAnnotationFile: null as SelectedLocalFile | null
 });
-const selectedLanguageOption = ref<ModelTrainingOption | null>(MODEL_TRAINING_LANGUAGE_OPTIONS[0]);
+const selectedLanguageOption = ref<ModelTrainingOption | null>(null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isStarting = ref(false);
 const isCancelling = ref(false);
@@ -150,6 +150,12 @@ const deviceOptions = computed(() =>
   modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const languageOptions = computed(() =>
+  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+    value: language,
+    label: APP_LANGUAGE_SHORT_LABELS[language] ?? language
   }))
 );
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));
@@ -321,6 +327,22 @@ watch(
 );
 
 watch(
+  languageOptions,
+  options => {
+    if (options.length === 0) {
+      form.language = AppLanguage.Chinese;
+      selectedLanguageOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.language) ?? options[0] ?? null;
+    form.language = (matched?.value ?? AppLanguage.Chinese) as AppLanguage;
+    selectedLanguageOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeTrainingModelParams(nextBaseModel, form.modelParams);
@@ -484,7 +506,7 @@ const resetForm = () => {
   form.singleTranscript = '';
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
-  selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS[0];
+  selectedLanguageOption.value = languageOptions.value[0] ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   importedSamples.value = [];
   uiStore.notifyInfo('训练表单已重置。', 2200);
@@ -523,7 +545,7 @@ const applyTrainingHistoryToForm = (record: ModelTrainingHistoryRecord) => {
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
   importedSamples.value = record.detail.samples.map(mapHistorySampleToImportedSample);
-  selectedLanguageOption.value = MODEL_TRAINING_LANGUAGE_OPTIONS.find(option => option.value === form.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === record.device) ?? null;
 };
 
@@ -603,7 +625,7 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.ModelTraining, 5);
     recentTrainingHistory.value = records.filter(isModelTrainingHistoryRecord).slice(0, 5);
 
     if (notifyOnSuccess) {
@@ -1030,7 +1052,7 @@ onBeforeUnmount(() => {
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
               label="语种"
-              :options="MODEL_TRAINING_LANGUAGE_OPTIONS"
+              :options="languageOptions"
             />
           </div>
         </div>

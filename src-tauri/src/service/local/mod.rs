@@ -33,11 +33,13 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
-            HistoryTaskType, ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult,
-            ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
+            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
+            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
+            VoiceDesignTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
@@ -95,8 +97,11 @@ impl Service for LocalService {
         self.import_model_as_speaker_impl(payload).await
     }
 
-    async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>> {
-        self.list_speaker_infos_impl().await
+    async fn list_speaker_infos(
+        &self,
+        request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult> {
+        self.list_speaker_infos_impl(request).await
     }
 
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
@@ -107,8 +112,11 @@ impl Service for LocalService {
         self.delete_speaker_info_impl(speaker_id).await
     }
 
-    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>> {
-        self.list_model_infos_impl().await
+    async fn list_model_infos(
+        &self,
+        request: PageRequest<ModelFilter>,
+    ) -> Result<Page<ModelInfo>> {
+        self.list_model_infos_impl(request).await
     }
 
     async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
@@ -127,8 +135,11 @@ impl Service for LocalService {
         self.uninstall_model_impl(model_id).await
     }
 
-    async fn list_history_records(&self) -> Result<Vec<HistoryRecord>> {
-        self.list_history_records_impl().await
+    async fn list_history_records(
+        &self,
+        request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>> {
+        self.list_history_records_impl(request).await
     }
 
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {

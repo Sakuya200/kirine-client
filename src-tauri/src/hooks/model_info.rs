@@ -2,18 +2,22 @@ use tauri::State;
 
 use crate::{
     config::HardwareType,
-    service::{models::{ModelInfo, ModelMutationResult}, ServiceState},
+    service::{
+        models::{ModelFilter, ModelInfo, ModelMutationResult, Page, PageRequest},
+        ServiceState,
+    },
 };
 
 #[tauri::command]
 pub async fn list_model_infos(
+    request: PageRequest<ModelFilter>,
     state: State<'_, ServiceState>,
-) -> std::result::Result<Vec<ModelInfo>, String> {
+) -> std::result::Result<Page<ModelInfo>, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .list_model_infos()
+        .list_model_infos(request)
         .await
         .map_err(|err| err.to_string())
 }

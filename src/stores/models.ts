@@ -4,9 +4,10 @@ import { computed, ref } from 'vue';
 
 import { HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
+import { AppLanguage } from '@/enums/language';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, ModelInfo, ModelMutationResult } from '@/types/domain';
+import type { BaseModel, ModelInfo, ModelMutationResult, Page } from '@/types/domain';
 
 const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
   id: typeof item.id === 'number' ? item.id : 0,
@@ -23,6 +24,9 @@ const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => ({
     : [],
   supportedDevices: Array.isArray(item.supportedDevices)
     ? item.supportedDevices.map(device => (device === HardwareType.Cuda ? HardwareType.Cuda : HardwareType.Cpu))
+    : [],
+  supportedLanguages: Array.isArray(item.supportedLanguages)
+    ? item.supportedLanguages.filter((lang): lang is AppLanguage => Object.values(AppLanguage).includes(lang as AppLanguage))
     : [],
   downloaded: item.downloaded === true,
   createTime: item.createTime ?? '',
@@ -55,8 +59,11 @@ export const useModelStore = defineStore('models', () => {
     isLoading.value = true;
 
     try {
-      const result = await invoke<ModelInfo[]>('list_model_infos');
-      items.value = Array.isArray(result) ? result.map(normalizeModelInfo) : [];
+      const result = await invoke<Page<ModelInfo>>('list_model_infos', {
+        request: { page: 1, pageSize: 500, filter: null }
+      });
+      const rawItems = Array.isArray(result?.items) ? result.items : [];
+      items.value = rawItems.map(normalizeModelInfo);
     } catch (error) {
       items.value = [];
       uiStore.notifyError(formatErrorMessage('加载模型列表失败', error));
@@ -148,6 +155,12 @@ export const useModelStore = defineStore('models', () => {
   const getSupportedDevices = (baseModel: BaseModel, modelVersion: string) =>
     (byBaseModel.value.get(baseModel) ?? []).find(item => item.modelVersion === modelVersion)?.supportedDevices ?? [];
 
+  // 模型声明的支持语言；若模型未声明则回退到全部语言，避免下拉为空
+  const getSupportedLanguages = (baseModel: BaseModel, modelVersion: string): AppLanguage[] => {
+    const declared = (byBaseModel.value.get(baseModel) ?? []).find(item => item.modelVersion === modelVersion)?.supportedLanguages ?? [];
+    return declared.length > 0 ? declared : Object.values(AppLanguage);
+  };
+
   return {
     items,
     isLoading,
@@ -162,6 +175,7 @@ export const useModelStore = defineStore('models', () => {
     getModelLabel,
     getModelVersionOptions,
     getSupportedDevices,
+    getSupportedLanguages,
     uninstallModel,
     supportsModelFeature
   };

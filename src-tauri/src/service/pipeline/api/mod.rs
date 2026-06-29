@@ -131,3 +131,152 @@ impl PythonScriptInvocationSpec {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// 规则4：`PythonScriptInvocationSpec::write_to_json_file` 写入的 params 文件即
+    /// 「调用模型层 python 脚本时的参数」。此处对 4 种任务类型分别构造 spec、写入临时
+    /// 文件、读回 JSON，断言 kind 标签与各 args 的关键字段被正确序列化。
+    fn unique_path(label: &str) -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "kirine-params-{}-{}-{}.json",
+            std::process::id(),
+            label,
+            n
+        ))
+    }
+
+    fn runtime() -> PythonScriptRuntimeOptions {
+        PythonScriptRuntimeOptions {
+            device: Some("cpu".to_string()),
+            logging_dir: None,
+            attn_implementation: Some("sdpa".to_string()),
+        }
+    }
+
+    fn write_and_read(spec: &PythonScriptInvocationSpec, label: &str) -> Value {
+        let path = unique_path(label);
+        spec.write_to_json_file(&path)
+            .expect("write spec to json file");
+        let bytes = fs::read(&path).expect("read back params file");
+        let _ = fs::remove_file(&path);
+        serde_json::from_slice(&bytes).expect("parse params json")
+    }
+
+    #[test]
+    fn writes_tts_params_file_with_expected_fields() {
+        let spec = PythonScriptInvocationSpec {
+            version: "1.0.0".to_string(),
+            base_model: "qwen3_tts".to_string(),
+            model_version: "1.7B".to_string(),
+            kind: PythonScriptTaskKind::TextToSpeech,
+            runtime: runtime(),
+            args: PythonScriptTaskArgs::TextToSpeech(TTSArgs {
+                model_root_path: "/models/root".to_string(),
+                speaker_dir_name: None,
+                model_params_json: serde_json::json!({}),
+                text: "你好".to_string(),
+                language: "chinese".to_string(),
+                speaker: "Alice".to_string(),
+                output_path: "/out/tts.wav".to_string(),
+            }),
+        };
+
+        let json = write_and_read(&spec, "tts");
+        assert_eq!(json["base_model"], "qwen3_tts");
+        assert_eq!(json["model_version"], "1.7B");
+        assert_eq!(json["kind"], "TextToSpeech");
+        assert_eq!(json["args"]["TextToSpeech"]["text"], "你好");
+        assert_eq!(json["args"]["TextToSpeech"]["language"], "chinese");
+        assert_eq!(json["args"]["TextToSpeech"]["output_path"], "/out/tts.wav");
+        assert_eq!(json["runtime"]["device"], "cpu");
+    }
+
+    #[test]
+    fn writes_voice_clone_params_file_with_expected_fields() {
+        let spec = PythonScriptInvocationSpec {
+            version: "1.0.0".to_string(),
+            base_model: "qwen3_tts".to_string(),
+            model_version: "1.7B".to_string(),
+            kind: PythonScriptTaskKind::VoiceClone,
+            runtime: runtime(),
+            args: PythonScriptTaskArgs::VoiceClone(VoiceCloneArgs {
+                model_root_path: "/models/root".to_string(),
+                speaker_dir_name: None,
+                model_params_json: serde_json::json!({}),
+                ref_audio_path: "/ref.wav".to_string(),
+                ref_text: Some("参考".to_string()),
+                language: "chinese".to_string(),
+                output_path: "/out/vc.wav".to_string(),
+                text: "生成".to_string(),
+            }),
+        };
+
+        let json = write_and_read(&spec, "vc");
+        assert_eq!(json["kind"], "VoiceClone");
+        assert_eq!(json["args"]["VoiceClone"]["ref_audio_path"], "/ref.wav");
+        assert_eq!(json["args"]["VoiceClone"]["ref_text"], "参考");
+    }
+
+    #[test]
+    fn writes_voice_design_params_file_with_expected_fields() {
+        let spec = PythonScriptInvocationSpec {
+            version: "1.0.0".to_string(),
+            base_model: "vox_cpm2".to_string(),
+            model_version: "2B".to_string(),
+            kind: PythonScriptTaskKind::VoiceDesign,
+            runtime: runtime(),
+            args: PythonScriptTaskArgs::VoiceDesign(VoiceDesignArgs {
+                model_root_path: "/models/root".to_string(),
+                speaker_dir_name: None,
+                model_params_json: serde_json::json!({}),
+                text: "生成".to_string(),
+                language: "chinese".to_string(),
+                instruct: "温柔".to_string(),
+                output_path: "/out/vd.wav".to_string(),
+            }),
+        };
+
+        let json = write_and_read(&spec, "vd");
+        assert_eq!(json["kind"], "VoiceDesign");
+        assert_eq!(json["args"]["VoiceDesign"]["instruct"], "温柔");
+        assert_eq!(json["base_model"], "vox_cpm2");
+    }
+
+    #[test]
+    fn writes_training_params_file_with_expected_fields() {
+        let spec = PythonScriptInvocationSpec {
+            version: "1.0.0".to_string(),
+            base_model: "qwen3_tts".to_string(),
+            model_version: "1.7B".to_string(),
+            kind: PythonScriptTaskKind::Training,
+            runtime: runtime(),
+            args: PythonScriptTaskArgs::Training(TrainingArgs {
+                model_root_path: "/models/root".to_string(),
+                speaker_dir_name: None,
+                model_params_json: serde_json::json!({}),
+                input_jsonl: "/in/manifest.jsonl".to_string(),
+                output_jsonl: "/out/manifest.jsonl".to_string(),
+                output_model_path: "/out/model".to_string(),
+                batch_size: 4,
+                lr: Some("2e-5".to_string()),
+                num_epochs: 12,
+                speaker_name: "Alice".to_string(),
+                gradient_accumulation_steps: 2,
+            }),
+        };
+
+        let json = write_and_read(&spec, "train");
+        assert_eq!(json["kind"], "Training");
+        assert_eq!(json["args"]["Training"]["input_jsonl"], "/in/manifest.jsonl");
+        assert_eq!(json["args"]["Training"]["batch_size"], 4);
+        assert_eq!(json["args"]["Training"]["num_epochs"], 12);
+        assert_eq!(json["args"]["Training"]["lr"], "2e-5");
+    }
+}

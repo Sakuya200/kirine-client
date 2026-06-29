@@ -1,7 +1,10 @@
 use std::{collections::HashSet, path::Path};
 
 use anyhow::{bail, Context};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    Set,
+};
 use serde::de::DeserializeOwned;
 use tokio::fs;
 
@@ -10,7 +13,10 @@ use crate::{
     config::HardwareType,
     service::{
         local::entity::model_info as model_info_entity,
-        models::{ModelDownloadType, ModelInfo, ModelMutationResult},
+        models::{
+            AppLanguage, ModelDownloadType, ModelFilter, ModelInfo, ModelMutationResult, Page,
+            PageRequest,
+        },
         pipeline::{
             model_artifacts::{resolve_model_download_paths, validate_model_artifact_paths},
             script_paths::{
@@ -29,14 +35,51 @@ use crate::{
 };
 
 impl LocalService {
-    pub(crate) async fn list_model_infos_impl(&self) -> Result<Vec<ModelInfo>> {
-        let rows = model_info_entity::Entity::find()
-            .filter(model_info_entity::Column::Deleted.eq(0))
-            .order_by_asc(model_info_entity::Column::Id)
-            .all(self.orm())
-            .await?;
+    pub(crate) async fn list_model_infos_impl(
+        &self,
+        request: PageRequest<ModelFilter>,
+    ) -> Result<Page<ModelInfo>> {
+        let page = request.page.max(1);
+        let page_size = request.page_size.max(1);
 
-        rows.into_iter().map(map_model_info).collect()
+        let mut query = model_info_entity::Entity::find()
+            .filter(model_info_entity::Column::Deleted.eq(0));
+
+        if let Some(filter) = &request.filter {
+            if let Some(keyword) = filter
+                .keyword
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let pattern = format!("%{keyword}%");
+                query = query.filter(
+                    Condition::any()
+                        .add(model_info_entity::Column::ModelName.like(&pattern))
+                        .add(model_info_entity::Column::ModelVersion.like(&pattern))
+                        .add(model_info_entity::Column::BaseModel.like(&pattern)),
+                );
+            }
+            if let Some(downloaded) = filter.downloaded {
+                query = query.filter(model_info_entity::Column::Downloaded.eq(downloaded));
+            }
+            if let Some(feature) = filter.feature {
+                // supported_feature_list_json 存储 JSON 数组，按功能标识子串匹配
+                let pattern = format!("%\"{}\"%", feature.as_str());
+                query = query.filter(
+                    model_info_entity::Column::SupportedFeatureListJson.like(&pattern),
+                );
+            }
+        }
+
+        let paginator = query
+            .order_by_asc(model_info_entity::Column::Id)
+            .paginate(self.orm(), page_size as u64);
+        let total = paginator.num_items().await?;
+        let rows = paginator.fetch_page((page - 1) as u64).await?;
+
+        let items: Result<Vec<ModelInfo>> = rows.into_iter().map(map_model_info).collect();
+        Ok(Page::new(items?, total, page, page_size))
     }
 
     pub(crate) async fn model_downloaded_impl(
@@ -377,6 +420,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,
         supported_devices: parse_json_field::<Vec<HardwareType>>(&row.supported_devices)?,
+        supported_languages: parse_json_field::<Vec<AppLanguage>>(&row.supported_languages)?,
         downloaded: row.downloaded,
         create_time: row.create_time,
         modify_time: row.modify_time,

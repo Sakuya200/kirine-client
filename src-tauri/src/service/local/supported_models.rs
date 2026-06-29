@@ -36,17 +36,26 @@ struct SupportedModelDefinition {
     required_model_repo_id_list: Vec<String>,
     supported_feature_list: Vec<String>,
     supported_devices: Vec<String>,
+    #[serde(default = "default_supported_languages")]
+    supported_languages: Vec<AppLanguage>,
 }
 
 fn default_model_download_type() -> ModelDownloadType {
     ModelDownloadType::HfLike
 }
 
+fn default_supported_languages() -> Vec<AppLanguage> {
+    vec![
+        AppLanguage::Chinese,
+        AppLanguage::English,
+        AppLanguage::Japanese,
+    ]
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SupportedSpeakerDefinition {
     name: String,
-    languages: Vec<AppLanguage>,
     base_model: String,
     description: String,
 }
@@ -244,6 +253,7 @@ where
             .map(|item| item.trim().to_ascii_lowercase())
             .collect::<Vec<String>>(),
     )?;
+    let supported_languages_json = serde_json::to_string(&definition.supported_languages)?;
 
     let existing = model_info_entity::Entity::find()
         .filter(model_info_entity::Column::BaseModel.eq(definition.base_model.trim()))
@@ -263,6 +273,7 @@ where
         active_model.required_model_repo_id_list_json = Set(required_model_repo_id_list_json);
         active_model.supported_feature_list_json = Set(supported_feature_list_json);
         active_model.supported_devices = Set(supported_devices_json);
+        active_model.supported_languages = Set(supported_languages_json);
         active_model.downloaded = Set(downloaded);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
@@ -279,6 +290,7 @@ where
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),
             supported_devices: Set(supported_devices_json),
+            supported_languages: Set(supported_languages_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
             downloaded: Set(false),
@@ -299,8 +311,6 @@ async fn upsert_speaker_definition<C>(
 where
     C: sea_orm::ConnectionTrait,
 {
-    let languages_json = serde_json::to_string(&definition.languages)?;
-
     let existing = speaker_entity::Entity::find()
         .filter(speaker_entity::Column::BaseModel.eq(definition.base_model.trim()))
         .filter(speaker_entity::Column::Name.eq(definition.name.trim()))
@@ -312,7 +322,6 @@ where
         let create_time = row.create_time.clone();
         let mut active_model: speaker_entity::ActiveModel = row.into();
         active_model.name = Set(definition.name.trim().to_string());
-        active_model.languages_json = Set(languages_json);
         active_model.samples = Set(0);
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.description = Set(definition.description.trim().to_string());
@@ -326,7 +335,6 @@ where
         speaker_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
             name: Set(definition.name.trim().to_string()),
-            languages_json: Set(languages_json),
             samples: Set(0),
             base_model: Set(definition.base_model.trim().to_string()),
             description: Set(definition.description.trim().to_string()),

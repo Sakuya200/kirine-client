@@ -1,7 +1,10 @@
 use tauri::State;
 
 use crate::service::{
-    models::{CreateSpeakerPayload, ImportModelAsSpeakerPayload, SpeakerInfo, UpdateSpeakerPayload},
+    models::{
+        CreateSpeakerPayload, ImportModelAsSpeakerPayload, PageRequest, SpeakerFilter,
+        SpeakerInfo, SpeakerPageResult, UpdateSpeakerPayload,
+    },
     ServiceState,
 };
 
@@ -21,13 +24,14 @@ pub async fn create_speaker_info(
 
 #[tauri::command]
 pub async fn list_speaker_infos(
+    request: PageRequest<SpeakerFilter>,
     state: State<'_, ServiceState>,
-) -> std::result::Result<Vec<SpeakerInfo>, String> {
+) -> std::result::Result<SpeakerPageResult, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .list_speaker_infos()
+        .list_speaker_infos(request)
         .await
         .map_err(|err| err.to_string())
 }

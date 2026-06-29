@@ -13,6 +13,7 @@ pub struct Model {
     pub required_model_repo_id_list_json: String,
     pub supported_feature_list_json: String,
     pub supported_devices: String,
+    pub supported_languages: String,
     pub create_time: String,
     pub modify_time: String,
     pub downloaded: bool,

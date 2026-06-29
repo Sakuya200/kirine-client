@@ -3,9 +3,10 @@ use tauri::{AppHandle, State};
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-        CreateVoiceDesignTaskPayload, HistoryRecord, HistoryTaskType, ModelTrainingTaskResult,
-        TextToSpeechAudioAsset, TextToSpeechTaskResult, VoiceCloneAudioAsset,
-        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+        CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord, HistoryRecordSummary,
+        HistoryTaskType, ModelTrainingTaskResult, Page, PageRequest, TextToSpeechAudioAsset,
+        TextToSpeechTaskResult, VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
+        VoiceDesignTaskResult,
     },
     ServiceState,
 };
@@ -22,13 +23,14 @@ const MODEL_TRAINING_TEMPLATE_XLSX_BYTES: &[u8] = include_bytes!(concat!(
 
 #[tauri::command]
 pub async fn list_history_records(
+    request: PageRequest<HistoryFilter>,
     state: State<'_, ServiceState>,
-) -> std::result::Result<Vec<HistoryRecord>, String> {
+) -> std::result::Result<Page<HistoryRecordSummary>, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .list_history_records()
+        .list_history_records(request)
         .await
         .map_err(|err| err.to_string())
 }

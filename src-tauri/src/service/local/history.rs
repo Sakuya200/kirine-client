@@ -1,8 +1,8 @@
 use std::io;
 
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, TransactionTrait,
 };
 
 use crate::{
@@ -15,8 +15,9 @@ use crate::{
             voice_design_task as voice_design_task_entity,
         },
         models::{
-            HistoryRecord, HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail,
-            TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
+            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest, TaskStatus,
+            TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
             VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
@@ -69,22 +70,51 @@ impl LocalService {
         }
     }
 
-    pub(crate) async fn list_history_records_impl(&self) -> Result<Vec<HistoryRecord>> {
-        let rows = task_history_entity::Entity::find()
-            .filter(task_history_entity::Column::Deleted.eq(0))
+    pub(crate) async fn list_history_records_impl(
+        &self,
+        request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>> {
+        let page = request.page.max(1);
+        let page_size = request.page_size.max(1);
+
+        let mut query = task_history_entity::Entity::find()
+            .filter(task_history_entity::Column::Deleted.eq(0));
+
+        if let Some(filter) = &request.filter {
+            if let Some(keyword) = filter
+                .keyword
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let pattern = format!("%{keyword}%");
+                query = query.filter(
+                    Condition::any()
+                        .add(task_history_entity::Column::Title.like(&pattern))
+                        .add(task_history_entity::Column::SpeakerNameSnapshot.like(&pattern)),
+                );
+            }
+            if let Some(task_type) = filter.task_type {
+                query =
+                    query.filter(task_history_entity::Column::TaskType.eq(task_type.as_str()));
+            }
+            if let Some(status) = filter.status {
+                query = query.filter(task_history_entity::Column::Status.eq(status.as_str()));
+            }
+        }
+
+        let paginator = query
             .order_by_desc(task_history_entity::Column::CreateTime)
             .order_by_desc(task_history_entity::Column::Id)
-            .all(self.orm())
-            .await?;
+            .paginate(self.orm(), page_size as u64);
+        let total = paginator.num_items().await?;
+        let rows = paginator.fetch_page((page - 1) as u64).await?;
 
-        let mut records = Vec::with_capacity(rows.len());
+        let mut items = Vec::with_capacity(rows.len());
         for row in rows {
-            let history_id = row.id;
             let task_type = parse_history_task_type(&row.task_type)?;
-            let detail = self.load_history_detail(history_id, task_type).await?;
-
-            records.push(HistoryRecord {
-                id: history_id,
+            items.push(HistoryRecordSummary {
+                id: row.id,
                 task_type,
                 title: row.title,
                 speaker: row.speaker_name_snapshot,
@@ -93,12 +123,10 @@ impl LocalService {
                 device: parse_hardware_type(&row.device)?,
                 create_time: row.create_time,
                 modify_time: row.modify_time,
-                task_log: None,
-                detail,
             });
         }
 
-        Ok(records)
+        Ok(Page::new(items, total, page, page_size))
     }
 
     pub(crate) async fn delete_history_record_impl(

@@ -15,17 +15,17 @@ import RecentTaskList, { type RecentTaskListItem } from '@/components/common/Rec
 import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
-import { AppLanguage } from '@/enums/language';
+import { AppLanguage, APP_LANGUAGE_LABELS } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import {
   TEXT_TO_SPEECH_FORMATS,
-  TEXT_TO_SPEECH_LANGUAGES,
   TextToSpeechFormat,
   type TextToSpeechOption,
   type TextToSpeechSpeakerOption
 } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -105,7 +105,7 @@ const form = reactive({
 });
 
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
-const selectedLanguageOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_LANGUAGES[0]);
+const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
 const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
@@ -155,6 +155,12 @@ const deviceOptions = computed(() =>
   modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
+  }))
+);
+const languageOptions = computed(() =>
+  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+    value: language,
+    label: APP_LANGUAGE_LABELS[language] ?? language
   }))
 );
 const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.TextToSpeech));
@@ -300,6 +306,22 @@ watch(
 );
 
 watch(
+  languageOptions,
+  options => {
+    if (options.length === 0) {
+      form.language = AppLanguage.Chinese;
+      selectedLanguageOption.value = null;
+      return;
+    }
+
+    const matched = options.find(option => option.value === form.language) ?? options[0] ?? null;
+    form.language = (matched?.value ?? AppLanguage.Chinese) as AppLanguage;
+    selectedLanguageOption.value = matched;
+  },
+  { immediate: true }
+);
+
+watch(
   speakerOptions,
   options => {
     if (options.length === 0) {
@@ -347,7 +369,7 @@ const syncActiveTaskStatusRefresh = () => {
   }, 3000);
 };
 
-const findLanguageLabel = (language: AppLanguage) => TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === language)?.label ?? language;
+const findLanguageLabel = (language: AppLanguage) => APP_LANGUAGE_LABELS[language] ?? language;
 const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
 
 const clearReplayTaskId = async () => {
@@ -423,7 +445,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.text = item.text;
   form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
-  selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES.find(option => option.value === item.language) ?? null;
+  selectedLanguageOption.value = languageOptions.value.find(option => option.value === item.language) ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === item.device) ?? null;
 
@@ -519,7 +541,7 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 
   try {
-    const records = await invoke<HistoryRecord[]>('list_history_records');
+    const records = await loadRecentHistoryRecords(HistoryTaskType.TextToSpeech, 5);
     generationHistory.value = records
       .map(mapHistoryRecordToResult)
       .filter((item): item is TtsResult => item !== null)
@@ -680,7 +702,7 @@ const confirmClearText = () => {
   form.text = '';
   form.modelParams = {};
   selectedSpeakerOption.value = null;
-  selectedLanguageOption.value = TEXT_TO_SPEECH_LANGUAGES[0] ?? null;
+  selectedLanguageOption.value = languageOptions.value[0] ?? null;
   selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   showClearDialog.value = false;
@@ -748,7 +770,7 @@ onMounted(async () => {
             v-model="form.language"
             v-model:selected-option="selectedLanguageOption"
             label="输出语言"
-            :options="TEXT_TO_SPEECH_LANGUAGES"
+            :options="languageOptions"
           />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />

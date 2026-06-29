@@ -6,16 +6,15 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
+import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { AppLanguage } from '@/enums/language';
 import { SPEAKER_STATUS_STYLES, SPEAKER_STATUS_TEXT, SpeakerStatus } from '@/enums/status';
 import { HistoryTaskType } from '@/enums/task';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import type { SpeakerProfile } from '@/types/domain';
 
-type LanguageFilterValue = 'all' | AppLanguage;
 type StatusFilterValue = 'all' | SpeakerStatus;
 
 const speakerStore = useSpeakerStore();
@@ -24,13 +23,6 @@ const selectedSpeakerId = ref<number | null>(null);
 const deleteTargetId = ref<number | null>(null);
 const searchKeyword = ref('');
 
-const languageOptions: Array<{ value: LanguageFilterValue; label: string }> = [
-  { value: 'all', label: '全部语言' },
-  { value: AppLanguage.Chinese, label: '中文' },
-  { value: AppLanguage.English, label: '英文' },
-  { value: AppLanguage.Japanese, label: '日文' }
-];
-
 const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
   { value: 'all', label: '全部状态' },
   { value: SpeakerStatus.Ready, label: SPEAKER_STATUS_TEXT[SpeakerStatus.Ready] },
@@ -38,7 +30,6 @@ const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
   { value: SpeakerStatus.Disabled, label: SPEAKER_STATUS_TEXT[SpeakerStatus.Disabled] }
 ];
 
-const selectedLanguage = ref<LanguageFilterValue>(languageOptions[0].value);
 const selectedStatus = ref<StatusFilterValue>(statusOptions[0].value);
 const isEditDialogOpen = ref(false);
 const isImportDialogOpen = ref(false);
@@ -56,8 +47,7 @@ const importForm = reactive({
   modelVersion: '',
   sourceModelDirPath: '',
   name: '',
-  description: '',
-  language: AppLanguage.Chinese as AppLanguage
+  description: ''
 });
 
 const importableModelOptions = computed(() =>
@@ -67,15 +57,9 @@ const importableModelOptions = computed(() =>
   }))
 );
 const importModelVersionOptions = computed(() => modelStore.getModelVersionOptions(importForm.baseModel));
-const importLanguageOptions: Array<{ value: AppLanguage; label: string }> = [
-  { value: AppLanguage.Chinese, label: '中文' },
-  { value: AppLanguage.English, label: '英文' },
-  { value: AppLanguage.Japanese, label: '日文' }
-];
 
 const selectedSpeaker = computed(() => speakerStore.speakers.find(speaker => speaker.id === selectedSpeakerId.value) ?? null);
 const deleteTarget = computed(() => speakerStore.speakers.find(speaker => speaker.id === deleteTargetId.value) ?? null);
-const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
 const canSaveSpeaker = computed(() => editForm.name.trim().length > 0 && editForm.description.trim().length > 0);
 const canImportSpeaker = computed(
   () =>
@@ -86,23 +70,13 @@ const canImportSpeaker = computed(
     importForm.description.trim().length > 0
 );
 
-const filteredSpeakers = computed(() => {
-  const keyword = trimmedKeyword.value;
+const onKeywordInput = () => {
+  speakerStore.setFilter({ keyword: searchKeyword.value.trim() });
+};
 
-  return speakerStore.speakers
-    .filter(speaker => {
-      const matchesKeyword =
-        !keyword ||
-        speaker.name.toLowerCase().includes(keyword) ||
-        speaker.description.toLowerCase().includes(keyword) ||
-        speakerStore.getLanguageLabel(speaker).toLowerCase().includes(keyword);
-      const matchesLanguage = selectedLanguage.value === 'all' || speaker.languages.includes(selectedLanguage.value);
-      const matchesStatus = selectedStatus.value === 'all' || speaker.status === selectedStatus.value;
-
-      return matchesKeyword && matchesLanguage && matchesStatus;
-    })
-    .sort((left, right) => right.modifyTime.localeCompare(left.modifyTime));
-});
+const onStatusChange = (value: StatusFilterValue) => {
+  speakerStore.setFilter({ status: value === 'all' ? null : value });
+};
 
 const statusLabelMap: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Ready]: SPEAKER_STATUS_TEXT[SpeakerStatus.Ready],
@@ -143,7 +117,6 @@ const resetImportForm = () => {
   importForm.sourceModelDirPath = '';
   importForm.name = '';
   importForm.description = '';
-  importForm.language = AppLanguage.Chinese;
 };
 
 const openImportDialog = () => {
@@ -178,8 +151,7 @@ const submitImportSpeaker = async () => {
     modelVersion: importForm.modelVersion,
     sourceModelDirPath: importForm.sourceModelDirPath.trim(),
     name: importForm.name.trim(),
-    description: importForm.description.trim(),
-    language: importForm.language
+    description: importForm.description.trim()
   });
   isImportingSpeaker.value = false;
 
@@ -301,7 +273,7 @@ onMounted(async () => {
       </article>
     </div>
 
-    <PanelCard title="说话人列表" subtitle="支持搜索、语言过滤、状态过滤、详情查看、编辑与删除操作">
+    <PanelCard title="说话人列表" subtitle="支持搜索、状态过滤、详情查看、编辑与删除操作">
       <template #actions>
         <div class="flex flex-wrap gap-2">
           <BaseButton tone="ghost" :disabled="importableModelOptions.length === 0" @click="openImportDialog">
@@ -319,14 +291,14 @@ onMounted(async () => {
         <input
           v-model="searchKeyword"
           class="min-w-0 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 sm:col-span-2 xl:col-span-1"
-          placeholder="搜索名称、语言或备注"
+          placeholder="搜索名称或备注"
+          @input="onKeywordInput"
         />
-        <BaseListbox v-model="selectedLanguage" :options="languageOptions" />
-        <BaseListbox v-model="selectedStatus" :options="statusOptions" />
+        <BaseListbox :model-value="selectedStatus" :options="statusOptions" @update:model-value="onStatusChange($event as StatusFilterValue)" />
       </div>
 
-      <div v-if="filteredSpeakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="speaker in filteredSpeakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
+      <div v-if="speakerStore.speakers.length > 0" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <article v-for="speaker in speakerStore.speakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
@@ -340,7 +312,7 @@ onMounted(async () => {
               </span>
             </div>
           </div>
-          <p class="mt-1 text-xs text-stone-500">{{ speakerStore.getLanguageLabel(speaker) }} · 样本 {{ speaker.samples }} 条</p>
+          <p class="mt-1 text-xs text-stone-500">样本 {{ speaker.samples }} 条</p>
           <p class="mt-2 text-sm text-slate-600">{{ speaker.description }}</p>
           <p class="mt-3 text-xs text-stone-500">创建于 {{ speaker.createTime }} · 最近更新 {{ speaker.modifyTime }}</p>
           <div class="mt-3 flex flex-wrap gap-2">
@@ -363,13 +335,25 @@ onMounted(async () => {
       <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
         {{ speakerStore.isLoading ? '正在加载说话人列表...' : '当前筛选条件下没有匹配的说话人。' }}
       </div>
+
+      <div v-if="speakerStore.speakers.length > 0" class="mt-4">
+        <BasePagination
+          :current-page="speakerStore.page"
+          :page-size="speakerStore.pageSize"
+          :page-size-options="[9, 18, 27]"
+          :total-items="speakerStore.total"
+          :disabled="speakerStore.isLoading"
+          :loading="speakerStore.isLoading"
+          @update:current-page="speakerStore.setPage"
+          @update:page-size="speakerStore.setPageSize"
+        />
+      </div>
     </PanelCard>
 
     <BaseDialog :open="selectedSpeaker !== null" title="说话人详情" @close="closeDetail">
       <div v-if="selectedSpeaker" class="space-y-2 text-sm text-slate-600">
         <p><span class="font-semibold text-slate-800">名称：</span>{{ selectedSpeaker.name }}</p>
         <p><span class="font-semibold text-slate-800">模型：</span>{{ getSpeakerModelLabel(selectedSpeaker) }}</p>
-        <p><span class="font-semibold text-slate-800">语言：</span>{{ speakerStore.getLanguageLabel(selectedSpeaker) }}</p>
         <p><span class="font-semibold text-slate-800">样本数：</span>{{ selectedSpeaker.samples }}</p>
         <p><span class="font-semibold text-slate-800">状态：</span>{{ statusLabelMap[selectedSpeaker.status] }}</p>
         <p><span class="font-semibold text-slate-800">创建时间：</span>{{ selectedSpeaker.createTime }}</p>
@@ -429,10 +413,6 @@ onMounted(async () => {
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">模型版本</span>
           <BaseListbox v-model="importForm.modelVersion" :options="importModelVersionOptions" />
-        </label>
-        <label class="block text-sm text-slate-700">
-          <span class="mb-1 block text-xs text-stone-500">语言</span>
-          <BaseListbox v-model="importForm.language" :options="importLanguageOptions" />
         </label>
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">模型目录</span>

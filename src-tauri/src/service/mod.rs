@@ -5,11 +5,12 @@ use crate::{
     config::{EnvConfig, HardwareType, StorageMode},
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryRecord,
-        HistoryTaskType, ImportModelAsSpeakerPayload, ModelInfo, ModelMutationResult,
-        ModelTrainingTaskResult, SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-        UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
+        HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
+        ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
+        SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+        VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
     },
     Result,
 };
@@ -51,10 +52,16 @@ pub trait Service: Send + Sync {
         &self,
         payload: ImportModelAsSpeakerPayload,
     ) -> Result<SpeakerInfo>;
-    async fn list_speaker_infos(&self) -> Result<Vec<SpeakerInfo>>;
+    async fn list_speaker_infos(
+        &self,
+        request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult>;
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
-    async fn list_model_infos(&self) -> Result<Vec<ModelInfo>>;
+    async fn list_model_infos(
+        &self,
+        request: PageRequest<ModelFilter>,
+    ) -> Result<Page<ModelInfo>>;
     async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType>;
     async fn install_model(
         &self,
@@ -62,7 +69,10 @@ pub trait Service: Send + Sync {
         device: HardwareType,
     ) -> Result<ModelMutationResult>;
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult>;
-    async fn list_history_records(&self) -> Result<Vec<HistoryRecord>>;
+    async fn list_history_records(
+        &self,
+        request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>>;
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;
     async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset>;
     async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset>;

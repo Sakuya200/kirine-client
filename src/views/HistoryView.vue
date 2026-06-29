@@ -7,6 +7,7 @@ import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
+import BasePagination from '@/components/common/BasePagination.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
@@ -14,8 +15,9 @@ import StatusPill from '@/components/common/StatusPill.vue';
 import { TaskStatus } from '@/enums/status';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { usePagination } from '@/hooks/usePagination';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
+import type { HistoryFilter, HistoryRecordSummary } from '@/types/domain';
 import { formatDurationClock } from '@/utils/formatDurationClock';
 
 type TaskTypeFilterValue = 'all' | HistoryTaskType;
@@ -43,26 +45,29 @@ const selectedStatus = ref<StatusFilterValue>(statusOptions[0].value);
 const searchKeyword = ref('');
 const selectedRecordId = ref<number | null>(null);
 const deleteTargetId = ref<number | null>(null);
-const rows = ref<HistoryRecord[]>([]);
-const isLoading = ref(false);
 const isMutating = ref(false);
 const uiStore = useUiStore();
 
-const deleteTarget = computed(() => rows.value.find(row => row.id === deleteTargetId.value) ?? null);
-const trimmedKeyword = computed(() => searchKeyword.value.trim().toLowerCase());
-const filteredRows = computed(() =>
-  rows.value.filter(row => {
-    const matchesKeyword =
-      !trimmedKeyword.value ||
-      String(row.id).toLowerCase().includes(trimmedKeyword.value) ||
-      row.title.toLowerCase().includes(trimmedKeyword.value) ||
-      row.speaker.toLowerCase().includes(trimmedKeyword.value);
-    const matchesTaskType = selectedTaskType.value === 'all' || row.taskType === selectedTaskType.value;
-    const matchesStatus = selectedStatus.value === 'all' || row.status === selectedStatus.value;
+const filter = ref<HistoryFilter>({ keyword: null, taskType: null, status: null });
 
-    return matchesKeyword && matchesTaskType && matchesStatus;
-  })
-);
+const {
+  items: rows,
+  total,
+  page,
+  pageSize,
+  loading: isLoading,
+  refresh: loadHistory,
+  setPage,
+  setPageSize,
+  setFilter
+} = usePagination<HistoryRecordSummary, HistoryFilter>({
+  command: 'list_history_records',
+  filter,
+  initialPageSize: 10,
+  errorLabel: '读取历史任务失败，请检查本地数据库或 Rust 后端'
+});
+
+const deleteTarget = computed(() => rows.value.find(row => row.id === deleteTargetId.value) ?? null);
 const historyBusyLabel = computed(() => {
   if (isMutating.value) {
     return '正在更新历史任务，请稍候';
@@ -75,20 +80,19 @@ const historyBusyLabel = computed(() => {
   return '';
 });
 
-const loadHistory = async () => {
-  isLoading.value = true;
-
-  try {
-    rows.value = await invoke<HistoryRecord[]>('list_history_records');
-  } catch (error) {
-    rows.value = [];
-    uiStore.notifyError(formatErrorMessage('读取历史任务失败，请检查本地数据库或 Rust 后端', error));
-  } finally {
-    isLoading.value = false;
-  }
+const onKeywordInput = () => {
+  setFilter({ keyword: searchKeyword.value.trim() });
 };
 
-const requestDelete = (record: HistoryRecord) => {
+const onTaskTypeChange = (value: TaskTypeFilterValue) => {
+  setFilter({ taskType: value === 'all' ? null : value });
+};
+
+const onStatusChange = (value: StatusFilterValue) => {
+  setFilter({ status: value === 'all' ? null : value });
+};
+
+const requestDelete = (record: HistoryRecordSummary) => {
   deleteTargetId.value = record.id;
 };
 
@@ -119,14 +123,13 @@ const confirmDelete = async () => {
       return;
     }
 
-    rows.value = rows.value.filter(row => row.id !== removedId);
-
     if (selectedRecordId.value === removedId) {
       closeDetail();
     }
 
     uiStore.notifySuccess(`任务 ${removedTitle} 已删除。`, 3200);
     closeDeleteDialog();
+    await loadHistory();
   } catch (error) {
     uiStore.notifyError(formatErrorMessage('删除历史任务失败', error));
   } finally {
@@ -134,7 +137,7 @@ const confirmDelete = async () => {
   }
 };
 
-const openDetail = (record: HistoryRecord) => {
+const openDetail = (record: HistoryRecordSummary) => {
   selectedRecordId.value = record.id;
 };
 
@@ -145,10 +148,8 @@ const closeDetail = () => {
 const cancelTask = async (historyId: number) => {
   isMutating.value = true;
 
-  console.log('Initiating cancel for historyId:', historyId);
   try {
     const accepted = await invoke<boolean>('cancel_history_task', { historyId });
-    console.log('Cancel request accepted:', accepted);
     if (!accepted) {
       uiStore.notifyWarning('当前任务已经提交过终止请求。');
       return;
@@ -191,9 +192,10 @@ onMounted(async () => {
           v-model="searchKeyword"
           class="min-w-0 w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 sm:col-span-2 xl:col-span-1"
           placeholder="按任务ID、标题或说话人搜索"
+          @input="onKeywordInput"
         />
-        <BaseListbox v-model="selectedTaskType" :options="taskTypeOptions" />
-        <BaseListbox v-model="selectedStatus" :options="statusOptions" />
+        <BaseListbox :model-value="selectedTaskType" :options="taskTypeOptions" @update:model-value="onTaskTypeChange($event as TaskTypeFilterValue)" />
+        <BaseListbox :model-value="selectedStatus" :options="statusOptions" @update:model-value="onStatusChange($event as StatusFilterValue)" />
       </div>
 
       <div class="overflow-x-auto">
@@ -211,7 +213,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in filteredRows" :key="row.id" class="border-b border-brand-50 text-slate-700">
+            <tr v-for="row in rows" :key="row.id" class="border-b border-brand-50 text-slate-700">
               <td class="py-3 font-mono text-xs">{{ row.id }}</td>
               <td class="py-3">{{ row.title }}</td>
               <td class="py-3">{{ HISTORY_TASK_TYPE_TEXT[row.taskType] }}</td>
@@ -236,8 +238,20 @@ onMounted(async () => {
         </table>
       </div>
 
-      <div v-if="filteredRows.length === 0" class="mt-4 rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
+      <div v-if="rows.length === 0" class="mt-4 rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
         {{ isLoading ? '正在加载历史任务...' : '当前筛选条件下没有匹配的历史任务。' }}
+      </div>
+
+      <div v-if="rows.length > 0" class="mt-4">
+        <BasePagination
+          :current-page="page"
+          :page-size="pageSize"
+          :total-items="total"
+          :disabled="isMutating"
+          :loading="isLoading"
+          @update:current-page="setPage"
+          @update:page-size="setPageSize"
+        />
       </div>
     </PanelCard>
 

@@ -7,15 +7,17 @@ use anyhow::{bail, Context};
 
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait,
-    EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
+    Condition, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
 };
 
 use crate::{
     service::{
         local::entity::speaker as speaker_entity,
         models::{
-            AppLanguage, CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType,
-            ModelInfo, SpeakerInfo, SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
+            CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType, ModelInfo,
+            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, SpeakerSource,
+            SpeakerStatus, UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
         LocalService,
@@ -30,12 +32,6 @@ impl LocalService {
         payload: CreateSpeakerPayload,
     ) -> Result<SpeakerInfo> {
         let create_time = now_string()?;
-        let languages = if payload.languages.is_empty() {
-            vec![AppLanguage::Chinese]
-        } else {
-            payload.languages
-        };
-        let languages_json = serde_json::to_string(&languages)?;
         let name = payload.name.trim();
         let description = payload.description.trim();
         let status = payload.status;
@@ -44,7 +40,6 @@ impl LocalService {
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
             name: Set(name.to_string()),
-            languages_json: Set(languages_json),
             samples: Set(payload.samples as i64),
             base_model: Set(payload.base_model.as_str().to_string()),
             description: Set(description.to_string()),
@@ -60,16 +55,91 @@ impl LocalService {
         map_speaker_model(inserted)
     }
 
-    pub(crate) async fn list_speaker_infos_impl(&self) -> Result<Vec<SpeakerInfo>> {
-        speaker_entity::Entity::find()
+    pub(crate) async fn list_speaker_infos_impl(
+        &self,
+        request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult> {
+        let page = request.page.max(1);
+        let page_size = request.page_size.max(1);
+
+        // 统一构造筛选条件，分页查询与各统计查询共用，避免重复拼装
+        let mut condition = Condition::all();
+        if let Some(filter) = &request.filter {
+            if let Some(keyword) = filter
+                .keyword
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let pattern = format!("%{keyword}%");
+                condition = condition.add(speaker_entity::Column::Name.like(&pattern));
+            }
+            if let Some(status) = filter.status {
+                condition = condition.add(speaker_entity::Column::Status.eq(status.as_str()));
+            }
+        }
+
+        // 与 model_info / history 一致：使用 sea-orm paginate 取当前页与总数
+        let paginator = speaker_entity::Entity::find()
             .filter(speaker_entity::Column::Deleted.eq(0))
+            .filter(condition.clone())
             .order_by_desc(speaker_entity::Column::ModifyTime)
             .order_by_desc(speaker_entity::Column::CreateTime)
-            .all(self.orm())
+            .paginate(self.orm(), page_size as u64);
+        let total = paginator.num_items().await?;
+        let rows = paginator.fetch_page((page - 1) as u64).await?;
+
+        // 统计基于同一筛选条件，用聚焦的 count / 聚合查询避免一次性载入全量
+        let base_query = || {
+            speaker_entity::Entity::find()
+                .filter(speaker_entity::Column::Deleted.eq(0))
+                .filter(condition.clone())
+        };
+
+        let ready_count = base_query()
+            .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Ready.as_str()))
+            .count(self.orm())
+            .await?;
+        let training_count = base_query()
+            .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Training.as_str()))
+            .count(self.orm())
+            .await?;
+        let disabled_count = base_query()
+            .filter(speaker_entity::Column::Status.eq(SpeakerStatus::Disabled.as_str()))
+            .count(self.orm())
+            .await?;
+        let total_samples = base_query()
+            .select_only()
+            .column_as(
+                Expr::col(speaker_entity::Column::Samples).sum(),
+                "total_samples",
+            )
+            .into_model::<SpeakerSampleSum>()
+            .one(self.orm())
             .await?
-            .into_iter()
-            .map(map_speaker_model)
-            .collect()
+            .and_then(|row| row.total_samples)
+            .unwrap_or(0) as u64;
+
+        let items: Result<Vec<SpeakerInfo>> = rows.into_iter().map(map_speaker_model).collect();
+        let items = items?;
+
+        let total_pages = if page_size == 0 {
+            0
+        } else {
+            (total as u32 + page_size - 1) / page_size
+        };
+
+        Ok(SpeakerPageResult {
+            items,
+            total,
+            page,
+            page_size,
+            total_pages,
+            ready_count,
+            training_count,
+            disabled_count,
+            total_samples,
+        })
     }
 
     pub(crate) async fn import_model_as_speaker_impl(
@@ -102,13 +172,11 @@ impl LocalService {
         self.find_supported_model_variant(base_model, model_version)
             .await?;
 
-        let languages_json = serde_json::to_string(&vec![payload.language])?;
         let txn = self.orm().begin().await?;
 
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
             name: Set(name.to_string()),
-            languages_json: Set(languages_json),
             samples: Set(0),
             base_model: Set(base_model.to_string()),
             description: Set(description.to_string()),
@@ -207,6 +275,7 @@ impl LocalService {
             )?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,
             supported_devices: serde_json::from_str(&row.supported_devices)?,
+            supported_languages: serde_json::from_str(&row.supported_languages)?,
             downloaded: row.downloaded,
             create_time: row.create_time,
             modify_time: row.modify_time,
@@ -249,12 +318,15 @@ fn copy_directory_recursively(source_dir: &Path, target_dir: &Path) -> Result<()
     Ok(())
 }
 
+#[derive(FromQueryResult)]
+struct SpeakerSampleSum {
+    total_samples: Option<i64>,
+}
+
 fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
-    let languages = serde_json::from_str::<Vec<AppLanguage>>(&model.languages_json)?;
     Ok(SpeakerInfo {
         id: model.id,
         name: model.name,
-        languages,
         samples: model.samples as u32,
         base_model: model.base_model,
         create_time: model.create_time,

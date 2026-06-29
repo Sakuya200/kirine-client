@@ -2,15 +2,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { SpeakerStatus } from '@/enums/status';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, SpeakerProfile } from '@/types/domain';
+import type { BaseModel, SpeakerFilter, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 
 interface CreateSpeakerPayload {
   name: string;
-  languages: string[];
   samples: number;
   baseModel: BaseModel;
   description: string;
@@ -30,7 +28,6 @@ interface ImportSpeakerPayload {
   sourceModelDirPath: string;
   name: string;
   description: string;
-  language: AppLanguage;
 }
 
 interface LoadSpeakersOptions {
@@ -39,7 +36,6 @@ interface LoadSpeakersOptions {
 }
 
 const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
-  const languages = Array.isArray(item.languages) ? item.languages : [];
   const safeStatus: SpeakerStatus =
     item.status === SpeakerStatus.Ready || item.status === SpeakerStatus.Training || item.status === SpeakerStatus.Disabled
       ? item.status
@@ -48,7 +44,6 @@ const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
   return {
     id: typeof item.id === 'number' ? item.id : 0,
     name: item.name?.trim() || '',
-    languages,
     samples: typeof item.samples === 'number' ? item.samples : 0,
     baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
     createTime: item.createTime ?? '',
@@ -68,39 +63,111 @@ export const useSpeakerStore = defineStore('speakers', () => {
   const uiStore = useUiStore();
   let loadSpeakersPromise: Promise<void> | null = null;
 
-  const speakerCount = computed(() => speakers.value.length);
-  const readyCount = computed(() => speakers.value.filter(speaker => speaker.status === SpeakerStatus.Ready).length);
-  const trainingCount = computed(() => speakers.value.filter(speaker => speaker.status === SpeakerStatus.Training).length);
-  const disabledCount = computed(() => speakers.value.filter(speaker => speaker.status === SpeakerStatus.Disabled).length);
-  const totalSamples = computed(() => speakers.value.reduce((total, speaker) => total + speaker.samples, 0));
+  // 分页与筛选状态
+  const page = ref(1);
+  // 说话人卡片为 3 列网格，单页大小取 9 的倍数以填满整行
+  const pageSize = ref(9);
+  const total = ref(0);
+  const totalPages = ref(1);
+  const filter = ref<SpeakerFilter>({ keyword: null, status: null });
 
-  const loadSpeakers = async ({ silent = false }: LoadSpeakersOptions = {}) => {
-    if (loadSpeakersPromise) {
-      return loadSpeakersPromise;
-    }
+  // 统计（来自分页响应，不再依赖前端全量聚合）
+  const stats = ref({ readyCount: 0, trainingCount: 0, disabledCount: 0, totalSamples: 0 });
 
+  let requestSeed = 0;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const speakerCount = computed(() => total.value);
+  const readyCount = computed(() => stats.value.readyCount);
+  const trainingCount = computed(() => stats.value.trainingCount);
+  const disabledCount = computed(() => stats.value.disabledCount);
+  const totalSamples = computed(() => stats.value.totalSamples);
+
+  const fetchPage = async (silent = false) => {
     isLoading.value = true;
+    const seed = ++requestSeed;
     loadSpeakersPromise = (async () => {
       try {
-        const result = await invoke<SpeakerProfile[]>('list_speaker_infos');
-        speakers.value = Array.isArray(result) ? normalizeSpeakers(result) : [];
+        const result = await invoke<SpeakerPagedResult>('list_speaker_infos', {
+          request: {
+            page: page.value,
+            pageSize: pageSize.value,
+            filter: filter.value
+          }
+        });
+        if (seed !== requestSeed) {
+          return;
+        }
+        speakers.value = Array.isArray(result?.items) ? normalizeSpeakers(result.items) : [];
+        total.value = typeof result?.total === 'number' ? result.total : 0;
+        totalPages.value = typeof result?.totalPages === 'number' ? result.totalPages : 1;
+        stats.value = {
+          readyCount: result?.readyCount ?? 0,
+          trainingCount: result?.trainingCount ?? 0,
+          disabledCount: result?.disabledCount ?? 0,
+          totalSamples: result?.totalSamples ?? 0
+        };
       } catch (error) {
+        if (seed !== requestSeed) {
+          return;
+        }
         speakers.value = [];
+        total.value = 0;
+        totalPages.value = 1;
+        stats.value = { readyCount: 0, trainingCount: 0, disabledCount: 0, totalSamples: 0 };
         if (!silent) {
           uiStore.notifyError(formatErrorMessage('加载说话人列表失败', error));
         }
       } finally {
-        isLoading.value = false;
-        initialized.value = true;
-        loadSpeakersPromise = null;
+        if (seed === requestSeed) {
+          isLoading.value = false;
+          initialized.value = true;
+          loadSpeakersPromise = null;
+        }
       }
     })();
 
     return loadSpeakersPromise;
   };
 
+  const loadSpeakers = async ({ silent = false }: LoadSpeakersOptions = {}) => {
+    if (loadSpeakersPromise) {
+      return loadSpeakersPromise;
+    }
+    return fetchPage(silent);
+  };
+
   const refreshSpeakers = async (options: LoadSpeakersOptions = {}) => {
     await loadSpeakers(options);
+  };
+
+  const setPage = (next: number) => {
+    const target = Math.min(Math.max(1, next), totalPages.value);
+    if (target === page.value) {
+      return;
+    }
+    page.value = target;
+    fetchPage();
+  };
+
+  const setPageSize = (next: number) => {
+    if (next === pageSize.value) {
+      return;
+    }
+    pageSize.value = next;
+    page.value = 1;
+    fetchPage();
+  };
+
+  const setFilter = (patch: Partial<SpeakerFilter>) => {
+    filter.value = { ...filter.value, ...patch };
+    page.value = 1;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      fetchPage();
+    }, 300);
   };
 
   const ensureLoaded = async ({ force = false, silent = false }: LoadSpeakersOptions = {}) => {
@@ -117,7 +184,6 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('create_speaker_info', {
           payload: {
             name: payload.name,
-            languages: payload.languages,
             samples: payload.samples,
             baseModel: payload.baseModel,
             description: payload.description,
@@ -127,8 +193,8 @@ export const useSpeakerStore = defineStore('speakers', () => {
         })
       );
 
-      speakers.value = [created, ...speakers.value];
       uiStore.notifySuccess(`已新增说话人“${created.name}”。`, 3200);
+      await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('新增说话人失败', error));
@@ -137,13 +203,6 @@ export const useSpeakerStore = defineStore('speakers', () => {
   };
 
   const updateSpeaker = async (payload: UpdateSpeakerPayload) => {
-    const speaker = speakers.value.find(item => item.id === payload.id);
-
-    if (!speaker) {
-      uiStore.notifyWarning('未找到目标说话人，无法保存修改。');
-      return false;
-    }
-
     try {
       const updated = normalizeSpeaker(
         await invoke<SpeakerProfile>('update_speaker_info', {
@@ -155,8 +214,8 @@ export const useSpeakerStore = defineStore('speakers', () => {
         })
       );
 
-      speakers.value = speakers.value.map(item => (item.id === updated.id ? updated : item));
       uiStore.notifySuccess(`已更新说话人“${updated.name}”的信息。`, 3200);
+      await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('保存说话人信息失败', error));
@@ -173,14 +232,14 @@ export const useSpeakerStore = defineStore('speakers', () => {
             modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
             name: payload.name,
-            description: payload.description,
-            language: payload.language
+            description: payload.description
           }
         })
       );
 
       speakers.value = [imported, ...speakers.value.filter(item => item.id !== imported.id)];
       uiStore.notifySuccess(`已导入说话人“${imported.name}”。`, 3200);
+      await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('导入说话人失败', error));
@@ -190,11 +249,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
 
   const removeSpeaker = async (speakerId: number) => {
     const speaker = speakers.value.find(item => item.id === speakerId);
-
-    if (!speaker) {
-      uiStore.notifyWarning('未找到目标说话人，无法删除。');
-      return false;
-    }
+    const speakerName = speaker?.name ?? '';
 
     try {
       const deleted = await invoke<boolean>('delete_speaker_info', { speakerId });
@@ -204,8 +259,8 @@ export const useSpeakerStore = defineStore('speakers', () => {
         return false;
       }
 
-      speakers.value = speakers.value.filter(item => item.id !== speakerId);
-      uiStore.notifySuccess(`已删除说话人“${speaker.name}”。`, 3200);
+      uiStore.notifySuccess(`已删除说话人“${speakerName}”。`, 3200);
+      await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage('删除说话人失败', error));
@@ -213,13 +268,15 @@ export const useSpeakerStore = defineStore('speakers', () => {
     }
   };
 
-  const getLanguageLabel = (speaker: SpeakerProfile) =>
-    speaker.languages.map(language => APP_LANGUAGE_SHORT_LABELS[language as AppLanguage] ?? language).join(' / ');
-
   return {
     speakers,
     isLoading,
     initialized,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    filter,
     speakerCount,
     readyCount,
     trainingCount,
@@ -229,9 +286,11 @@ export const useSpeakerStore = defineStore('speakers', () => {
     ensureLoaded,
     loadSpeakers,
     refreshSpeakers,
+    setPage,
+    setPageSize,
+    setFilter,
     updateSpeaker,
     importSpeaker,
-    removeSpeaker,
-    getLanguageLabel
+    removeSpeaker
   };
 });
