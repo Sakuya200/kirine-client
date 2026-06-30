@@ -9,7 +9,10 @@ import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
+import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT, ModelInstallStatus } from '@/enums/status';
+import { usePollingResume } from '@/hooks/usePollingResume';
 import { useModelStore } from '@/stores/models';
+import type { ModelInfo } from '@/types/domain';
 
 const modelStore = useModelStore();
 const isMutating = ref(false);
@@ -59,6 +62,8 @@ const refreshModels = async () => {
   await modelStore.loadModels();
 };
 
+const installStatusOf = (item: ModelInfo): ModelInstallStatus => modelStore.installStatusOf(item);
+
 const handleInstall = async (modelId: number) => {
   const target = modelStore.items.find(item => item.id === modelId);
   isMutating.value = true;
@@ -103,6 +108,35 @@ const confirmUninstall = async () => {
     mutatingAction.value = null;
   }
 };
+
+// 解除锁屏 / 唤醒后重新同步模型状态：模型安装/卸载是阻塞式长任务，其 invoke
+// 可能被系统睡眠冻结而卡住 isMutating；安装也可能在睡眠期间已完成。这里重拉
+// 列表，并在后端状态已达到预期时复位 isMutating，避免加载条与按钮永久卡死。
+usePollingResume(async () => {
+  await modelStore.loadModels();
+
+  if (isMutating.value && mutatingModelId.value !== null) {
+    const target = modelStore.items.find(item => item.id === mutatingModelId.value) ?? null;
+    const action = mutatingAction.value;
+    const reached = target
+      ? (action === 'install' || action === 'reinstall')
+        ? target.downloaded
+        : action === 'uninstall'
+          ? !target.downloaded
+          : false
+      : false;
+
+    if (reached) {
+      const reachedId = mutatingModelId.value;
+      if (reachedId !== null) {
+        modelStore.clearInstallFailed(reachedId);
+      }
+      isMutating.value = false;
+      mutatingModelId.value = null;
+      mutatingAction.value = null;
+    }
+  }
+});
 
 onMounted(async () => {
   await modelStore.ensureLoaded();
@@ -156,9 +190,9 @@ onMounted(async () => {
               <td class="py-3 align-middle">
                 <span
                   class="rounded-full border px-2 py-1 text-[11px] font-medium"
-                  :class="item.downloaded ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-stone-100 text-stone-600'"
+                  :class="MODEL_INSTALL_STATUS_STYLES[installStatusOf(item)]"
                 >
-                  {{ item.downloaded ? '已安装' : '未安装' }}
+                  {{ MODEL_INSTALL_STATUS_TEXT[installStatusOf(item)] }}
                 </span>
               </td>
               <td class="py-3 align-middle">

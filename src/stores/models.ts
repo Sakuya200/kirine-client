@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
 import { AppLanguage } from '@/enums/language';
+import { ModelInstallStatus } from '@/enums/status';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 import type { BaseModel, ModelInfo, ModelMutationResult, Page } from '@/types/domain';
@@ -37,6 +38,10 @@ export const useModelStore = defineStore('models', () => {
   const items = ref<ModelInfo[]>([]);
   const isLoading = ref(false);
   const initialized = ref(false);
+  // 安装失败的模型 id（Rust 端 install_model 报错时记录）。这是会话级前端状态：
+  // 后端 downloaded 仅反映权重是否就绪，无法表达“最近一次安装失败”，故在此单独追踪，
+  // 供模型管理页展示“安装失败”状态。安装/重装成功或卸载成功后清除。
+  const failedModelIds = ref<Set<number>>(new Set());
   const uiStore = useUiStore();
 
   const byBaseModel = computed(() => {
@@ -77,6 +82,17 @@ export const useModelStore = defineStore('models', () => {
     items.value = items.value.map(item => (item.id === nextModel.id ? nextModel : item));
   };
 
+  const installStatusOf = (item: ModelInfo): ModelInstallStatus => {
+    if (failedModelIds.value.has(item.id)) {
+      return ModelInstallStatus.Failed;
+    }
+    return item.downloaded ? ModelInstallStatus.Installed : ModelInstallStatus.NotInstalled;
+  };
+
+  const clearInstallFailed = (modelId: number) => {
+    failedModelIds.value.delete(modelId);
+  };
+
   const installModel = async (modelId: number, device: HardwareType = HardwareType.Cpu) => {
     try {
       const result = await invoke<ModelMutationResult>('install_model', { modelId, device });
@@ -85,9 +101,11 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       replaceModel(normalized.model);
+      failedModelIds.value.delete(modelId);
       uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已安装。`, 3200);
       return normalized;
     } catch (error) {
+      failedModelIds.value.add(modelId);
       uiStore.notifyError(formatErrorMessage('安装模型失败', error));
       return null;
     }
@@ -101,6 +119,7 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       replaceModel(normalized.model);
+      failedModelIds.value.delete(modelId);
       uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已卸载。`, 3200);
       return normalized;
     } catch (error) {
@@ -165,6 +184,7 @@ export const useModelStore = defineStore('models', () => {
     items,
     isLoading,
     initialized,
+    failedModelIds,
     byBaseModel,
     loadModels,
     ensureLoaded,
@@ -177,6 +197,8 @@ export const useModelStore = defineStore('models', () => {
     getSupportedDevices,
     getSupportedLanguages,
     uninstallModel,
-    supportsModelFeature
+    supportsModelFeature,
+    installStatusOf,
+    clearInstallFailed
   };
 });
