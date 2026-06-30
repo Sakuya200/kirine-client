@@ -21,7 +21,7 @@ src_model_extract_start:
 src_model_extract_archive:
   Push "$2"
   Push "$0"
-  Call ExtractBundledZipArchiveContents
+  Call MergeBundledZipArchiveContents
   Pop $3
   ${If} $3 != 0
     MessageBox MB_ICONEXCLAMATION "src-model runtime extraction failed with exit code $3. Model tasks may not work correctly."

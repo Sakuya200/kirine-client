@@ -75,14 +75,14 @@ Function ExtractBundledZipArchive
   Push $2
 FunctionEnd
 
-Function ExtractBundledZipArchiveContents
+Function MergeBundledZipArchiveContents
   Exch $1
   Exch
   Exch $0
 
   ${StrRep} $0 "$0" "'" "''"
   ${StrRep} $1 "$1" "'" "''"
-  StrCpy $2 "$\"${POWERSHELL_EXE}$\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command $\"$$destination = '$1'; if (-not (Test-Path -LiteralPath $$destination)) { New-Item -ItemType Directory -Path $$destination -Force | Out-Null }; Get-ChildItem -LiteralPath $$destination -Force -ErrorAction SilentlyContinue | Where-Object { $$_.Name -ne 'venv' -and $$_.Name -ne '.venv' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive -LiteralPath '$0' -DestinationPath $$destination -Force$\""
+  StrCpy $2 "$\"${POWERSHELL_EXE}$\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command $\"$$archive = '$0'; $$destination = '$1'; $$temp = Join-Path $$env:TEMP ('src-model-update-' + [System.IO.Path]::GetRandomFileName()); New-Item -ItemType Directory -Path $$temp -Force | Out-Null; Expand-Archive -LiteralPath $$archive -DestinationPath $$temp -Force; Get-ChildItem -LiteralPath $$temp -Recurse -File -Force | ForEach-Object { $$rel = $$_.FullName.Substring($$temp.Length).TrimStart('\'); $$target = Join-Path $$destination $$rel; $$targetDir = Split-Path $$target -Parent; if (-not (Test-Path -LiteralPath $$targetDir)) { New-Item -ItemType Directory -Path $$targetDir -Force | Out-Null }; Copy-Item -LiteralPath $$_.FullName -Destination $$target -Force }; Remove-Item -LiteralPath $$temp -Recurse -Force$\""
   StrCpy $0 "$2"
   Call RunHiddenCommandWait
   StrCpy $2 "$0"
