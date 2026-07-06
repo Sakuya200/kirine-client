@@ -70,7 +70,7 @@ async fn create_speakers_node(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
                         .auto_increment()
                         .primary_key(),
                 )
-                .col(ColumnDef::new(Speakers::Name).string().not_null())
+                .col(ColumnDef::new(Speakers::SpeakerName).string().not_null())
                 .col(
                     ColumnDef::new(Speakers::Samples)
                         .integer()
@@ -647,7 +647,7 @@ enum AppMeta {
 enum Speakers {
     Table,
     Id,
-    Name,
+    SpeakerName,
     Samples,
     BaseModel,
     Description,

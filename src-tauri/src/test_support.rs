@@ -74,7 +74,7 @@ impl LocalServiceHarness {
     pub async fn create_test_speaker(&self) -> Result<SpeakerInfo> {
         self.service
             .create_speaker_info(CreateSpeakerPayload {
-                name: "SeaOrm Speaker".to_string(),
+                speaker_name: "SeaOrm Speaker".to_string(),
                 samples: 3,
                 base_model: "qwen3_tts".to_string(),
                 description: "created by test".to_string(),
@@ -144,7 +144,7 @@ impl LocalServiceHarness {
         self.service
             .update_speaker_info(UpdateSpeakerPayload {
                 id,
-                name: "Updated Speaker".to_string(),
+                speaker_name: "Updated Speaker".to_string(),
                 description: "updated by test".to_string(),
             })
             .await

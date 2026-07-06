@@ -316,3 +316,7 @@ attn_implementation = "sdpa"
 - **前端 / Tauri 日志**：开发模式下直接输出到终端；生产模式下同样写入 `log_dir`。
 - **Python 脚本日志**：每次任务执行时，脚本的标准输出会被重定向到任务专属日志文件，路径格式为 `log_dir/<task_id>/`。
 - **模型运行时查找**：Rust 启动时会依次尝试 `<workspace>/src-model`、`<app_dir>/src-model`、`<app_dir>/lib/src-model`，本地开发通常命中第一个路径（仓库目录下的 `src-model/`）。
+
+### D9. 模型适配器开发
+
+如果需要为 `src-model/` 新增或维护模型适配器（包括两个配置文件 `model-config.json` / `params-config.json` 的结构、前端支持的表单组件类型、Python 适配器的实现流程与调用链路），请阅读 **[模型适配器开发指南](src-model/ADAPTER_DEVELOPMENT.md)**。

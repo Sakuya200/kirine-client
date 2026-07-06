@@ -106,7 +106,7 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
         .all(&txn)
         .await?;
     for row in existing_preset_speakers {
-        let key = format!("{}:{}", row.base_model.trim(), row.name.trim());
+        let key = format!("{}:{}", row.base_model.trim(), row.speaker_name.trim());
         if active_speaker_keys.contains(&key) {
             continue;
         }
@@ -313,7 +313,7 @@ where
 {
     let existing = speaker_entity::Entity::find()
         .filter(speaker_entity::Column::BaseModel.eq(definition.base_model.trim()))
-        .filter(speaker_entity::Column::Name.eq(definition.name.trim()))
+        .filter(speaker_entity::Column::SpeakerName.eq(definition.name.trim()))
         .filter(speaker_entity::Column::Source.eq(SpeakerSource::Preset.as_str()))
         .one(connection)
         .await?;
@@ -321,7 +321,7 @@ where
     if let Some(row) = existing {
         let create_time = row.create_time.clone();
         let mut active_model: speaker_entity::ActiveModel = row.into();
-        active_model.name = Set(definition.name.trim().to_string());
+        active_model.speaker_name = Set(definition.name.trim().to_string());
         active_model.samples = Set(0);
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.description = Set(definition.description.trim().to_string());
@@ -334,7 +334,7 @@ where
     } else {
         speaker_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
-            name: Set(definition.name.trim().to_string()),
+            speaker_name: Set(definition.name.trim().to_string()),
             samples: Set(0),
             base_model: Set(definition.base_model.trim().to_string()),
             description: Set(definition.description.trim().to_string()),

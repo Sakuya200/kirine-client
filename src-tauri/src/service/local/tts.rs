@@ -62,7 +62,7 @@ impl LocalService {
                     "未找到与当前基础模型匹配的可用说话人",
                 )
             })?;
-            speaker.name.clone()
+            speaker.speaker_name.clone()
         } else {
             "自动选择".to_string()
         };

@@ -181,7 +181,7 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
     .map(speaker => ({
       value: speaker.id,
-      label: speaker.name,
+      label: speaker.speakerName,
       description: speaker.description || '该说话人暂无备注。'
     }))
 ]);

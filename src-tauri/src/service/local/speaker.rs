@@ -32,14 +32,14 @@ impl LocalService {
         payload: CreateSpeakerPayload,
     ) -> Result<SpeakerInfo> {
         let create_time = now_string()?;
-        let name = payload.name.trim();
+        let name = payload.speaker_name.trim();
         let description = payload.description.trim();
         let status = payload.status;
         let source = payload.source;
 
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
-            name: Set(name.to_string()),
+            speaker_name: Set(name.to_string()),
             samples: Set(payload.samples as i64),
             base_model: Set(payload.base_model.as_str().to_string()),
             description: Set(description.to_string()),
@@ -72,7 +72,7 @@ impl LocalService {
                 .filter(|value| !value.is_empty())
             {
                 let pattern = format!("%{keyword}%");
-                condition = condition.add(speaker_entity::Column::Name.like(&pattern));
+                condition = condition.add(speaker_entity::Column::SpeakerName.like(&pattern));
             }
             if let Some(status) = filter.status {
                 condition = condition.add(speaker_entity::Column::Status.eq(status.as_str()));
@@ -147,7 +147,7 @@ impl LocalService {
         payload: ImportModelAsSpeakerPayload,
     ) -> Result<SpeakerInfo> {
         let create_time = now_string()?;
-        let name = payload.name.trim();
+        let name = payload.speaker_name.trim();
         let description = payload.description.trim();
         let base_model = payload.base_model.trim();
         let model_version = payload.model_version.trim();
@@ -176,7 +176,7 @@ impl LocalService {
 
         let inserted = speaker_entity::ActiveModel {
             id: NotSet,
-            name: Set(name.to_string()),
+            speaker_name: Set(name.to_string()),
             samples: Set(0),
             base_model: Set(base_model.to_string()),
             description: Set(description.to_string()),
@@ -217,7 +217,7 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标说话人"))?;
 
         let mut active_model: speaker_entity::ActiveModel = speaker.into();
-        active_model.name = Set(payload.name.trim().to_string());
+        active_model.speaker_name = Set(payload.speaker_name.trim().to_string());
         active_model.description = Set(payload.description.trim().to_string());
         active_model.modify_time = Set(modify_time);
 
@@ -326,7 +326,7 @@ struct SpeakerSampleSum {
 fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
     Ok(SpeakerInfo {
         id: model.id,
-        name: model.name,
+        speaker_name: model.speaker_name,
         samples: model.samples as u32,
         base_model: model.base_model,
         create_time: model.create_time,

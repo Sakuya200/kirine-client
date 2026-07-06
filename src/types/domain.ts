@@ -11,7 +11,7 @@ export type SpeakerSource = 'local' | 'preset' | 'remote';
 
 export interface SpeakerProfile {
   id: number;
-  name: string;
+  speakerName: string;
   samples: number;
   baseModel: BaseModel;
   createTime: string;

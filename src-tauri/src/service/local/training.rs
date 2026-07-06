@@ -141,7 +141,7 @@ impl LocalService {
         let txn = self.orm().begin().await?;
         let speaker = speaker_entity::ActiveModel {
             id: NotSet,
-            name: Set(speaker_name.clone()),
+            speaker_name: Set(speaker_name.clone()),
             samples: Set(0),
             base_model: Set(base_model.clone()),
             description: Set(speaker_description),

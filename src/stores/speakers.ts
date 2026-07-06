@@ -8,7 +8,7 @@ import { useUiStore } from '@/stores/ui';
 import type { BaseModel, SpeakerFilter, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 
 interface CreateSpeakerPayload {
-  name: string;
+  speakerName: string;
   samples: number;
   baseModel: BaseModel;
   description: string;
@@ -18,7 +18,7 @@ interface CreateSpeakerPayload {
 
 interface UpdateSpeakerPayload {
   id: number;
-  name: string;
+  speakerName: string;
   description: string;
 }
 
@@ -26,7 +26,7 @@ interface ImportSpeakerPayload {
   baseModel: BaseModel;
   modelVersion: string;
   sourceModelDirPath: string;
-  name: string;
+  speakerName: string;
   description: string;
 }
 
@@ -43,7 +43,7 @@ const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile => {
 
   return {
     id: typeof item.id === 'number' ? item.id : 0,
-    name: item.name?.trim() || '',
+    speakerName: item.speakerName?.trim() || '',
     samples: typeof item.samples === 'number' ? item.samples : 0,
     baseModel: typeof item.baseModel === 'string' ? item.baseModel.trim() : '',
     createTime: item.createTime ?? '',
@@ -183,7 +183,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       const created = normalizeSpeaker(
         await invoke<SpeakerProfile>('create_speaker_info', {
           payload: {
-            name: payload.name,
+            name: payload.speakerName,
             samples: payload.samples,
             baseModel: payload.baseModel,
             description: payload.description,
@@ -193,7 +193,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
         })
       );
 
-      uiStore.notifySuccess(`已新增说话人“${created.name}”。`, 3200);
+      uiStore.notifySuccess(`已新增说话人“${created.speakerName}”。`, 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
@@ -208,13 +208,13 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('update_speaker_info', {
           payload: {
             id: payload.id,
-            name: payload.name,
+            name: payload.speakerName,
             description: payload.description
           }
         })
       );
 
-      uiStore.notifySuccess(`已更新说话人“${updated.name}”的信息。`, 3200);
+      uiStore.notifySuccess(`已更新说话人“${updated.speakerName}”的信息。`, 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
@@ -231,14 +231,14 @@ export const useSpeakerStore = defineStore('speakers', () => {
             baseModel: payload.baseModel,
             modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
-            name: payload.name,
+            name: payload.speakerName,
             description: payload.description
           }
         })
       );
 
       speakers.value = [imported, ...speakers.value.filter(item => item.id !== imported.id)];
-      uiStore.notifySuccess(`已导入说话人“${imported.name}”。`, 3200);
+      uiStore.notifySuccess(`已导入说话人“${imported.speakerName}”。`, 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
@@ -249,7 +249,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
 
   const removeSpeaker = async (speakerId: number) => {
     const speaker = speakers.value.find(item => item.id === speakerId);
-    const speakerName = speaker?.name ?? '';
+    const speakerName = speaker?.speakerName ?? '';
 
     try {
       const deleted = await invoke<boolean>('delete_speaker_info', { speakerId });

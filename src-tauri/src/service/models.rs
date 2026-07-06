@@ -365,7 +365,7 @@ impl FromStr for ModelTrainingFileKind {
 #[serde(rename_all = "camelCase")]
 pub struct SpeakerInfo {
     pub id: i64,
-    pub name: String,
+    pub speaker_name: String,
     pub samples: u32,
     pub base_model: BaseModel,
     pub create_time: String,
@@ -378,7 +378,7 @@ pub struct SpeakerInfo {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSpeakerPayload {
-    pub name: String,
+    pub speaker_name: String,
     pub samples: u32,
     pub base_model: BaseModel,
     pub description: String,
@@ -390,7 +390,7 @@ pub struct CreateSpeakerPayload {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSpeakerPayload {
     pub id: i64,
-    pub name: String,
+    pub speaker_name: String,
     pub description: String,
 }
 
@@ -400,7 +400,7 @@ pub struct ImportModelAsSpeakerPayload {
     pub base_model: BaseModel,
     pub model_version: String,
     pub source_model_dir_path: String,
-    pub name: String,
+    pub speaker_name: String,
     pub description: String,
 }
 
