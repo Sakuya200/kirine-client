@@ -1,5 +1,9 @@
-use crate::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    service::models::{Page, PageRequest as ServicePageRequest, SpeakerInfo, SpeakerPageResult},
+    Result,
+};
 
 const MAX_CLIENT_ERROR_MESSAGE_CHARS: usize = 420;
 
@@ -59,6 +63,89 @@ impl<T> CommonResponse<T> {
         match res {
             Ok(data) => CommonResponse::success(Some(data)),
             Err(e) => CommonResponse::error(500, e.to_string()),
+        }
+    }
+}
+
+/// 分页请求结构体（client 层统一规范，与 `service::models::PageRequest` 字段对齐）。
+/// page: 页码
+/// page_size: 每页条数
+/// filter: 过滤条件
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRequest<T> {
+    pub page: u32,
+    pub page_size: u32,
+    pub filter: Option<T>,
+}
+
+/// 通用分页响应结构体（client 层统一规范，与 `service::models::Page` 字段对齐）。
+/// items: 当前页数据
+/// total: 总条数
+/// page: 当前页码
+/// page_size: 每页条数
+/// total_pages: 总页数
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PageResponse<T> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
+}
+
+/// 说话人分页响应（附带统计，供页面统计卡使用），与 `service::models::SpeakerPageResult` 对齐。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerPageResponse {
+    pub items: Vec<SpeakerInfo>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
+    pub ready_count: u64,
+    pub training_count: u64,
+    pub disabled_count: u64,
+    pub total_samples: u64,
+}
+
+// ---- 与 service 层领域类型的边界转换 ----
+
+impl<T> From<ServicePageRequest<T>> for PageRequest<T> {
+    fn from(req: ServicePageRequest<T>) -> Self {
+        Self {
+            page: req.page,
+            page_size: req.page_size,
+            filter: req.filter,
+        }
+    }
+}
+
+impl<T> From<PageResponse<T>> for Page<T> {
+    fn from(resp: PageResponse<T>) -> Self {
+        Self {
+            items: resp.items,
+            total: resp.total,
+            page: resp.page,
+            page_size: resp.page_size,
+            total_pages: resp.total_pages,
+        }
+    }
+}
+
+impl From<SpeakerPageResponse> for SpeakerPageResult {
+    fn from(resp: SpeakerPageResponse) -> Self {
+        Self {
+            items: resp.items,
+            total: resp.total,
+            page: resp.page,
+            page_size: resp.page_size,
+            total_pages: resp.total_pages,
+            ready_count: resp.ready_count,
+            training_count: resp.training_count,
+            disabled_count: resp.disabled_count,
+            total_samples: resp.total_samples,
         }
     }
 }

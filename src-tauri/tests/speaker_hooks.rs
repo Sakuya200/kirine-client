@@ -19,7 +19,7 @@ async fn create_speaker_info_persists_row_and_returns_id() -> Result<()> {
     let created = harness
         .service()
         .create_speaker_info(CreateSpeakerPayload {
-            name: "Alice".to_string(),
+            speaker_name: "Alice".to_string(),
             samples: 5,
             base_model: "qwen3_tts".to_string(),
             description: "test speaker".to_string(),
@@ -29,7 +29,7 @@ async fn create_speaker_info_persists_row_and_returns_id() -> Result<()> {
         .await?;
 
     assert!(created.id > 0);
-    assert_eq!(created.name, "Alice");
+    assert_eq!(created.speaker_name, "Alice");
     assert_eq!(created.samples, 5);
     assert_eq!(created.status, SpeakerStatus::Ready);
     assert_eq!(created.source, SpeakerSource::Local);
@@ -51,7 +51,7 @@ async fn list_speaker_infos_pagination_filter_and_stats() -> Result<()> {
         harness
             .service()
             .create_speaker_info(CreateSpeakerPayload {
-                name: format!("Ready-{i}"),
+                speaker_name: format!("Ready-{i}"),
                 samples: 2,
                 base_model: "qwen3_tts".to_string(),
                 description: "".to_string(),
@@ -63,7 +63,7 @@ async fn list_speaker_infos_pagination_filter_and_stats() -> Result<()> {
     harness
         .service()
         .create_speaker_info(CreateSpeakerPayload {
-            name: "Training-One".to_string(),
+            speaker_name: "Training-One".to_string(),
             samples: 0,
             base_model: "qwen3_tts".to_string(),
             description: "".to_string(),
@@ -84,10 +84,7 @@ async fn list_speaker_infos_pagination_filter_and_stats() -> Result<()> {
     assert_eq!(paged.page_size, 2);
     assert!(paged.total >= 4);
     assert_eq!(paged.items.len(), 2);
-    assert_eq!(
-        paged.total_pages,
-        ((paged.total as u32) + 2 - 1) / 2
-    );
+    assert_eq!(paged.total_pages, ((paged.total as u32) + 2 - 1) / 2);
     // 统计字段
     assert!(paged.ready_count >= 3);
     assert!(paged.training_count >= 1);
@@ -104,7 +101,10 @@ async fn list_speaker_infos_pagination_filter_and_stats() -> Result<()> {
             }),
         })
         .await?;
-    assert!(filtered.items.iter().all(|s| s.name.contains("Training")));
+    assert!(filtered
+        .items
+        .iter()
+        .all(|s| s.speaker_name.contains("Training")));
     assert_eq!(filtered.items.len(), 1);
 
     harness.shutdown().await
@@ -126,7 +126,7 @@ async fn import_model_as_speaker_copies_into_managed_dir() -> Result<()> {
             base_model: "qwen3_tts".to_string(),
             model_version: "1.7B".to_string(),
             source_model_dir_path: source_dir.to_string_lossy().to_string(),
-            name: "Imported".to_string(),
+            speaker_name: "Imported".to_string(),
             description: "from external dir".to_string(),
         })
         .await?;
@@ -152,14 +152,16 @@ async fn update_speaker_info_changes_name_and_description() -> Result<()> {
 
     let updated = harness
         .service()
-        .update_speaker_info(kirine_client_lib::test_support::models::UpdateSpeakerPayload {
-            id: created.id,
-            name: "Renamed".to_string(),
-            description: "new desc".to_string(),
-        })
+        .update_speaker_info(
+            kirine_client_lib::test_support::models::UpdateSpeakerPayload {
+                id: created.id,
+                speaker_name: "Renamed".to_string(),
+                description: "new desc".to_string(),
+            },
+        )
         .await?;
 
-    assert_eq!(updated.name, "Renamed");
+    assert_eq!(updated.speaker_name, "Renamed");
     assert_eq!(updated.description, "new desc");
     // status / source / samples / base_model 保留
     assert_eq!(updated.status, SpeakerStatus::Ready);
@@ -179,7 +181,7 @@ async fn delete_speaker_info_soft_deletes_and_hides_from_list() -> Result<()> {
     let after = harness.list_speakers().await?;
     assert!(after.iter().all(|s| s.id != created.id));
 
-    // 重复删除已软删的行 → 返回 false
+    // 重复删除已软删的行 -> 返回 false
     let again = harness.delete_speaker(created.id).await?;
     assert!(!again);
 

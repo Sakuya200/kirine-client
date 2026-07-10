@@ -375,7 +375,7 @@ pub struct SpeakerInfo {
     pub source: SpeakerSource,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSpeakerPayload {
     pub speaker_name: String,
@@ -386,7 +386,7 @@ pub struct CreateSpeakerPayload {
     pub source: SpeakerSource,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSpeakerPayload {
     pub id: i64,
@@ -394,7 +394,7 @@ pub struct UpdateSpeakerPayload {
     pub description: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportModelAsSpeakerPayload {
     pub base_model: BaseModel,
@@ -404,7 +404,7 @@ pub struct ImportModelAsSpeakerPayload {
     pub description: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTaskStatusPayload {
     pub task_id: i64,
@@ -533,7 +533,7 @@ pub struct HistoryRecordSummary {
     pub modify_time: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {
     pub speaker_id: Option<i64>,
@@ -614,7 +614,7 @@ pub struct ModelTrainingSampleInput {
     pub secondary_file: Option<ModelTrainingFileInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
@@ -627,7 +627,7 @@ pub struct CreateModelTrainingTaskPayload {
     pub samples: Vec<ModelTrainingSampleInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceCloneTaskPayload {
     pub base_model: BaseModel,
@@ -643,7 +643,7 @@ pub struct CreateVoiceCloneTaskPayload {
     pub model_params: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceDesignTaskPayload {
     pub base_model: BaseModel,
