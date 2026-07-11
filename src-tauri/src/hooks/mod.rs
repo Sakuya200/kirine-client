@@ -34,6 +34,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::cancel_history_task,
         task_history::create_voice_clone_task,
         task_history::create_voice_design_task,
+        streaming::stream_audio_placeholder,
         settings::get_settings_config,
         settings::get_ui_config,
         settings::save_settings_config

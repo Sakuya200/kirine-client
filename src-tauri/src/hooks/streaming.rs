@@ -83,3 +83,35 @@ pub fn build_sine_wave_stream_events(
     events.push(AudioStreamEvent::Finished);
     events
 }
+
+const SINE_WAVE_DURATION_SECS: f32 = 2.0;
+const SINE_WAVE_FREQ: f32 = 440.0;
+const SINE_WAVE_SAMPLE_RATE: u32 = 44100;
+const CHUNK_SAMPLE_COUNT: usize = 4096;
+const INTER_CHUNK_DELAY_MS: u64 = 50;
+
+/// 流式音频占位 hook。生成合成正弦波 WAV，分块经 Channel 下发。
+/// 不对接适配器层；`task_id` / `context_id` 仅日志记录。
+#[tauri::command]
+pub async fn stream_audio_placeholder(
+    task_id: i64,
+    context_id: String,
+    on_event: tauri::ipc::Channel<AudioStreamEvent>,
+) -> std::result::Result<(), String> {
+    tracing::info!(
+        task_id,
+        %context_id,
+        "stream_audio_placeholder invoked (placeholder)"
+    );
+    let events = build_sine_wave_stream_events(
+        SINE_WAVE_DURATION_SECS,
+        SINE_WAVE_FREQ,
+        SINE_WAVE_SAMPLE_RATE,
+        CHUNK_SAMPLE_COUNT,
+    );
+    for event in events {
+        on_event.send(event).map_err(|e| e.to_string())?;
+        tokio::time::sleep(std::time::Duration::from_millis(INTER_CHUNK_DELAY_MS)).await;
+    }
+    Ok(())
+}
