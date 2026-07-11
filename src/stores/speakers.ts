@@ -183,7 +183,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       const created = normalizeSpeaker(
         await invoke<SpeakerProfile>('create_speaker_info', {
           payload: {
-            name: payload.speakerName,
+            speakerName: payload.speakerName,
             samples: payload.samples,
             baseModel: payload.baseModel,
             description: payload.description,
@@ -208,7 +208,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
         await invoke<SpeakerProfile>('update_speaker_info', {
           payload: {
             id: payload.id,
-            name: payload.speakerName,
+            speakerName: payload.speakerName,
             description: payload.description
           }
         })
@@ -231,7 +231,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
             baseModel: payload.baseModel,
             modelVersion: payload.modelVersion,
             sourceModelDirPath: payload.sourceModelDirPath,
-            name: payload.speakerName,
+            speakerName: payload.speakerName,
             description: payload.description
           }
         })
