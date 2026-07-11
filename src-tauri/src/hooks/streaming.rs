@@ -1,0 +1,85 @@
+/// 流式音频事件协议。前端通过 `Channel<AudioStreamEvent>` 订阅。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AudioStreamEvent {
+    Started,
+    Chunk { bytes: Vec<u8> },
+    Finished,
+    Error { message: String },
+}
+
+/// 生成正弦波 PCM WAV 字节（44100Hz / 16-bit / mono）。
+pub fn generate_sine_wave_wav(duration_secs: f32, freq: f32, sample_rate: u32) -> Vec<u8> {
+    let num_samples = (duration_secs * sample_rate as f32) as usize;
+    let data_size = num_samples * 2;
+    let byte_rate = sample_rate * 2;
+    let mut buf = Vec::with_capacity(44 + data_size);
+
+    // RIFF header
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&(36 + data_size as u32).to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+
+    // fmt chunk
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes()); // audio_format = PCM
+    buf.extend_from_slice(&1u16.to_le_bytes()); // mono
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&2u16.to_le_bytes()); // block_align
+    buf.extend_from_slice(&16u16.to_le_bytes()); // bits_per_sample
+
+    // data chunk
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&(data_size as u32).to_le_bytes());
+
+    // PCM samples (sine wave, amplitude 0.3 防削波)
+    for i in 0..num_samples {
+        let t = i as f32 / sample_rate as f32;
+        let sample = (t * freq * 2.0 * std::f32::consts::PI).sin() * 0.3;
+        let value = (sample * i16::MAX as f32) as i16;
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    buf
+}
+
+/// 构建流式事件序列：`[Started, Chunk(header+pcm1), Chunk(pcm2), ..., Finished]`。
+pub fn build_sine_wave_stream_events(
+    duration_secs: f32,
+    freq: f32,
+    sample_rate: u32,
+    chunk_sample_count: usize,
+) -> Vec<AudioStreamEvent> {
+    let wav = generate_sine_wave_wav(duration_secs, freq, sample_rate);
+    let header_len = 44usize;
+    let pcm = &wav[header_len..];
+    let bytes_per_sample = 2usize;
+    let chunk_byte_len = chunk_sample_count * bytes_per_sample;
+
+    let mut events = Vec::new();
+    events.push(AudioStreamEvent::Started);
+
+    let mut cursor = 0usize;
+    let mut first = true;
+    while cursor < pcm.len() {
+        let end = (cursor + chunk_byte_len).min(pcm.len());
+        if first {
+            // 首 chunk：WAV 头 + 首段 PCM
+            let mut chunk_buf = Vec::with_capacity(header_len + (end - cursor));
+            chunk_buf.extend_from_slice(&wav[..header_len]);
+            chunk_buf.extend_from_slice(&pcm[cursor..end]);
+            events.push(AudioStreamEvent::Chunk { bytes: chunk_buf });
+            first = false;
+        } else {
+            events.push(AudioStreamEvent::Chunk {
+                bytes: pcm[cursor..end].to_vec(),
+            });
+        }
+        cursor = end;
+    }
+
+    events.push(AudioStreamEvent::Finished);
+    events
+}

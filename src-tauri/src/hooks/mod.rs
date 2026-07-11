@@ -4,6 +4,7 @@ mod model_info;
 mod settings;
 mod speaker_info;
 mod task_history;
+pub(crate) mod streaming;
 
 pub use settings::{EnvConfigState, UiConfigState};
 
