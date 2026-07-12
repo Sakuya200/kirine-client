@@ -91,12 +91,14 @@ pub async fn stream_audio_placeholder(
         CHUNK_SAMPLE_COUNT,
     );
     for event in events {
-        on_event.emit(event).map_err(|e| e.to_string())?;
+        on_event.send(event).map_err(|e| e.to_string())?;
         tokio::time::sleep(std::time::Duration::from_millis(INTER_CHUNK_DELAY_MS)).await;
     }
     Ok(())
 }
 ```
+
+> 注：Tauri 2 `ipc::Channel` 的下发方法为 `send`（非 `emit`）。`AudioStreamEvent` 实现 `Serialize`，满足 `IpcResponse` trait bound，`send` 返回 `tauri::Result<()>`，配合 `.map_err(|e| e.to_string())` 适配命令的 `Result<(), String>` 返回类型。
 
 - 不接收 `State<'_, ServiceState>`——不依赖服务层。
 - `context_id` 类型为 `String`，纯占位，仅日志记录。
@@ -226,7 +228,7 @@ interface Props {
 
 #### 行为
 
-- Stream 模式：`onMounted` + `watch(() => [props.taskId, props.contextId])` → 调 `startStreaming(taskId, contextId)`（仅当 `taskId != null` 时触发）。
+- Stream 模式：`watch(() => [props.taskId, props.contextId], { immediate: true })` → 调 `startStreaming(taskId, contextId)`（仅当 `taskId != null` 时触发；`immediate: true` 在 setup 期同步首次触发，等效于 `onMounted` 但无需额外导入）。
 - Path 模式：`watch(() => props.audioPath)` → 调 `setAudioPath(path)`。
 
 #### UI（严格契合项目风格）
