@@ -7,6 +7,7 @@ pub mod training;
 pub mod tts;
 pub mod voice_clone;
 pub mod voice_design;
+pub mod streaming;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
