@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ChatBubbleLeftRightIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   ClockIcon,
@@ -34,6 +35,7 @@ const navIcons: Record<string, Component> = {
   models: ServerStackIcon,
   speakers: UserGroupIcon,
   history: ClockIcon,
+  'streaming-speech': ChatBubbleLeftRightIcon,
   settings: Cog6ToothIcon
 };
 
