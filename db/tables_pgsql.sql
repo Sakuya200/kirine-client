@@ -146,6 +146,27 @@ create table if not exists voice_design_tasks
     deleted           smallint    default 0                        not null
 );
 
+CREATE TABLE
+    IF NOT EXISTS streaming_tasks (
+        id BIGSERIAL NOT NULL PRIMARY KEY,
+        history_id BIGINT NOT NULL,
+        base_model VARCHAR NOT NULL,
+        model_version VARCHAR NOT NULL,
+        language VARCHAR NOT NULL,
+        device VARCHAR NOT NULL DEFAULT 'cpu',
+        model_params_json TEXT NOT NULL DEFAULT '{}',
+        context_file_path TEXT NOT NULL,
+        input_cache_file_path TEXT NOT NULL,
+        output_audio_dir TEXT NOT NULL,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        create_time VARCHAR NOT NULL,
+        modify_time VARCHAR NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT fk_streaming_tasks_history FOREIGN KEY (history_id) REFERENCES task_history (id) ON DELETE CASCADE
+    );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_streaming_tasks_history_id ON streaming_tasks (history_id);
+
 create unique index if not exists idx_model_info_base_model
     on model_info (base_model, model_version);
 

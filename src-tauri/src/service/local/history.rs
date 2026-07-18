@@ -1,8 +1,8 @@
 use std::io;
 
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, TransactionTrait,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 
 use crate::{
@@ -67,6 +67,8 @@ impl LocalService {
             HistoryTaskType::ModelTraining => self.load_model_training_detail(history_id).await,
             HistoryTaskType::VoiceClone => self.load_voice_clone_detail(history_id).await,
             HistoryTaskType::VoiceDesign => self.load_voice_design_detail(history_id).await,
+            // 流式语音任务详情加载由后续任务实现（entity/service 尚未引入），此处返回 Null 占位。
+            HistoryTaskType::StreamingSpeech => Ok(serde_json::Value::Null),
         }
     }
 
@@ -199,6 +201,15 @@ impl LocalService {
                     .filter(voice_design_task_entity::Column::Deleted.eq(0))
                     .exec(&tx)
                     .await?;
+            }
+            // streaming_tasks 表已存在但尚无 SeaORM entity（后续任务引入），
+            // 此处用原生 SQL 在同一事务内软删除，保证级联一致性。
+            HistoryTaskType::StreamingSpeech => {
+                tx.execute_unprepared(&format!(
+                    "UPDATE streaming_tasks SET deleted = 1, modify_time = '{}' WHERE history_id = {} AND deleted = 0",
+                    modify_time, history_id
+                ))
+                .await?;
             }
         }
 

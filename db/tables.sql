@@ -144,6 +144,27 @@ CREATE TABLE
         CONSTRAINT fk_voice_design_tasks_history FOREIGN KEY (history_id) REFERENCES task_history (id) ON DELETE CASCADE
     );
 
+CREATE TABLE
+    IF NOT EXISTS streaming_tasks (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        history_id INTEGER NOT NULL,
+        base_model TEXT NOT NULL,
+        model_version TEXT NOT NULL,
+        language TEXT NOT NULL,
+        device TEXT NOT NULL DEFAULT 'cpu',
+        model_params_json TEXT NOT NULL DEFAULT '{}',
+        context_file_path TEXT NOT NULL,
+        input_cache_file_path TEXT NOT NULL,
+        output_audio_dir TEXT NOT NULL,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        create_time TEXT NOT NULL,
+        modify_time TEXT NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT fk_streaming_tasks_history FOREIGN KEY (history_id) REFERENCES task_history (id) ON DELETE CASCADE
+    );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_streaming_tasks_history_id ON streaming_tasks (history_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_info_base_model ON model_info (base_model, model_version);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tts_tasks_history_id ON tts_tasks (history_id);

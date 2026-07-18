@@ -92,6 +92,7 @@ pub enum HistoryTaskType {
     TextToSpeech,
     VoiceClone,
     VoiceDesign,
+    StreamingSpeech,
 }
 
 impl HistoryTaskType {
@@ -101,6 +102,7 @@ impl HistoryTaskType {
             Self::TextToSpeech => "text-to-speech",
             Self::VoiceClone => "voice-clone",
             Self::VoiceDesign => "voice-design",
+            Self::StreamingSpeech => "streaming-speech",
         }
     }
 
@@ -110,6 +112,7 @@ impl HistoryTaskType {
             Self::TextToSpeech => "tts",
             Self::VoiceClone => "voice_clone",
             Self::VoiceDesign => "voice_design",
+            Self::StreamingSpeech => "streaming",
         }
     }
 }
@@ -213,6 +216,7 @@ impl FromStr for HistoryTaskType {
             "text-to-speech" => Ok(Self::TextToSpeech),
             "voice-clone" => Ok(Self::VoiceClone),
             "voice-design" => Ok(Self::VoiceDesign),
+            "streaming-speech" => Ok(Self::StreamingSpeech),
             other => Err(format!("不支持的历史任务类型: {}", other)),
         }
     }

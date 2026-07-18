@@ -18,6 +18,9 @@ const TRAINING_PARAMS_JSON_NAME: &str = "training.params.json";
 const TTS_PARAMS_JSON_NAME: &str = "tts.params.json";
 const VOICE_CLONE_PARAMS_JSON_NAME: &str = "voice_clone.params.json";
 const VOICE_DESIGN_PARAMS_JSON_NAME: &str = "voice_design.params.json";
+const STREAMING_CONTEXT_JSON_NAME: &str = "context.json";
+const STREAMING_INPUT_CACHE_NAME: &str = "input.jsonl";
+const STREAMING_AUDIO_DIR_NAME: &str = "audio";
 const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_audio";
 
 pub(crate) fn task_sample_dir(
@@ -81,6 +84,22 @@ pub(crate) fn voice_design_params_json_path(sample_root: &Path) -> PathBuf {
     sample_root.join(VOICE_DESIGN_PARAMS_JSON_NAME)
 }
 
+pub(crate) fn streaming_context_json_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(STREAMING_CONTEXT_JSON_NAME)
+}
+
+pub(crate) fn streaming_input_cache_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(STREAMING_INPUT_CACHE_NAME)
+}
+
+pub(crate) fn streaming_output_audio_dir(sample_root: &Path) -> PathBuf {
+    sample_root.join(STREAMING_AUDIO_DIR_NAME)
+}
+
+pub(crate) fn streaming_message_audio_path(audio_dir: &Path, context_id: &str) -> PathBuf {
+    audio_dir.join(format!("{}.wav", context_id))
+}
+
 pub(crate) fn training_reference_audio_path(sample_root: &Path, extension: &str) -> PathBuf {
     sample_root.join(format!(
         "{}{}",
@@ -117,5 +136,6 @@ const fn task_log_file_prefix(task_type: HistoryTaskType) -> &'static str {
         HistoryTaskType::TextToSpeech => "tts",
         HistoryTaskType::VoiceClone => "voice-clone",
         HistoryTaskType::VoiceDesign => "voice-design",
+        HistoryTaskType::StreamingSpeech => "streaming",
     }
 }
