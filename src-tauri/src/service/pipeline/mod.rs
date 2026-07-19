@@ -63,6 +63,11 @@ pub(crate) struct VoiceDesignPipelineRequest {
     pub task_id: i64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StreamingPipelineRequest {
+    pub task_id: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CommonRuntimeOptions {
     device: HardwareType,

@@ -78,3 +78,31 @@ fn locate_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     let idx = args.iter().position(|a| a == flag)?;
     args.get(idx + 1).map(String::as_str)
 }
+
+#[test]
+fn streaming_script_args_match_begin_llm_task_contract() {
+    // 流式会话同样经 `begin_llm_task` 包装器拉起 streaming.py，args 形状与其它流水线一致。
+    let script = Path::new("/src-model/gpt_sovits_cpufast/streaming.py");
+    let params = Path::new("/d/streaming_1/streaming.params.json");
+    let task_log = Path::new("/log/task/streaming-1.log");
+
+    let args = build_llm_task_script_args(script, params, task_log, "gpt_sovits_cpufast");
+
+    // 与既有用例一致：用 to_string_lossy 比对，避免 Windows 路径分隔符差异。
+    let expected = [
+        "--base-model",
+        "gpt_sovits_cpufast",
+        "--script-path",
+        &script.to_string_lossy().to_string(),
+        "--params-file",
+        &params.to_string_lossy().to_string(),
+        "--log-path",
+        &task_log.to_string_lossy().to_string(),
+        "--task-log-file",
+        &task_log.to_string_lossy().to_string(),
+    ];
+    assert_eq!(args.len(), expected.len());
+    for (i, want) in expected.iter().enumerate() {
+        assert_eq!(&args[i], want, "streaming arg[{i}] mismatch");
+    }
+}

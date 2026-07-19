@@ -661,7 +661,7 @@ pub struct CreateVoiceDesignTaskPayload {
     pub model_params: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamingSpeakerInput {
     pub name: String,
