@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 
 import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
+import type { StreamingSpeechTaskResult } from '@/types/domain';
 import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerConfig } from '@/types/streaming';
 
 /**
@@ -25,15 +27,15 @@ export interface StreamingSpeakerInput {
 
 let speakerSeed = 0;
 let messageSeed = 0;
-let taskSeed = 0;
 const nextSpeakerId = () => `spk-${++speakerSeed}`;
 const nextMessageId = () => `msg-${++messageSeed}`;
-const nextTaskId = () => ++taskSeed;
 
 export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const speakers = ref<StreamingSpeakerConfig[]>([]);
   const messages = ref<StreamingChatMessage[]>([]);
   const isDrawerOpen = ref(false);
+  const activeTaskId = ref<number | null>(null);
+  const isStartingSession = ref(false);
   const sessionConfig = reactive<StreamingSessionConfig>({
     baseModel: '',
     modelVersion: '',
@@ -100,25 +102,63 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   };
 
   /**
-   * 发送一条聊天消息：push user 消息 + 占位 assistant 消息。
+   * 发送一条聊天消息：首条消息时 invoke create_streaming_speech_task 拿 taskId 回填，
+   * 随后 push user 消息 + 占位 assistant 消息。
    * 实际流式接收由渲染出的 StreamableAudioPlayer(mode='stream') 在 watch immediate 时
-   * 自动调 startStreaming(taskId, contextId) 完成，符合既有组件契约；此处不 invoke。
+   * 自动调 startStreaming(taskId, contextId, speakerName, synthText) 完成。
    * 提交后端的 payload 不含时间字段，任务创建时间由后端执行前生成。
    */
-  const sendMessage = (text: string, speakerId: string | null) => {
+  const sendMessage = async (text: string, speakerId: string | null) => {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       return;
     }
-
     const speaker = getSpeaker(speakerId);
+
+    // 首条消息：建会话拿 taskId
+    if (activeTaskId.value === null) {
+      if (speakers.value.length === 0) {
+        return;
+      }
+      isStartingSession.value = true;
+      try {
+        const result = await invoke<StreamingSpeechTaskResult>('create_streaming_speech_task', {
+          payload: {
+            baseModel: sessionConfig.baseModel,
+            modelVersion: sessionConfig.modelVersion,
+            device: sessionConfig.device,
+            language: sessionConfig.language,
+            modelParams: sessionConfig.modelParams,
+            speakers: speakers.value.map(s => ({
+              name: s.name,
+              baseModel: s.baseModel,
+              modelVersion: s.modelVersion,
+              refAudioPath: s.refAudioPath,
+              refAudioName: s.refAudioName,
+              refText: s.refText,
+              description: s.description
+            }))
+          }
+        });
+        activeTaskId.value = result.taskId;
+      } finally {
+        isStartingSession.value = false;
+      }
+    }
+
+    const taskId = activeTaskId.value;
+    if (taskId === null) {
+      return;
+    }
+
     const userMessage: StreamingChatMessage = {
       id: nextMessageId(),
       role: 'user',
       text: trimmed,
+      synthText: trimmed,
       speakerId,
       speakerName: speaker?.name,
-      taskId: 0,
+      taskId,
       contextId: '',
       status: 'completed'
     };
@@ -129,23 +169,40 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       id: assistantId,
       role: 'assistant',
       text: '',
+      synthText: trimmed,
       speakerId,
       speakerName: speaker?.name,
-      taskId: nextTaskId(),
+      taskId,
       contextId: assistantId,
       status: 'streaming'
     };
     messages.value = [...messages.value, assistantMessage];
   };
 
+  const terminateSession = async () => {
+    const taskId = activeTaskId.value;
+    if (taskId === null) {
+      return;
+    }
+    try {
+      await invoke('cancel_streaming_task', { taskId });
+    } finally {
+      activeTaskId.value = null;
+      messages.value = messages.value.map(m => (m.status === 'streaming' ? { ...m, status: 'error' } : m));
+    }
+  };
+
   const clearMessages = () => {
     messages.value = [];
+    activeTaskId.value = null;
   };
 
   return {
     speakers,
     messages,
     isDrawerOpen,
+    activeTaskId,
+    isStartingSession,
     sessionConfig,
     speakerOptions,
     getSpeaker,
@@ -157,6 +214,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     toggleDrawer,
     setSessionConfig,
     sendMessage,
+    terminateSession,
     clearMessages
   };
 });

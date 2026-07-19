@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Cog6ToothIcon, PaperAirplaneIcon, TrashIcon } from '@heroicons/vue/24/outline';
+import { Cog6ToothIcon, PaperAirplaneIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -91,6 +91,15 @@ onMounted(async () => {
         · 回车发送，Shift+Enter 换行
       </p>
       <div class="flex gap-2">
+        <BaseButton
+          tone="ghost"
+          size="sm"
+          :disabled="store.activeTaskId === null"
+          @click="store.terminateSession"
+        >
+          <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
+          <span>终止会话</span>
+        </BaseButton>
         <BaseButton tone="ghost" size="sm" :disabled="store.messages.length === 0" @click="clearMessages">
           <TrashIcon class="h-4 w-4" aria-hidden="true" />
           <span>清空对话</span>
@@ -120,7 +129,13 @@ onMounted(async () => {
               </div>
               <div v-else class="rounded-2xl rounded-bl-md border border-brand-200 bg-white/95 px-4 py-3 shadow-soft">
                 <p class="mb-2 text-xs text-stone-500">{{ message.speakerName ? `说话人：${message.speakerName}` : '流式生成中…' }}</p>
-                <StreamableAudioPlayer mode="stream" :task-id="message.taskId" :context-id="message.contextId" />
+                <StreamableAudioPlayer
+                  mode="stream"
+                  :task-id="message.taskId"
+                  :context-id="message.contextId"
+                  :speaker-name="message.speakerName ?? ''"
+                  :synth-text="message.synthText"
+                />
               </div>
             </div>
           </div>

@@ -148,7 +148,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     element.play().catch(() => options.onPlaybackError?.());
   };
 
-  const startStreaming = async (taskId: number, contextId: string) => {
+  const startStreaming = async (taskId: number, contextId: string, speakerName: string, text: string) => {
     accumulated = [];
     hasData.value = false;
     streamComplete.value = false;
@@ -180,7 +180,10 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     };
 
     try {
-      await invoke('stream_audio_placeholder', { taskId, contextId, onEvent: channel });
+      await invoke('send_streaming_message', {
+        payload: { taskId, contextId, speakerName, text },
+        onEvent: channel
+      });
     } catch (error) {
       isStreaming.value = false;
       options.onStreamError?.(error instanceof Error ? error.message : String(error));

@@ -37,6 +37,7 @@ export interface StreamingChatMessage {
   id: string;
   role: StreamingMessageRole;
   text: string;
+  synthText: string; // 该轮待合成的文本（assistant 消息携带，传给 send_streaming_message）
   speakerId: string | null;
   speakerName?: string;
   taskId: number;

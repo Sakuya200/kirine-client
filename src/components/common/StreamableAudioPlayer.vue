@@ -11,12 +11,16 @@ interface Props {
   taskId?: number;
   contextId?: string;
   audioPath?: string;
+  speakerName?: string;
+  synthText?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   taskId: undefined,
   contextId: '',
   audioPath: undefined,
+  speakerName: '',
+  synthText: '',
 });
 
 const uiStore = useUiStore();
@@ -42,10 +46,10 @@ const actionLabel = computed(() => {
 
 if (props.mode === 'stream') {
   watch(
-    () => [props.taskId, props.contextId] as const,
-    ([taskId, contextId]) => {
+    () => [props.taskId, props.contextId, props.speakerName, props.synthText] as const,
+    ([taskId, contextId, speakerName, synthText]) => {
       if (taskId != null) {
-        void startStreaming(taskId, contextId);
+        void startStreaming(taskId, contextId, speakerName, synthText);
       }
     },
     { immediate: true },

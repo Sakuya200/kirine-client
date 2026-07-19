@@ -106,6 +106,41 @@ export interface VoiceDesignTaskDetail {
   outputFilePath: string;
 }
 
+export interface StreamingSpeakerPayload {
+  name: string;
+  baseModel: BaseModel;
+  modelVersion?: string;
+  refAudioPath: string;
+  refAudioName: string;
+  refText: string;
+  description?: string;
+}
+
+export interface CreateStreamingSpeechTaskPayload {
+  baseModel: BaseModel;
+  modelVersion: string;
+  device: HardwareType;
+  language: AppLanguage;
+  modelParams: Record<string, unknown>;
+  speakers: StreamingSpeakerPayload[];
+}
+
+export interface SendStreamingMessagePayload {
+  taskId: number;
+  contextId: string;
+  speakerName: string;
+  text: string;
+}
+
+export interface StreamingSpeechTaskResult {
+  taskId: number;
+  contextFilePath: string;
+  inputCacheFilePath: string;
+  outputAudioDir: string;
+  status: TaskStatus;
+  createdAt: string;
+}
+
 export interface ModelInfo {
   id: number;
   baseModel: BaseModel;
