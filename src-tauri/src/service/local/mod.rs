@@ -8,6 +8,7 @@ mod training;
 mod tts;
 mod voice_clone;
 mod voice_design;
+mod streaming;
 
 use std::{
     collections::HashMap,
@@ -32,14 +33,15 @@ use crate::{
     migration,
     service::{
         models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
-            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
-            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
-            VoiceDesignTaskResult,
+            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
+            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+            ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
+            ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload,
+            SpeakerFilter, SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult,
+            TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
+            VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         pipeline::{
             resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
@@ -55,6 +57,8 @@ struct ActiveTaskControl {
     task_type: HistoryTaskType,
     cancel_tx: watch::Sender<bool>,
     _cancel_rx_guard: watch::Receiver<bool>,
+    streaming_extra:
+        Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +204,25 @@ impl Service for LocalService {
         payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult> {
         self.create_voice_design_task_impl(payload).await
+    }
+
+    async fn create_streaming_speech_task(
+        &self,
+        payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult> {
+        self.create_streaming_speech_task_impl(payload).await
+    }
+
+    async fn send_streaming_message(
+        &self,
+        payload: SendStreamingMessagePayload,
+        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()> {
+        self.send_streaming_message_impl(payload, on_event).await
+    }
+
+    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool> {
+        self.cancel_streaming_task_impl(task_id).await
     }
 }
 
@@ -432,6 +455,7 @@ impl LocalService {
                     task_type,
                     cancel_tx,
                     _cancel_rx_guard: cancel_rx_guard,
+                    streaming_extra: None,
                 },
             );
         }
@@ -492,6 +516,113 @@ impl LocalService {
         Ok(true)
     }
 
+    /// 注册流式会话的运行句柄：创建 cancel 通道并注入 `StreamingSessionExtra`，
+    /// 供 runner 与 `send_streaming_message` 共享 `message_channels`。
+    pub(crate) fn register_streaming_session(&self, task_id: i64) {
+        let extra = Arc::new(crate::service::pipeline::streaming::StreamingSessionExtra::default());
+        if let Ok(mut controls) = self.active_task_controls.write() {
+            let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+            controls.insert(
+                task_id,
+                ActiveTaskControl {
+                    task_type: HistoryTaskType::StreamingSpeech,
+                    cancel_tx,
+                    _cancel_rx_guard: cancel_rx_guard,
+                    streaming_extra: Some(extra),
+                },
+            );
+        }
+    }
+
+    pub(crate) fn streaming_session_extra(
+        &self,
+        task_id: i64,
+    ) -> Result<Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>> {
+        let controls = self
+            .active_task_controls
+            .read()
+            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+        Ok(controls.get(&task_id).and_then(|c| c.streaming_extra.clone()))
+    }
+
+    /// 从 DB + `context.json` 加载流式会话详情，供 `run_streaming_session` 使用。
+    pub(crate) async fn load_streaming_task_detail(
+        &self,
+        task_id: i64,
+    ) -> Result<crate::service::pipeline::streaming::LoadedStreamingDetail> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use crate::service::local::entity::streaming_task as streaming_task_entity;
+
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(task_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {task_id}"))?;
+
+        let context_path = crate::common::local_paths::resolve_task_path(
+            Path::new(self.data_dir()),
+            &detail.context_file_path,
+        );
+        let ctx: crate::service::pipeline::streaming::StreamingContextJson =
+            serde_json::from_str(&std::fs::read_to_string(context_path)?)?;
+        let speakers: Vec<crate::service::models::StreamingSpeakerInput> = ctx
+            .basic
+            .speakers
+            .into_iter()
+            .map(|s| crate::service::models::StreamingSpeakerInput {
+                name: s.name,
+                base_model: s.base_model,
+                model_version: s.model_version,
+                ref_audio_path: s.ref_audio_path,
+                ref_audio_name: s.ref_audio_name,
+                ref_text: s.ref_text,
+                description: s.description,
+            })
+            .collect();
+
+        Ok(crate::service::pipeline::streaming::LoadedStreamingDetail {
+            base_model: detail.base_model,
+            model_version: detail.model_version,
+            device: detail.device.parse().unwrap_or(HardwareType::Cpu),
+            speakers,
+        })
+    }
+
+    /// 拉起长期存活的流式会话进程（`begin_llm_task` -> streaming.py）。
+    /// cancel 通道由 `register_streaming_session` 预先注册，本方法仅 spawn runner。
+    pub(crate) fn start_streaming_session(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+    ) -> Result<()> {
+        let service = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = async {
+                let detail = service.load_streaming_task_detail(task_id).await?;
+                let extra = service
+                    .streaming_session_extra(task_id)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("streaming session extra not registered for task {task_id}")
+                    })?;
+                crate::service::pipeline::streaming::run_streaming_session(
+                    &service,
+                    crate::service::pipeline::StreamingPipelineRequest { task_id },
+                    &base_model,
+                    detail,
+                    extra,
+                )
+                .await
+            }
+            .await;
+            service.unregister_active_task_control(task_id);
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local streaming session failed");
+            }
+        });
+        Ok(())
+    }
+
     async fn init_db(orm: &DatabaseConnection, data_dir: &Path) -> Result<()> {
         migration::run_local_migrations(orm).await.map_err(|e| {
             anyhow::anyhow!(
@@ -510,6 +641,11 @@ impl LocalService {
                     e
                 )
             })?;
+
+        // 清扫上次应用退出后残留的流式会话 Running 行（长生命周期任务，进程随应用退出而终止）
+        if let Err(err) = streaming::sweep_stale_streaming_sessions_on_orm(orm).await {
+            tracing::warn!(error = %err, "failed to sweep stale streaming sessions during init");
+        }
 
         Ok(())
     }

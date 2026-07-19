@@ -1,7 +1,7 @@
 use std::io;
 
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait,
     PaginatorTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 
@@ -10,16 +10,17 @@ use crate::{
     config::{resolve_base_log_dir, HardwareType},
     service::{
         local::entity::{
-            task_history as task_history_entity, training_task as training_task_entity,
-            tts_task as tts_task_entity, voice_clone_task as voice_clone_task_entity,
+            streaming_task as streaming_task_entity, task_history as task_history_entity,
+            training_task as training_task_entity, tts_task as tts_task_entity,
+            voice_clone_task as voice_clone_task_entity,
             voice_design_task as voice_design_task_entity,
         },
         models::{
             HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
             ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest, TaskStatus,
-            TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
-            VoiceDesignAudioAsset, VoiceDesignTaskDetail,
+            StreamingTaskDetail, TextToSpeechAudioAsset, TextToSpeechFormat,
+            TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
         LocalService,
     },
@@ -67,8 +68,7 @@ impl LocalService {
             HistoryTaskType::ModelTraining => self.load_model_training_detail(history_id).await,
             HistoryTaskType::VoiceClone => self.load_voice_clone_detail(history_id).await,
             HistoryTaskType::VoiceDesign => self.load_voice_design_detail(history_id).await,
-            // 流式语音任务详情加载由后续任务实现（entity/service 尚未引入），此处返回 Null 占位。
-            HistoryTaskType::StreamingSpeech => Ok(serde_json::Value::Null),
+            HistoryTaskType::StreamingSpeech => self.load_streaming_detail(history_id).await,
         }
     }
 
@@ -202,14 +202,17 @@ impl LocalService {
                     .exec(&tx)
                     .await?;
             }
-            // streaming_tasks 表已存在但尚无 SeaORM entity（后续任务引入），
-            // 此处用原生 SQL 在同一事务内软删除，保证级联一致性。
             HistoryTaskType::StreamingSpeech => {
-                tx.execute_unprepared(&format!(
-                    "UPDATE streaming_tasks SET deleted = 1, modify_time = '{}' WHERE history_id = {} AND deleted = 0",
-                    modify_time, history_id
-                ))
-                .await?;
+                streaming_task_entity::Entity::update_many()
+                    .col_expr(streaming_task_entity::Column::Deleted, Expr::value(1))
+                    .col_expr(
+                        streaming_task_entity::Column::ModifyTime,
+                        Expr::value(modify_time.clone()),
+                    )
+                    .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+                    .filter(streaming_task_entity::Column::Deleted.eq(0))
+                    .exec(&tx)
+                    .await?;
             }
         }
 
@@ -588,6 +591,33 @@ impl LocalService {
             char_count: row.char_count as usize,
             file_name: row.file_name,
             output_file_path: row.output_file_path.unwrap_or_default(),
+        })?)
+    }
+
+    pub(crate) async fn load_streaming_detail(
+        &self,
+        history_id: i64,
+    ) -> Result<serde_json::Value> {
+        let row = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到流式语音任务详情"))?;
+
+        Ok(serde_json::to_value(StreamingTaskDetail {
+            base_model: row.base_model,
+            model_version: row.model_version,
+            language: row
+                .language
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            device: parse_hardware_type(&row.device)?,
+            model_params: serde_json::from_str(&row.model_params_json)?,
+            context_file_path: row.context_file_path,
+            input_cache_file_path: row.input_cache_file_path,
+            output_audio_dir: row.output_audio_dir,
+            message_count: row.message_count,
         })?)
     }
 }

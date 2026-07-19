@@ -5,14 +5,14 @@ use crate::{
     config::{EnvConfig, HardwareType},
     service::{
         models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
-            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
+            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+            ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
+            ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload, SpeakerFilter,
+            SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult, TextToSpeechAudioAsset,
             TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
-            VoiceDesignTaskResult,
+            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -166,5 +166,24 @@ impl Service for RemoteService {
         payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult> {
         self.client.create_voice_design_task(payload).await
+    }
+
+    async fn create_streaming_speech_task(
+        &self,
+        _payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn send_streaming_message(
+        &self,
+        _payload: SendStreamingMessagePayload,
+        _on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn cancel_streaming_task(&self, _task_id: i64) -> Result<bool> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
     }
 }

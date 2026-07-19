@@ -506,6 +506,20 @@ pub struct VoiceDesignTaskDetail {
     pub output_file_path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingTaskDetail {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub device: HardwareType,
+    pub model_params: Value,
+    pub context_file_path: String,
+    pub input_cache_file_path: String,
+    pub output_audio_dir: String,
+    pub message_count: i64,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {

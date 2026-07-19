@@ -4,11 +4,12 @@ mod remote;
 use crate::{
     config::{EnvConfig, HardwareType, StorageMode},
     service::models::{
-        CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
-        HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-        ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
-        SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+        CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+        CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
+        HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+        ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
+        ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload, SpeakerFilter,
+        SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult, TextToSpeechAudioAsset,
         TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
         VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
     },
@@ -100,6 +101,16 @@ pub trait Service: Send + Sync {
         &self,
         payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult>;
+    async fn create_streaming_speech_task(
+        &self,
+        payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult>;
+    async fn send_streaming_message(
+        &self,
+        payload: SendStreamingMessagePayload,
+        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()>;
+    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool>;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {

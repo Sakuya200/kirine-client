@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 use rand::random;
 use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -131,6 +131,29 @@ impl LocalServiceHarness {
 
     pub async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
         self.service.get_history_record(history_id).await
+    }
+
+    /// 读取 `task_history.status`（直接走原生 SQL，不加载 detail）。
+    /// 用于断言清扫/状态机等仅关心 status 的场景，避免对未种子化 detail 行的依赖。
+    pub async fn history_status(&self, history_id: i64) -> Result<TaskStatus> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        let row = sqlx::query("SELECT status FROM task_history WHERE id = ? AND deleted = 0")
+            .bind(history_id)
+            .fetch_optional(&pool)
+            .await?;
+        pool.close().await;
+        let row = row.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("history row {history_id} not found"))
+        })?;
+        let status: String = row.get("status");
+        status
+            .parse::<TaskStatus>()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e).into())
+    }
+
+    /// 触发流式会话启动清扫（调用真实 `LocalService::sweep_stale_streaming_sessions_impl`）。
+    pub async fn sweep_stale_streaming_sessions(&self) -> Result<()> {
+        self.service.sweep_stale_streaming_sessions_impl().await
     }
 
     pub fn src_model_root(&self) -> PathBuf {
