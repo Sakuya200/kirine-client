@@ -13,6 +13,7 @@ pub(crate) enum PythonScriptTaskKind {
     TextToSpeech,
     VoiceClone,
     VoiceDesign,
+    StreamingSpeech,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -81,11 +82,27 @@ pub(crate) struct VoiceDesignArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StreamingSpeakerArg {
+    pub name: String,
+    pub ref_audio_path: String,
+    pub ref_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StreamingArgs {
+    pub context_file_path: String,
+    pub input_cache_file_path: String,
+    pub output_audio_dir: String,
+    pub speakers: Vec<StreamingSpeakerArg>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum PythonScriptTaskArgs {
     Training(TrainingArgs),
     TextToSpeech(TTSArgs),
     VoiceClone(VoiceCloneArgs),
     VoiceDesign(VoiceDesignArgs),
+    Streaming(StreamingArgs),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,5 +295,33 @@ mod tests {
         assert_eq!(json["args"]["Training"]["batch_size"], 4);
         assert_eq!(json["args"]["Training"]["num_epochs"], 12);
         assert_eq!(json["args"]["Training"]["lr"], "2e-5");
+    }
+
+    #[test]
+    fn writes_streaming_params_file_with_expected_fields() {
+        let spec = PythonScriptInvocationSpec {
+            version: "1.0.0".to_string(),
+            base_model: "gpt_sovits_cpufast".to_string(),
+            model_version: "v1".to_string(),
+            kind: PythonScriptTaskKind::StreamingSpeech,
+            runtime: runtime(),
+            args: PythonScriptTaskArgs::Streaming(StreamingArgs {
+                context_file_path: "/ctx/context.json".to_string(),
+                input_cache_file_path: "/ctx/input.jsonl".to_string(),
+                output_audio_dir: "/ctx/audio".to_string(),
+                speakers: vec![StreamingSpeakerArg {
+                    name: "A".to_string(),
+                    ref_audio_path: "/ref.wav".to_string(),
+                    ref_text: "参考".to_string(),
+                }],
+            }),
+        };
+
+        let json = write_and_read(&spec, "streaming");
+        assert_eq!(json["kind"], "StreamingSpeech");
+        assert_eq!(json["args"]["Streaming"]["context_file_path"], "/ctx/context.json");
+        assert_eq!(json["args"]["Streaming"]["input_cache_file_path"], "/ctx/input.jsonl");
+        assert_eq!(json["args"]["Streaming"]["speakers"][0]["name"], "A");
+        assert_eq!(json["args"]["Streaming"]["speakers"][0]["ref_text"], "参考");
     }
 }

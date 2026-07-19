@@ -661,6 +661,51 @@ pub struct CreateVoiceDesignTaskPayload {
     pub model_params: Value,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeakerInput {
+    pub name: String,
+    pub base_model: BaseModel,
+    #[serde(default)]
+    pub model_version: Option<String>,
+    pub ref_audio_path: String,
+    pub ref_audio_name: String,
+    pub ref_text: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateStreamingSpeechTaskPayload {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub device: HardwareType,
+    pub language: AppLanguage,
+    pub model_params: Value,
+    pub speakers: Vec<StreamingSpeakerInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendStreamingMessagePayload {
+    pub task_id: i64,
+    pub context_id: String,
+    pub speaker_name: String,
+    pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeechTaskResult {
+    pub task_id: i64,
+    pub context_file_path: String,
+    pub input_cache_file_path: String,
+    pub output_audio_dir: String,
+    pub status: TaskStatus,
+    pub created_at: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTrainingTaskResult {
