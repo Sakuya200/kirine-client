@@ -611,4 +611,48 @@ mod tests {
         assert_eq!(v["contextId"], "msg-2");
         assert_eq!(v["text"], "你好");
     }
+
+    #[test]
+    fn unknown_frame_type_is_err() {
+        let result = parse_streaming_frame(r#"{"type":"bogus","contextId":"msg-1"}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn frame_to_event_maps_each_payload() {
+        // AudioStreamEvent 未派生 PartialEq，用 match + 字段断言。
+        let started = parse_streaming_frame(r#"{"type":"started","contextId":"msg-1"}"#)
+            .expect("parse")
+            .expect("some");
+        match frame_to_event(&started) {
+            Some(AudioStreamEvent::Started) => {}
+            other => panic!("expected Started, got {other:?}"),
+        }
+
+        let chunk =
+            parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
+                .expect("parse")
+                .expect("some");
+        match frame_to_event(&chunk) {
+            Some(AudioStreamEvent::Chunk { bytes }) => assert_eq!(bytes, vec![b'h', b'i']),
+            other => panic!("expected Chunk, got {other:?}"),
+        }
+
+        let finished = parse_streaming_frame(r#"{"type":"finished","contextId":"msg-1"}"#)
+            .expect("parse")
+            .expect("some");
+        match frame_to_event(&finished) {
+            Some(AudioStreamEvent::Finished) => {}
+            other => panic!("expected Finished, got {other:?}"),
+        }
+
+        let error =
+            parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
+                .expect("parse")
+                .expect("some");
+        match frame_to_event(&error) {
+            Some(AudioStreamEvent::Error { message }) => assert_eq!(message, "boom"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
 }
