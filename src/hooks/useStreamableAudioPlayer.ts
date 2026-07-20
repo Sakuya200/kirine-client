@@ -11,6 +11,8 @@ interface UseStreamableAudioPlayerOptions {
   onPlaybackEnded?: () => void;
   onPlaybackError?: () => void;
   onStreamError?: (message: string) => void;
+  /** 流式收到 `finished` 帧（数据完整）时触发，用于回写消息状态为 completed。 */
+  onStreamFinished?: () => void;
 }
 
 export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOptions = {}) => {
@@ -171,6 +173,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
         case 'finished':
           streamComplete.value = true;
           isStreaming.value = false;
+          options.onStreamFinished?.();
           break;
         case 'error':
           isStreaming.value = false;

@@ -21,7 +21,9 @@ const selectedSpeakerId = ref<string | null>(null);
 const inputText = ref('');
 const messagesContainerRef = ref<HTMLElement | null>(null);
 
-const canSend = computed(() => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null);
+const canSend = computed(
+  () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && !store.isStartingSession
+);
 const hasSpeakers = computed(() => store.speakers.length > 0);
 const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? '未选择');
 
@@ -48,16 +50,27 @@ const scrollToBottom = () => {
 
 watch(() => store.messages.length, scrollToBottom);
 
-const send = () => {
+const send = async () => {
   if (!canSend.value) {
     if (!hasSpeakers.value) {
       uiStore.notifyWarning('请先在配置抽屉中添加说话人。');
     }
     return;
   }
-  store.sendMessage(inputText.value, selectedSpeakerId.value);
+  // 二次保险：建会话期间忽略回车连击（canSend 已守卫按钮，此处防 keydown 直达）
+  if (store.isStartingSession) {
+    return;
+  }
+  const text = inputText.value;
   inputText.value = '';
   scrollToBottom();
+  try {
+    await store.sendMessage(text, selectedSpeakerId.value);
+  } catch (err) {
+    // 建会话/发送失败：回填文本以便重试，并通知用户（消除未处理 rejection）
+    inputText.value = text;
+    uiStore.notifyError(err instanceof Error ? err.message : String(err));
+  }
 };
 
 const onTextareaKeydown = (event: KeyboardEvent) => {
@@ -131,10 +144,13 @@ onMounted(async () => {
                 <p class="mb-2 text-xs text-stone-500">{{ message.speakerName ? `说话人：${message.speakerName}` : '流式生成中…' }}</p>
                 <StreamableAudioPlayer
                   mode="stream"
+                  :message-id="message.id"
                   :task-id="message.taskId"
                   :context-id="message.contextId"
                   :speaker-name="message.speakerName ?? ''"
                   :synth-text="message.synthText"
+                  @stream-finished="id => store.updateMessageStatus(id, 'completed')"
+                  @stream-error="id => store.updateMessageStatus(id, 'error')"
                 />
               </div>
             </div>

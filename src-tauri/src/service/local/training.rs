@@ -15,6 +15,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
+use tokio::sync::watch;
 
 use crate::{
     common::{
@@ -24,7 +25,7 @@ use crate::{
             training_reference_audio_path, training_temp_extract_dir,
         },
     },
-    config::HardwareType,
+    config::{BaseModel, HardwareType},
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -35,6 +36,7 @@ use crate::{
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
+        pipeline::{resolve_model_task_pipeline, TrainingPipelineRequest},
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -941,5 +943,45 @@ impl LocalService {
                 .as_deref(),
             Some("wav") | Some("mp3") | Some("flac") | Some("ogg") | Some("m4a")
         )
+    }
+
+    pub(crate) fn start_training(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+        speaker_id: i64,
+        speaker_name: &str,
+    ) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let speaker_name = speaker_name.to_string();
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::ModelTraining,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_training_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    TrainingPipelineRequest {
+                        task_id,
+                        speaker_id,
+                        speaker_name,
+                    },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local training pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

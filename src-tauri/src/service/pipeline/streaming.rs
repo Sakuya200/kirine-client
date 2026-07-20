@@ -11,7 +11,7 @@ use tauri::ipc::Channel;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
-    sync::{oneshot, watch},
+    sync::{oneshot, watch, Mutex},
 };
 use tracing::{error, info, warn};
 
@@ -45,13 +45,13 @@ use crate::{
 
 /// 脚本 stdout 单帧（JSON 行）。`bytes` 为 base64。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StreamingFrame {
+pub struct StreamingFrame {
     pub context_id: String,
     pub payload: StreamingFramePayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum StreamingFramePayload {
+pub enum StreamingFramePayload {
     Started,
     Chunk { bytes: Vec<u8> },
     Finished,
@@ -59,14 +59,14 @@ pub(crate) enum StreamingFramePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct StreamingContextJson {
+pub struct StreamingContextJson {
     pub basic: StreamingContextBasic,
     pub messages: Vec<StreamingMessageEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct StreamingContextBasic {
+pub struct StreamingContextBasic {
     pub task_id: i64,
     pub base_model: String,
     pub model_version: String,
@@ -77,7 +77,7 @@ pub(crate) struct StreamingContextBasic {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct StreamingSpeaker {
+pub struct StreamingSpeaker {
     pub id: String,
     pub name: String,
     pub base_model: String,
@@ -92,14 +92,14 @@ pub(crate) struct StreamingSpeaker {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct StreamingMessageEntry {
+pub struct StreamingMessageEntry {
     pub context_id: String,
     pub speaker_name: String,
     pub text: String,
     pub audio_path: String,
 }
 
-pub(crate) fn serialize_input_entry(
+pub fn serialize_input_entry(
     context_id: &str,
     speaker_name: &str,
     text: &str,
@@ -127,7 +127,7 @@ struct RawFrame {
 }
 
 /// 解析脚本 stdout 一行。空行返回 `Ok(None)`；坏行返回 `Err`。
-pub(crate) fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
+pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -149,7 +149,7 @@ pub(crate) fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>
 }
 
 /// 将帧映射为下发前端的 `AudioStreamEvent`。
-pub(crate) fn frame_to_event(frame: &StreamingFrame) -> Option<AudioStreamEvent> {
+pub fn frame_to_event(frame: &StreamingFrame) -> Option<AudioStreamEvent> {
     match &frame.payload {
         StreamingFramePayload::Started => Some(AudioStreamEvent::Started),
         StreamingFramePayload::Chunk { bytes } => Some(AudioStreamEvent::Chunk { bytes: bytes.clone() }),
@@ -280,6 +280,9 @@ pub(crate) struct StreamMessageOutcome {
 #[derive(Debug, Default)]
 pub(crate) struct StreamingSessionExtra {
     pub message_channels: Arc<RwLock<HashMap<String, MessageChannel>>>,
+    /// 串行化 context.json 的 read-modify-write，避免同会话并发发送时后写覆盖前写、
+    /// 丢失先到达的消息记录。每会话独立一把锁（`register_streaming_session` 时创建）。
+    pub context_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,19 +481,25 @@ fn forward_event(extra: &StreamingSessionExtra, context_id: &str, event: AudioSt
         event,
         AudioStreamEvent::Finished | AudioStreamEvent::Error { .. }
     );
-    let mut guard = match extra.message_channels.write() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
     if is_terminal {
+        let mut guard = match extra.message_channels.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
         if let Some(mc) = guard.remove(context_id) {
             let errored = matches!(event, AudioStreamEvent::Error { .. });
             let _ = mc.on_event.send(event);
             let _ = mc.done.send(StreamMessageOutcome { cancelled: false, errored });
         }
-    } else if let Some(mc) = guard.get_mut(context_id) {
-        // Channel::send 取 &self，无需 Clone
-        let _ = mc.on_event.send(event);
+    } else {
+        let guard = match extra.message_channels.read() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if let Some(mc) = guard.get(context_id) {
+            // Channel::send 取 &self，读锁即可，避免 Chunk 高频时不必要的写锁竞争。
+            let _ = mc.on_event.send(event);
+        }
     }
 }
 
@@ -513,146 +522,3 @@ fn drain_pending_channels(extra: &StreamingSessionExtra, cancelled: bool) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_started_frame() {
-        let frame = parse_streaming_frame(r#"{"type":"started","contextId":"msg-1"}"#)
-            .expect("parse")
-            .expect("some");
-        assert_eq!(frame.context_id, "msg-1");
-        assert_eq!(frame.payload, StreamingFramePayload::Started);
-    }
-
-    #[test]
-    fn parses_chunk_frame_with_base64_bytes() {
-        // "hi" -> base64 "aGk="
-        let frame = parse_streaming_frame(
-            r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#,
-        )
-        .expect("parse")
-        .expect("some");
-        assert_eq!(frame.payload, StreamingFramePayload::Chunk { bytes: vec![b'h', b'i'] });
-    }
-
-    #[test]
-    fn parses_finished_and_error_frames() {
-        let fin = parse_streaming_frame(r#"{"type":"finished","contextId":"msg-1"}"#)
-            .expect("parse")
-            .expect("some");
-        assert_eq!(fin.payload, StreamingFramePayload::Finished);
-
-        let err = parse_streaming_frame(
-            r#"{"type":"error","contextId":"msg-1","message":"boom"}"#,
-        )
-        .expect("parse")
-        .expect("some");
-        assert_eq!(
-            err.payload,
-            StreamingFramePayload::Error { message: "boom".to_string() }
-        );
-    }
-
-    #[test]
-    fn blank_line_yields_none() {
-        assert!(parse_streaming_frame("   ").expect("parse").is_none());
-    }
-
-    #[test]
-    fn malformed_line_is_err() {
-        assert!(parse_streaming_frame("not json").is_err());
-    }
-
-    #[test]
-    fn context_json_round_trips() {
-        let ctx = StreamingContextJson {
-            basic: StreamingContextBasic {
-                task_id: 7,
-                base_model: "gpt_sovits_cpufast".to_string(),
-                model_version: "v1".to_string(),
-                device: "cpu".to_string(),
-                language: "chinese".to_string(),
-                speakers: vec![StreamingSpeaker {
-                    id: "spk-1".to_string(),
-                    name: "A".to_string(),
-                    base_model: "gpt_sovits_cpufast".to_string(),
-                    model_version: None,
-                    ref_audio_path: "/ref.wav".to_string(),
-                    ref_audio_name: "ref.wav".to_string(),
-                    ref_text: "参考".to_string(),
-                    description: None,
-                }],
-            },
-            messages: vec![StreamingMessageEntry {
-                context_id: "msg-2".to_string(),
-                speaker_name: "A".to_string(),
-                text: "你好".to_string(),
-                audio_path: "%DATA_DIR_PATH%/streaming_7/audio/msg-2.wav".to_string(),
-            }],
-        };
-        let json = serde_json::to_string(&ctx).expect("serialize");
-        let back: StreamingContextJson = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.basic.task_id, 7);
-        assert_eq!(back.basic.speakers[0].ref_audio_path, "/ref.wav");
-        assert_eq!(back.messages[0].context_id, "msg-2");
-        // camelCase 字段名
-        assert!(json.contains("\"taskId\""));
-        assert!(json.contains("\"contextId\""));
-        assert!(json.contains("\"audioPath\""));
-    }
-
-    #[test]
-    fn input_entry_serializes_single_line() {
-        let line = serialize_input_entry("msg-2", "A", "你好", "/p/a.wav");
-        assert!(!line.contains('\n'));
-        let v: serde_json::Value = serde_json::from_str(&line).expect("parse");
-        assert_eq!(v["contextId"], "msg-2");
-        assert_eq!(v["text"], "你好");
-    }
-
-    #[test]
-    fn unknown_frame_type_is_err() {
-        let result = parse_streaming_frame(r#"{"type":"bogus","contextId":"msg-1"}"#);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn frame_to_event_maps_each_payload() {
-        // AudioStreamEvent 未派生 PartialEq，用 match + 字段断言。
-        let started = parse_streaming_frame(r#"{"type":"started","contextId":"msg-1"}"#)
-            .expect("parse")
-            .expect("some");
-        match frame_to_event(&started) {
-            Some(AudioStreamEvent::Started) => {}
-            other => panic!("expected Started, got {other:?}"),
-        }
-
-        let chunk =
-            parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
-                .expect("parse")
-                .expect("some");
-        match frame_to_event(&chunk) {
-            Some(AudioStreamEvent::Chunk { bytes }) => assert_eq!(bytes, vec![b'h', b'i']),
-            other => panic!("expected Chunk, got {other:?}"),
-        }
-
-        let finished = parse_streaming_frame(r#"{"type":"finished","contextId":"msg-1"}"#)
-            .expect("parse")
-            .expect("some");
-        match frame_to_event(&finished) {
-            Some(AudioStreamEvent::Finished) => {}
-            other => panic!("expected Finished, got {other:?}"),
-        }
-
-        let error =
-            parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
-                .expect("parse")
-                .expect("some");
-        match frame_to_event(&error) {
-            Some(AudioStreamEvent::Error { message }) => assert_eq!(message, "boom"),
-            other => panic!("expected Error, got {other:?}"),
-        }
-    }
-}

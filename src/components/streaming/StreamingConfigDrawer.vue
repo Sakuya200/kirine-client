@@ -36,7 +36,7 @@ const isFormOpen = ref(false);
 const editingSpeaker = ref<StreamingSpeakerConfig | null>(null);
 
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.VoiceClone).map(item => ({ label: item.modelName, value: item.baseModel }))
+  modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
 );
 const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(store.sessionConfig.baseModel));
 const deviceOptions = computed(() =>
@@ -51,10 +51,10 @@ const languageOptions = computed(() =>
     label: APP_LANGUAGE_LABELS[language] ?? language
   }))
 );
-const activeTaskConfig = computed<TaskParamConfig | null>(() => uiConfigStore.getTaskConfig(store.sessionConfig.baseModel, HistoryTaskType.VoiceClone));
+const activeTaskConfig = computed<TaskParamConfig | null>(() => uiConfigStore.getTaskConfig(store.sessionConfig.baseModel, HistoryTaskType.StreamingSpeech));
 
 const normalizeModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
-  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.VoiceClone);
+  const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.StreamingSpeech);
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
@@ -213,7 +213,7 @@ onBeforeUnmount(() => {
           </header>
 
           <div class="flex-1 space-y-4 overflow-y-auto p-5">
-            <PanelCard title="基础配置" subtitle="选择模型、设备与输出语言">
+            <PanelCard class="z-30" title="基础配置" subtitle="选择模型、设备与输出语言">
               <div class="grid gap-4 md:grid-cols-2">
                 <BaseListbox :model-value="store.sessionConfig.baseModel" label="基础模型" :options="modelOptions" @update:model-value="onBaseModelChange" />
                 <BaseListbox

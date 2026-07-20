@@ -1,4 +1,6 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::bail;
 use sea_orm::{
@@ -6,8 +8,9 @@ use sea_orm::{
     EntityTrait, QueryFilter, TransactionTrait,
 };
 use tauri::ipc::Channel;
-use tokio::sync::oneshot;
-use tracing::{error, info};
+use tokio::sync::{oneshot, watch};
+use tokio::time::timeout;
+use tracing::{error, info, warn};
 
 use crate::{
     common::{
@@ -17,6 +20,7 @@ use crate::{
             streaming_message_audio_path, streaming_output_audio_dir,
         },
     },
+    config::{BaseModel, HardwareType},
     hooks::streaming::AudioStreamEvent,
     service::{
         local::entity::{
@@ -24,7 +28,7 @@ use crate::{
         },
         models::{
             CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
-            StreamingSpeechTaskResult, TaskStatus,
+            StreamingSpeechTaskResult, TaskStatus, UpdateTaskStatusPayload,
         },
         pipeline::streaming::{
             serialize_input_entry, MessageChannel, StreamingContextBasic, StreamingContextJson,
@@ -35,6 +39,11 @@ use crate::{
     utils::time::now_string,
     Result,
 };
+
+/// 单条流式消息等待终帧的超时上限。脚本在产出 finished/error 前卡住、stdout 帧丢失
+/// 或 runner 异常退出未发 done 信号时，强制收尾避免 `send_streaming_message` 永久挂起。
+/// 按真实合成耗时调整（建议单消息上限 5 分钟）。
+const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
 
 impl LocalService {
     pub(crate) async fn create_streaming_speech_task_impl(
@@ -157,6 +166,17 @@ impl LocalService {
         self.register_streaming_session(task_id);
         if let Err(err) = self.start_streaming_session(base_model.clone(), task_id) {
             error!(error = %err, task_id, "failed to start streaming session");
+            // 启动失败：回滚运行句柄并把任务置 Failed，让前端 invoke 抛错并 notifyError，
+            // 避免任务卡在 Pending、前端误以为会话已建立。
+            self.unregister_active_task_control(task_id);
+            let _ = self
+                .update_task_status_impl(UpdateTaskStatusPayload {
+                    task_id,
+                    status: TaskStatus::Failed,
+                    duration_seconds: None,
+                })
+                .await;
+            bail!("流式会话启动失败: {err}");
         }
 
         Ok(StreamingSpeechTaskResult {
@@ -204,13 +224,20 @@ impl LocalService {
         let audio_dir = resolve_task_path(data_dir, &detail.output_audio_dir);
         let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
         let input_cache_path = resolve_task_path(data_dir, &detail.input_cache_file_path);
-        let audio_path = streaming_message_audio_path(&audio_dir, &context_id);
+        // context_id 来自前端，清洗后再 join 音频文件名，防御路径穿越（当前固定 msg-N
+        // 已安全，属纵深防御）。channel key 与 context.json 的 contextId 字段仍用原值，
+        // 与脚本回传帧的 contextId 对齐。
+        let sanitized_context_id = super::sanitize_path_segment(&context_id);
+        let audio_path = streaming_message_audio_path(&audio_dir, &sanitized_context_id);
         let serialized_audio_path = serialize_task_path(data_dir, &audio_path);
 
         // 先注册 Channel，再喂入输入：避免脚本在 Channel 注册前产出终帧导致丢失。
         let extra = self
             .streaming_session_extra(task_id)?
             .ok_or_else(|| anyhow::anyhow!("流式会话进程未运行: {task_id}"))?;
+        // 串行化 context.json 的 read-modify-write：同一会话并发发送时避免后写覆盖前写
+        // 导致 messages 缺条目（input.jsonl 为 append-only 不受影响）。
+        let context_lock = extra.context_lock.clone();
         let (done_tx, done_rx) = oneshot::channel();
         {
             let mut guard = extra
@@ -222,6 +249,7 @@ impl LocalService {
 
         // 追加 context.json messages + input.jsonl
         let feed_result: Result<()> = async {
+            let _guard = context_lock.lock().await;
             let ctx_bytes = std::fs::read(&context_json_path)?;
             let mut ctx: StreamingContextJson = serde_json::from_slice(&ctx_bytes)?;
             ctx.messages.push(StreamingMessageEntry {
@@ -256,20 +284,36 @@ impl LocalService {
             return Err(err);
         }
 
-        let outcome = done_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("流式会话进程退出，未收到完成信号"))?;
+        let outcome = match timeout(STREAMING_MESSAGE_TIMEOUT, done_rx).await {
+            Ok(Ok(o)) => o,
+            Ok(Err(_)) => bail!("流式会话进程退出，未收到完成信号"),
+            Err(_) => {
+                // 超时：移除 channel 并经其下发 Error，避免前端永久转圈、Channel 不结束。
+                // 若 runner 已先行 remove（终帧已到），则不下发，避免成功后误报错误。
+                if let Ok(mut guard) = extra.message_channels.write() {
+                    if let Some(mc) = guard.remove(&context_id) {
+                        let _ = mc.on_event.send(AudioStreamEvent::Error {
+                            message: "流式生成超时".into(),
+                        });
+                    }
+                }
+                bail!("流式生成超时（contextId={context_id}）");
+            }
+        };
 
         // 完成则自增 message_count
         if !outcome.cancelled && !outcome.errored {
-            let _ = streaming_task_entity::Entity::update_many()
+            if let Err(e) = streaming_task_entity::Entity::update_many()
                 .col_expr(
                     streaming_task_entity::Column::MessageCount,
                     Expr::col(streaming_task_entity::Column::MessageCount).add(1),
                 )
                 .filter(streaming_task_entity::Column::HistoryId.eq(task_id))
                 .exec(self.orm())
-                .await;
+                .await
+            {
+                warn!(error = %e, task_id, "failed to increment message_count");
+            }
         }
         if outcome.errored {
             bail!("流式生成失败（contextId={context_id}）");
@@ -285,6 +329,120 @@ impl LocalService {
     /// 启动清扫：将上次应用退出后残留的 Running 流式会话标记为 Cancelled。
     pub(crate) async fn sweep_stale_streaming_sessions_impl(&self) -> Result<()> {
         sweep_stale_streaming_sessions_on_orm(self.orm()).await
+    }
+
+    /// 注册流式会话的运行句柄：创建 cancel 通道并注入 `StreamingSessionExtra`，
+    /// 供 runner 与 `send_streaming_message` 共享 `message_channels`。
+    pub(crate) fn register_streaming_session(&self, task_id: i64) {
+        let extra = Arc::new(crate::service::pipeline::streaming::StreamingSessionExtra::default());
+        if let Ok(mut controls) = self.active_task_controls.write() {
+            let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+            controls.insert(
+                task_id,
+                super::ActiveTaskControl {
+                    task_type: HistoryTaskType::StreamingSpeech,
+                    cancel_tx,
+                    _cancel_rx_guard: cancel_rx_guard,
+                    streaming_extra: Some(extra),
+                },
+            );
+        }
+    }
+
+    pub(crate) fn streaming_session_extra(
+        &self,
+        task_id: i64,
+    ) -> Result<Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>> {
+        let controls = self
+            .active_task_controls
+            .read()
+            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+        Ok(controls.get(&task_id).and_then(|c| c.streaming_extra.clone()))
+    }
+
+    /// 从 DB + `context.json` 加载流式会话详情，供 `run_streaming_session` 使用。
+    pub(crate) async fn load_streaming_task_detail(
+        &self,
+        task_id: i64,
+    ) -> Result<crate::service::pipeline::streaming::LoadedStreamingDetail> {
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(task_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {task_id}"))?;
+
+        let context_path = resolve_task_path(
+            Path::new(self.data_dir()),
+            &detail.context_file_path,
+        );
+        let ctx: crate::service::pipeline::streaming::StreamingContextJson =
+            serde_json::from_str(&std::fs::read_to_string(context_path)?)?;
+        let speakers: Vec<crate::service::models::StreamingSpeakerInput> = ctx
+            .basic
+            .speakers
+            .into_iter()
+            .map(|s| crate::service::models::StreamingSpeakerInput {
+                name: s.name,
+                base_model: s.base_model,
+                model_version: s.model_version,
+                ref_audio_path: s.ref_audio_path,
+                ref_audio_name: s.ref_audio_name,
+                ref_text: s.ref_text,
+                description: s.description,
+            })
+            .collect();
+
+        Ok(crate::service::pipeline::streaming::LoadedStreamingDetail {
+            base_model: detail.base_model,
+            model_version: detail.model_version,
+            device: detail.device.parse().unwrap_or(HardwareType::Cpu),
+            speakers,
+        })
+    }
+
+    /// 拉起长期存活的流式会话进程（`begin_llm_task` -> streaming.py）。
+    /// cancel 通道由 `register_streaming_session` 预先注册，本方法仅 spawn runner。
+    pub(crate) fn start_streaming_session(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+    ) -> Result<()> {
+        let service = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = async {
+                let detail = service.load_streaming_task_detail(task_id).await?;
+                let extra = service
+                    .streaming_session_extra(task_id)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("streaming session extra not registered for task {task_id}")
+                    })?;
+                crate::service::pipeline::streaming::run_streaming_session(
+                    &service,
+                    crate::service::pipeline::StreamingPipelineRequest { task_id },
+                    &base_model,
+                    detail,
+                    extra,
+                )
+                .await
+            }
+            .await;
+            service.unregister_active_task_control(task_id);
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local streaming session failed");
+                // 兜底：runner 在置 Running 前早退 / panic 会令任务停在 Pending/Running，
+                // 前端误以为会话已建立。run_streaming_session 已在自身退出路径更新最终状态
+                // （Cancelled/Failed），此处对 Failed 幂等，仅补齐未触达最终状态更新的早退路径。
+                let _ = service
+                    .update_task_status_impl(UpdateTaskStatusPayload {
+                        task_id,
+                        status: TaskStatus::Failed,
+                        duration_seconds: None,
+                    })
+                    .await;
+            }
+        });
+        Ok(())
     }
 }
 

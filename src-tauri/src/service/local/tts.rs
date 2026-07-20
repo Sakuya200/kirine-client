@@ -1,6 +1,7 @@
 use std::{io, path::Path};
 
 use anyhow::bail;
+use tokio::sync::watch;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
     TransactionTrait,
@@ -11,6 +12,7 @@ use crate::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::BaseModel,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -20,6 +22,7 @@ use crate::{
             CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
             TextToSpeechTaskResult,
         },
+        pipeline::{resolve_model_task_pipeline, TtsPipelineRequest},
         LocalService,
     },
     utils::time::now_string,
@@ -153,5 +156,34 @@ impl LocalService {
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,
         })
+    }
+
+    pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::TextToSpeech,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_tts_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    TtsPipelineRequest { task_id },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local tts pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

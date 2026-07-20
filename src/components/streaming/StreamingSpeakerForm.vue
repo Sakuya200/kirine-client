@@ -26,7 +26,7 @@ const modelStore = useModelStore();
 const uiStore = useUiStore();
 
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.VoiceClone).map(item => ({ label: item.modelName, value: item.baseModel }))
+  modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
 );
 
 const createEmptyForm = (): StreamingSpeakerInput => ({

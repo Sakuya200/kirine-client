@@ -113,6 +113,11 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     if (trimmed.length === 0) {
       return;
     }
+    // 防重入：首条消息建会话期间（isStartingSession=true）忽略后续发送，
+    // 避免连点/回车连击触发多次 create_streaming_speech_task 产生僵尸会话。
+    if (isStartingSession.value) {
+      return;
+    }
     const speaker = getSpeaker(speakerId);
 
     // 首条消息：建会话拿 taskId
@@ -192,6 +197,15 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     }
   };
 
+  /**
+   * 按 messageId 流转 assistant 消息状态：流式 finished -> completed、error/超时 -> error。
+   * 由 StreamableAudioPlayer 经 emit 回调驱动，补齐「初版不追踪流式结束」的缺口，
+   * 使已完成消息不被 terminateSession 误标为 error。
+   */
+  const updateMessageStatus = (messageId: string, status: StreamingChatMessage['status']) => {
+    messages.value = messages.value.map(m => (m.id === messageId ? { ...m, status } : m));
+  };
+
   const clearMessages = () => {
     messages.value = [];
     activeTaskId.value = null;
@@ -215,6 +229,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     setSessionConfig,
     sendMessage,
     terminateSession,
+    updateMessageStatus,
     clearMessages
   };
 });

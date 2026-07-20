@@ -13,6 +13,8 @@ interface Props {
   audioPath?: string;
   speakerName?: string;
   synthText?: string;
+  /** assistant 消息 id，流式 finished/error 时随事件回传父级以流转消息状态。 */
+  messageId?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -21,7 +23,13 @@ const props = withDefaults(defineProps<Props>(), {
   audioPath: undefined,
   speakerName: '',
   synthText: '',
+  messageId: undefined,
 });
+
+const emit = defineEmits<{
+  (e: 'stream-finished', messageId: string): void;
+  (e: 'stream-error', messageId: string): void;
+}>();
 
 const uiStore = useUiStore();
 
@@ -35,6 +43,14 @@ const { isPlaying, hasData, isStreaming, togglePlayback, startStreaming, setAudi
     },
     onStreamError: message => {
       uiStore.notifyError(`音频流式接收失败：${message}`);
+      if (props.messageId) {
+        emit('stream-error', props.messageId);
+      }
+    },
+    onStreamFinished: () => {
+      if (props.messageId) {
+        emit('stream-finished', props.messageId);
+      }
     },
   });
 

@@ -18,6 +18,16 @@ pub use crate::hooks::streaming::{
 };
 pub use crate::service::models;
 pub use crate::service::pipeline::build_llm_task_script_args;
+pub use crate::service::pipeline::api::{
+    PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
+    PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
+    VoiceCloneArgs, VoiceDesignArgs,
+};
+pub use crate::service::pipeline::streaming::{
+    frame_to_event, parse_streaming_frame, serialize_input_entry, StreamingContextBasic,
+    StreamingContextJson, StreamingFrame, StreamingFramePayload, StreamingMessageEntry,
+    StreamingSpeaker,
+};
 pub use crate::service::{LocalService, Service};
 pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
 

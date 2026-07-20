@@ -5,12 +5,14 @@ use sea_orm::{
     ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
     ActiveModelTrait,
 };
+use tokio::sync::watch;
 
 use crate::{
     common::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::BaseModel,
     service::{
         local::entity::{
             task_history as task_history_entity, voice_design_task as voice_design_task_entity,
@@ -18,6 +20,7 @@ use crate::{
         models::{
             CreateVoiceDesignTaskPayload, HistoryTaskType, TaskStatus, VoiceDesignTaskResult,
         },
+        pipeline::{resolve_model_task_pipeline, VoiceDesignPipelineRequest},
         LocalService,
     },
     utils::time::now_string,
@@ -140,5 +143,38 @@ impl LocalService {
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,
         })
+    }
+
+    pub(crate) fn start_voice_design_inference(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+    ) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::VoiceDesign,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_voice_design_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    VoiceDesignPipelineRequest { task_id },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local voice design pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

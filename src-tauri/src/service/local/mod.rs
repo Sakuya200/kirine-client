@@ -27,7 +27,7 @@ use tracing::{info, warn};
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
-        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, HardwareType, UiComponentType,
+        load_ui_configs, resolve_storage_dir, EnvConfig, HardwareType, UiComponentType,
         UiConfigCatalog,
     },
     migration,
@@ -42,10 +42,6 @@ use crate::{
             TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
             VoiceDesignAudioAsset, VoiceDesignTaskResult,
-        },
-        pipeline::{
-            resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
-            VoiceClonePipelineRequest, VoiceDesignPipelineRequest,
         },
         Service,
     },
@@ -274,141 +270,6 @@ impl LocalService {
         Ok(service)
     }
 
-    pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::TextToSpeech,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_tts_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    TtsPipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local tts pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_voice_clone_inference(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::VoiceClone,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_voice_clone_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    VoiceClonePipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local voice clone pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_training(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-        speaker_id: i64,
-        speaker_name: &str,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let speaker_name = speaker_name.to_string();
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::ModelTraining,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_training_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    TrainingPipelineRequest {
-                        task_id,
-                        speaker_id,
-                        speaker_name,
-                    },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local training pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_voice_design_inference(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::VoiceDesign,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_voice_design_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    VoiceDesignPipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local voice design pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
     pub(crate) fn app_dir(&self) -> &Path {
         &self.app_dir
     }
@@ -514,113 +375,6 @@ impl LocalService {
             .map_err(|_| anyhow::anyhow!("任务终止信号发送失败"))?;
         info!(task_id, task_type = %task_type.as_str(), "task cancellation signal sent");
         Ok(true)
-    }
-
-    /// 注册流式会话的运行句柄：创建 cancel 通道并注入 `StreamingSessionExtra`，
-    /// 供 runner 与 `send_streaming_message` 共享 `message_channels`。
-    pub(crate) fn register_streaming_session(&self, task_id: i64) {
-        let extra = Arc::new(crate::service::pipeline::streaming::StreamingSessionExtra::default());
-        if let Ok(mut controls) = self.active_task_controls.write() {
-            let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-            controls.insert(
-                task_id,
-                ActiveTaskControl {
-                    task_type: HistoryTaskType::StreamingSpeech,
-                    cancel_tx,
-                    _cancel_rx_guard: cancel_rx_guard,
-                    streaming_extra: Some(extra),
-                },
-            );
-        }
-    }
-
-    pub(crate) fn streaming_session_extra(
-        &self,
-        task_id: i64,
-    ) -> Result<Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>> {
-        let controls = self
-            .active_task_controls
-            .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
-        Ok(controls.get(&task_id).and_then(|c| c.streaming_extra.clone()))
-    }
-
-    /// 从 DB + `context.json` 加载流式会话详情，供 `run_streaming_session` 使用。
-    pub(crate) async fn load_streaming_task_detail(
-        &self,
-        task_id: i64,
-    ) -> Result<crate::service::pipeline::streaming::LoadedStreamingDetail> {
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-        use crate::service::local::entity::streaming_task as streaming_task_entity;
-
-        let detail = streaming_task_entity::Entity::find()
-            .filter(streaming_task_entity::Column::HistoryId.eq(task_id))
-            .filter(streaming_task_entity::Column::Deleted.eq(0))
-            .one(self.orm())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {task_id}"))?;
-
-        let context_path = crate::common::local_paths::resolve_task_path(
-            Path::new(self.data_dir()),
-            &detail.context_file_path,
-        );
-        let ctx: crate::service::pipeline::streaming::StreamingContextJson =
-            serde_json::from_str(&std::fs::read_to_string(context_path)?)?;
-        let speakers: Vec<crate::service::models::StreamingSpeakerInput> = ctx
-            .basic
-            .speakers
-            .into_iter()
-            .map(|s| crate::service::models::StreamingSpeakerInput {
-                name: s.name,
-                base_model: s.base_model,
-                model_version: s.model_version,
-                ref_audio_path: s.ref_audio_path,
-                ref_audio_name: s.ref_audio_name,
-                ref_text: s.ref_text,
-                description: s.description,
-            })
-            .collect();
-
-        Ok(crate::service::pipeline::streaming::LoadedStreamingDetail {
-            base_model: detail.base_model,
-            model_version: detail.model_version,
-            device: detail.device.parse().unwrap_or(HardwareType::Cpu),
-            speakers,
-        })
-    }
-
-    /// 拉起长期存活的流式会话进程（`begin_llm_task` -> streaming.py）。
-    /// cancel 通道由 `register_streaming_session` 预先注册，本方法仅 spawn runner。
-    pub(crate) fn start_streaming_session(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
-        let service = self.clone();
-        tauri::async_runtime::spawn(async move {
-            let result = async {
-                let detail = service.load_streaming_task_detail(task_id).await?;
-                let extra = service
-                    .streaming_session_extra(task_id)?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("streaming session extra not registered for task {task_id}")
-                    })?;
-                crate::service::pipeline::streaming::run_streaming_session(
-                    &service,
-                    crate::service::pipeline::StreamingPipelineRequest { task_id },
-                    &base_model,
-                    detail,
-                    extra,
-                )
-                .await
-            }
-            .await;
-            service.unregister_active_task_control(task_id);
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local streaming session failed");
-            }
-        });
-        Ok(())
     }
 
     async fn init_db(orm: &DatabaseConnection, data_dir: &Path) -> Result<()> {
