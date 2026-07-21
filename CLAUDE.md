@@ -19,13 +19,13 @@ Claude Code 的记忆自动加载路径按项目路径编码写死在用户主�
 建联接（cmd，**不需要管理员权限**，跨盘可用；路径按本机调整）：
 
 ```bat
-mklink /J "C:\Users\Q1297\.claude\projects\d--Project-llm-kirine-client\memory" "D:\Project\llm\kirine-client\docs\memory"
+mklink /J "${USER_HOME}\.claude\projects\d--Project-llm-kirine-client\memory" "~\docs\memory"
 ```
 
 或在 PowerShell：
 
 ```powershell
-New-Item -ItemType Junction -Path "C:\Users\Q1297\.claude\projects\d--Project-llm-kirine-client\memory" -Target "D:\Project\llm\kirine-client\docs\memory"
+New-Item -ItemType Junction -Path "${USER_HOME}\.claude\projects\d--Project-llm-kirine-client\memory" -Target "~\docs\memory"
 ```
 
 > **换机器或重新克隆后需重建此 junction**，否则自动加载会找不到 `MEMORY.md`。
