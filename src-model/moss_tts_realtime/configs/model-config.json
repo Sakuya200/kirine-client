@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "baseModel": "moss_tts_realtime",
+      "modelName": "MOSS-TTS-Realtime",
+      "modelVersion": "1.7B",
+      "downloadType": "Custom",
+      "requiredModelNameList": ["moss_tts_realtime"],
+      "requiredModelRepoIdList": [],
+      "supportedDevices": ["cuda"],
+      "supportedFeatureList": ["streaming-speech", "model-training"],
+      "supportedLanguages": ["chinese", "english", "japanese", "korean"]
+    }
+  ],
+  "speakers": []
+}
