@@ -29,3 +29,6 @@ resources
 
 # Conda environments
 **/conda_env
+
+# Claude superpowers (local-only plans/specs)
+docs/superpowers/
