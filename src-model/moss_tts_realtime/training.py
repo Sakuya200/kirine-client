@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -85,3 +86,84 @@ def canonicalize_checkpoint(output_model_path: Path) -> Path:
     candidates.sort(key=lambda x: x[0])
     candidates[-1][1].rename(final)
     return final
+
+
+# --------------------------------------------------------------------------- #
+# 微调主流程：映射 -> prepare_data -> sft -> 规整 checkpoint_final
+# --------------------------------------------------------------------------- #
+def run_training(params) -> None:
+    output_dir = Path(params.output_model_path).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mapped_jsonl = output_dir / "_conversations.jsonl"
+    prepared_jsonl = output_dir / "_prepared.jsonl"
+
+    print(
+        f"[moss_tts_realtime] training device={params.device} "
+        f"batch={params.batch_size} grad_accum={params.gradient_accumulation_steps} "
+        f"epochs={params.num_epochs} lr={params.learning_rate}",
+        flush=True,
+    )
+    print(f"[moss_tts_realtime] output_model_path={output_dir}", flush=True)
+
+    # 1. 统一 JSONL -> MOSS conversations JSONL
+    written = map_to_conversations(
+        Path(params.input_jsonl).expanduser().resolve(), mapped_jsonl
+    )
+    print(f"[moss_tts_realtime] mapped {written} samples -> {mapped_jsonl}", flush=True)
+
+    # 2. 预编码 audio_codes（上游脚本）。单卡直接 python 调用（Accelerator 单进程）；
+    #    多卡需改用 accelerate launch（本期范围外，见 spec §10）。
+    run_upstream_script(
+        "moss_tts_realtime/finetuning/prepare_data.py",
+        [
+            "--codec-path", str(params.codec_path),
+            "--device", params.device,
+            "--input-jsonl", str(mapped_jsonl),
+            "--output-jsonl", str(prepared_jsonl),
+        ],
+    )
+
+    # 3. SFT 训练（上游脚本）。
+    run_upstream_script(
+        "moss_tts_realtime/finetuning/sft.py",
+        [
+            "--model-path", str(params.base_checkpoint),
+            "--codec-path", str(params.codec_path),
+            "--train-jsonl", str(prepared_jsonl),
+            "--output-dir", str(output_dir),
+            "--per-device-batch-size", str(params.batch_size),
+            "--gradient-accumulation-steps", str(params.gradient_accumulation_steps),
+            "--learning-rate", params.learning_rate,
+            "--weight-decay", params.weight_decay,
+            "--warmup-ratio", params.warmup_ratio,
+            "--num-epochs", str(params.num_epochs),
+            "--mixed-precision", params.mixed_precision,
+            "--max-grad-norm", params.max_grad_norm,
+        ],
+    )
+
+    # 4. 规整 canonical 产物（仅 sft.py 成功退出后执行）。
+    final = canonicalize_checkpoint(output_dir)
+    print(f"[moss_tts_realtime] canonical checkpoint: {final}", flush=True)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run MOSS-TTS-Realtime fine-tuning via kirine-client.")
+    parser.add_argument(
+        "--params-file",
+        dest="params_file",
+        type=str,
+        required=True,
+        help="Path to a JSON params file produced by the kirine-client UI.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    params = load_training_params(args.params_file)
+    run_training(params)
+
+
+if __name__ == "__main__":
+    main()
