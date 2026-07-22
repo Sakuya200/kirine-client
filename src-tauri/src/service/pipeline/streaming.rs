@@ -88,6 +88,12 @@ pub struct StreamingSpeaker {
     pub ref_text: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// trained 说话人 = speaker_id；voice-clone 为 None。
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
+    #[serde(default)]
+    pub category: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +180,8 @@ pub(crate) struct ResolvedStreamingPaths {
     pub context_json_path: PathBuf,
     pub input_cache_path: PathBuf,
     pub output_audio_dir: PathBuf,
+    /// = service.model_dir()，trained 说话人 checkpoint 解析所需。
+    pub model_root_path: PathBuf,
     pub params_json_path: PathBuf,
 }
 
@@ -207,6 +215,7 @@ pub(crate) fn resolve_streaming_paths(
         context_json_path,
         input_cache_path,
         output_audio_dir,
+        model_root_path: PathBuf::from(service.model_dir()),
         params_json_path,
     })
 }
@@ -216,6 +225,7 @@ pub(crate) fn build_streaming_invocation(
     base_model: &str,
     model_version: &str,
     device: HardwareType,
+    model_params: serde_json::Value,
     speakers: Vec<StreamingSpeakerInput>,
 ) -> PythonScriptInvocationSpec {
     PythonScriptInvocationSpec {
@@ -232,12 +242,16 @@ pub(crate) fn build_streaming_invocation(
             context_file_path: paths.context_json_path.to_string_lossy().to_string(),
             input_cache_file_path: paths.input_cache_path.to_string_lossy().to_string(),
             output_audio_dir: paths.output_audio_dir.to_string_lossy().to_string(),
+            model_root_path: paths.model_root_path.to_string_lossy().to_string(),
+            model_params_json: model_params,
             speakers: speakers
                 .into_iter()
                 .map(|s| StreamingSpeakerArg {
                     name: s.name,
                     ref_audio_path: s.ref_audio_path,
                     ref_text: s.ref_text,
+                    speaker_dir_name: s.speaker_dir_name,
+                    category: s.category,
                 })
                 .collect(),
         }),
@@ -290,6 +304,8 @@ pub(crate) struct LoadedStreamingDetail {
     pub base_model: String,
     pub model_version: String,
     pub device: HardwareType,
+    /// 流式 UI 参数（temperature/topP 等），透传到 streaming.params.json。
+    pub model_params: serde_json::Value,
     pub speakers: Vec<StreamingSpeakerInput>,
 }
 
@@ -319,6 +335,7 @@ pub(crate) async fn run_streaming_session(
         &detail.base_model,
         &detail.model_version,
         detail.device,
+        detail.model_params.clone(),
         detail.speakers,
     );
     invocation.write_to_json_file(&paths.params_json_path)?;

@@ -271,10 +271,14 @@ fn writes_streaming_params_file_with_expected_fields() {
             context_file_path: "/ctx/context.json".to_string(),
             input_cache_file_path: "/ctx/input.jsonl".to_string(),
             output_audio_dir: "/ctx/audio".to_string(),
+            model_root_path: String::new(),
+            model_params_json: Value::Null,
             speakers: vec![StreamingSpeakerArg {
                 name: "A".to_string(),
                 ref_audio_path: "/ref.wav".to_string(),
                 ref_text: "参考".to_string(),
+                speaker_dir_name: None,
+                category: String::new(),
             }],
         }),
     };

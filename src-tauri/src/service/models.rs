@@ -687,6 +687,12 @@ pub struct StreamingSpeakerInput {
     pub ref_text: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// trained 说话人 = speaker_id；voice-clone 为 None。
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
+    #[serde(default)]
+    pub category: String,
 }
 
 #[derive(Debug, Deserialize)]

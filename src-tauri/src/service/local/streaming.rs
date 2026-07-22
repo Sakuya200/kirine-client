@@ -69,6 +69,25 @@ impl LocalService {
         if payload.speakers.is_empty() {
             bail!("流式语音会话至少需要一个说话人");
         }
+        // trained 说话人校验：一会话至多一个 trained，且必须提供 speakerDirName；
+        // voice-clone（category 缺省视为 voice-clone）须有参考音频。
+        let trained_count = payload
+            .speakers
+            .iter()
+            .filter(|s| s.category == "trained")
+            .count();
+        if trained_count > 1 {
+            bail!("流式会话至多支持一个已训练说话人");
+        }
+        for s in &payload.speakers {
+            if s.category == "trained" {
+                if s.speaker_dir_name.as_deref().map(str::is_empty).unwrap_or(true) {
+                    bail!("已训练说话人必须提供 speakerDirName");
+                }
+            } else if s.ref_audio_path.trim().is_empty() {
+                bail!("语音克隆说话人必须提供参考音频");
+            }
+        }
 
         let mut model_params = payload.model_params.clone();
         let title = super::build_task_title("流式语音", None, &create_time);
@@ -130,6 +149,8 @@ impl LocalService {
                         ref_audio_name: s.ref_audio_name.clone(),
                         ref_text: s.ref_text.clone(),
                         description: s.description.clone(),
+                        speaker_dir_name: s.speaker_dir_name.clone(),
+                        category: s.category.clone(),
                     })
                     .collect(),
             },
@@ -390,6 +411,8 @@ impl LocalService {
                 ref_audio_name: s.ref_audio_name,
                 ref_text: s.ref_text,
                 description: s.description,
+                speaker_dir_name: s.speaker_dir_name,
+                category: s.category,
             })
             .collect();
 
@@ -397,6 +420,8 @@ impl LocalService {
             base_model: detail.base_model,
             model_version: detail.model_version,
             device: detail.device.parse().unwrap_or(HardwareType::Cpu),
+            model_params: serde_json::from_str(&detail.model_params_json)
+                .unwrap_or(serde_json::Value::Null),
             speakers,
         })
     }

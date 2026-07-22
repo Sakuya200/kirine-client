@@ -86,6 +86,12 @@ pub struct StreamingSpeakerArg {
     pub name: String,
     pub ref_audio_path: String,
     pub ref_text: String,
+    /// trained 说话人 = speaker_id；voice-clone 为 None。
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
+    #[serde(default)]
+    pub category: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +99,12 @@ pub struct StreamingArgs {
     pub context_file_path: String,
     pub input_cache_file_path: String,
     pub output_audio_dir: String,
+    /// = service.model_dir()，streaming.py 解析 <model_root_path>/<speaker_dir_name>。
+    #[serde(default)]
+    pub model_root_path: String,
+    /// 流式 UI 参数（temperature/topP 等），透传给 streaming.py。
+    #[serde(default)]
+    pub model_params_json: serde_json::Value,
     pub speakers: Vec<StreamingSpeakerArg>,
 }
 

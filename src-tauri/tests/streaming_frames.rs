@@ -76,6 +76,8 @@ fn context_json_round_trips() {
                 ref_audio_name: "ref.wav".to_string(),
                 ref_text: "参考".to_string(),
                 description: None,
+                speaker_dir_name: None,
+                category: String::new(),
             }],
         },
         messages: vec![StreamingMessageEntry {
