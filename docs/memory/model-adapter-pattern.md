@@ -14,7 +14,7 @@ metadata:
 ## 模型体系
 项目采用 **Git 子模块 + 配置驱动** 的模型适配器架构。每个模型作为独立 Git 子模块存在于 `src-model/` 目录，通过标准化的命令行接口（`--params-file`）与后端 Pipeline 通信。
 
-## 支持的模型（6 个）
+## 支持的模型（7 个）
 
 | 模型 | 版本 | 子模块路径 | TTS | 声音克隆 | 微调 | 音色设计 | 设备 | 说明 |
 |------|------|-----------|-----|---------|------|---------|------|------|
@@ -23,6 +23,7 @@ metadata:
 | **qwen3_tts** | 1.7B/0.6B | `src-model/qwen3_tts` | ✅ | ✅ | ✅ | ✅ | CPU/CUDA | Qwen3 系列 TTS 模型 |
 | **vox_cpm2** | 2B | `src-model/vox_cpm2` | ✅ | ✅ | ✅ | ✅ | CPU/CUDA | 支持音色设计 (Voice Design) |
 | **moss_tts_local** | 1.7B | `src-model/moss_tts_local` | ✅ | ✅ | ✅ | ❌ | CPU/CUDA | MOSS-TTS Local，标准脚本调用模式（`tts.py`/`voice_clone.py`/`training.py` + `--params-file`） |
+| **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ✅ | ❌ | CUDA | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech` + `model-training`），上游 OpenMOSS/MOSS-TTS |
 | **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，V2+ 为实验性 |
 
 > 特性矩阵、设备支持与支持语言以各子模块 `configs/model-config.json` 的 `supportedFeatureList` / `supportedDevices` / `supportedLanguages` 为准（应用启动时扫描）。
@@ -121,6 +122,17 @@ src-model/dots_tts/
 - 流匹配采样: RF Euler，默认 40 步；CFG 分文本 (`cfgScaleText` 3.0) 与说话人 (`cfgScaleSpeaker` 5.0) 两路
 - 额外预热 HF 缓存: `Aratako/Semantic-DACVAE-Japanese-32dim`、`llm-jp/llm-jp-3-150m`
 - 入口脚本: `tts.py` / `voice_clone.py` / `voice_design.py` / `training.py` / `download.py`，`infer.py` 从克隆仓库根目录运行（经 `sys.path[0]` 导入 `irodori_tts` 包，不做 editable install）
+
+## moss_tts_realtime 模型详解
+
+- 上游: GitHub `OpenMOSS/MOSS-TTS`（克隆到 `base-models/moss_tts_realtime/`，cwd=仓库根，零改动上游，只 `import` `mossttsrealtime` 包）；权重 HF `OpenMOSS-Team/MOSS-TTS-Realtime`（基座）+ `OpenMOSS-Team/MOSS-Audio-Tokenizer`（codec）。
+- **仅 CUDA**（`supportedDevices: ["cuda"]`）；`supportedFeatureList: ["streaming-speech", "model-training"]`（无 TTS/克隆/设计单次任务）。
+- **首个实现会话级 `streaming.py` 契约的适配器**：自写会话循环（读 `streaming.params.json` + `context.json` basic.speakers，轮询 `input.jsonl`，按 `contextId` 顺序合成，stdout 输出 started/chunk/finished/error 帧）。用法对齐上游 `example_multiturn_stream_to_tts.py`（`MossTTSRealtimeStreamingSession`/`MossTTSRealtimeInference`/`AudioStreamDecoder`）。多轮语义取最简：每消息独立合成（voice prompt + 文本 -> 音频），轮间不保 KV cache、不采集 user 音频。
+- **chunk 字节格式**：首 chunk = 44 字节 WAV 头（data size 哨兵 `0xFFFFFFFF`）+ PCM16，后续 chunk = PCM16，前端 `useStreamableAudioPlayer` 累加成单个 `audio/wav` Blob 整播。
+- **微调**：统一 JSONL `{fid,audio,text,language?}` -> MOSS `conversations` 格式（`map_to_conversations`）-> subprocess 上游 `finetuning/prepare_data.py`（预编码 audio_codes）+ `finetuning/sft.py`（accelerate SFT）-> 规整最大 `checkpoint-epoch-{N}` 为 `checkpoint_final/`。单卡直接 `python` 调上游脚本（`Accelerator` 单进程），多卡 `accelerate launch` 留待未来。
+- **trained 说话人回接流式**：微调产物 `<model_root_path>/<speaker_dir_name>/checkpoint_final/` 经 `StreamingSpeakerForm` trained 类别从 `list_speaker_infos`(status=Ready) 选择；streaming.py 加载该 checkpoint 合成。一会话至多一个 trained 说话人。
+- 入口脚本: `streaming.py` / `training.py` / `download.py` / `common.py` / `params.py` / `params_entity.py`（含 `StreamingSpeech` TaskKind，显式映射 `TaskKind -> args 嵌套键`，因 kind="StreamingSpeech" 而 args 键="Streaming"）。
+- 适配器纯逻辑单测: `src-model/moss_tts_realtime/tests/`（pytest，31 用例，覆盖 configs/common/params_entity/params/wav_frames/training_mapping）。
 
 ## 关联记忆
 - [[project-overview]] - 项目全貌
