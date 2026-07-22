@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
 import type { StreamingSpeechTaskResult } from '@/types/domain';
-import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerConfig } from '@/types/streaming';
+import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerCategory, StreamingSpeakerConfig } from '@/types/streaming';
 
 /**
  * 需要参考文本的模型集合（对齐 TextToSpeechView 的 DYNAMIC_REFERENCE_BASE_MODELS）。
@@ -14,7 +14,7 @@ import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerConf
 export const REQUIRES_REF_TEXT_MODELS = new Set(['gpt_sovits_cpufast']);
 export const requiresRefText = (baseModel: string) => REQUIRES_REF_TEXT_MODELS.has(baseModel);
 
-/** 新增/编辑说话人时由表单提交的输入（不含 id/category/时间，时间由后端生成）。 */
+/** 新增/编辑说话人时由表单提交的输入（不含 id/时间，时间由后端生成）。 */
 export interface StreamingSpeakerInput {
   name: string;
   baseModel: string;
@@ -23,6 +23,10 @@ export interface StreamingSpeakerInput {
   refAudioName: string;
   refText: string;
   description?: string;
+  /** 说话人来源类别，缺省视为 voice-clone。trained 时从 speakerStore 选择已训练说话人。 */
+  category?: StreamingSpeakerCategory;
+  /** trained 说话人 = speaker_id；voice-clone 无。 */
+  speakerDirName?: string;
 }
 
 let speakerSeed = 0;
@@ -57,7 +61,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const addSpeaker = (payload: StreamingSpeakerInput): StreamingSpeakerConfig => {
     const speaker: StreamingSpeakerConfig = {
       id: nextSpeakerId(),
-      category: 'voice-clone',
+      category: payload.category ?? 'voice-clone',
+      speakerDirName: payload.speakerDirName,
       name: payload.name,
       baseModel: payload.baseModel,
       modelVersion: payload.modelVersion,
@@ -141,7 +146,9 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
               refAudioPath: s.refAudioPath,
               refAudioName: s.refAudioName,
               refText: s.refText,
-              description: s.description
+              description: s.description,
+              category: s.category,
+              speakerDirName: s.speakerDirName
             }))
           }
         });
