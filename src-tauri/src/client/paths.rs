@@ -12,6 +12,7 @@ pub const MODELS: &str = "/api/models";
 pub const MODELS_DEVICE_TYPE: &str = "/api/models/device-type";
 pub const MODEL_BY_ID: &str = "/api/models/{id}";
 pub const MODEL_INSTALL: &str = "/api/models/{id}/install";
+pub const MODEL_CURRENT_DEVICE: &str = "/api/models/{id}/current-device";
 
 // ---- History ----
 pub const HISTORY: &str = "/api/history";

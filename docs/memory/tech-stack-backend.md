@@ -9,7 +9,7 @@ metadata:
 
 # 后端架构 (Tauri 2 / Rust)
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`
+> 状态截至 2026-07-27 · 分支 `v.0.12.0`
 
 ## 目录结构
 ```
@@ -36,14 +36,14 @@ src-tauri/src/
 │
 ├── hooks/                         # Tauri 命令层
 │   ├── mod.rs                     # load_hooks() 注册所有命令
-│   ├── model_info.rs              # list_model_infos, get_device_type, install_model, uninstall_model
+│   ├── model_info.rs              # list_model_infos, get_device_type, install_model, uninstall_model, set_model_current_device
 │   ├── speaker_info.rs            # create_speaker_info, import_model_as_speaker, list/update/delete
 │   ├── task_history.rs            # 任务创建/查询/取消 + 音频获取/导出/删除
 │   ├── streaming.rs               # 流式语音命令（create/send/cancel）+ AudioStreamEvent 协议
 │   └── settings.rs                # get_settings_config, save_settings_config, get_ui_config
 │
 ├── migration/                     # 数据库迁移 (SeaORM Migration)
-│   ├── mod.rs                     # Migrator + schema version 28 + rename_column_if_needed 守卫
+│   ├── mod.rs                     # Migrator + schema version 29 + rename_column_if_needed 守卫
 │   ├── create_local_schema.rs     # 初始建表
 │   ├── m20260508_000002_make_tts_speaker_nullable.rs
 │   ├── m20260508_000003_add_model_download_type.rs
@@ -54,10 +54,11 @@ src-tauri/src/
 │   ├── m20260604_000008_add_voice_design_tasks.rs
 │   ├── m20260626_000009_add_model_supported_languages_and_drop_speaker_languages.rs
 │   ├── m20260706_000010_rename_speakers_name_to_speaker_name.rs
-│   └── m20260718_000011_add_streaming_tasks.rs  # schema 27->28
+│   ├── m20260718_000011_add_streaming_tasks.rs  # schema 27->28
+│   └── m20260723_000012_add_model_current_device.rs  # schema 28->29
 │
 ├── service/
-│   ├── mod.rs                     # Service trait (24 业务方法) + ServiceImpl(Local/Remote) 分发
+│   ├── mod.rs                     # Service trait (25 业务方法) + ServiceImpl(Local/Remote) 分发
 │   ├── models.rs                  # 所有业务模型枚举与结构体统一定义 (含流式 payload/result)
 │   ├── local/                     # 本地业务逻辑层
 │   │   ├── mod.rs                 # LocalService 定义 + impl Service 委托 + 通用任务句柄方法
@@ -71,8 +72,8 @@ src-tauri/src/
 │   │   │   ├── voice_clone_task.rs
 │   │   │   ├── voice_design_task.rs
 │   │   │   └── streaming_task.rs
-│   │   ├── model_info.rs          # 模型安装/卸载/设备检测
-│   │   ├── supported_models.rs    # 模型目录加载 -> ModelInfo 列表
+│   │   ├── model_info.rs          # 模型安装/卸载/设备检测/当前设备设置
+│   │   ├── supported_models.rs    # 模型目录加载 -> ModelInfo 列表 + current_device 回填/保留
 │   │   ├── speaker.rs             # 说话人 CRUD + 模型导入
 │   │   ├── history.rs             # 历史记录查询 (含 load_streaming_detail)
 │   │   ├── tts.rs                 # TTS 任务创建 + start_tts_inference
@@ -147,7 +148,7 @@ Pipeline 通过 shell 脚本包装器 `begin_llm_task` 执行 Python 脚本（�
 ### 远程存储模式 (RemoteService / ApiClient) - 开发中
 后端第二种存储后端 `RemoteService`，与 `LocalService` 并列实现同一 `Service` trait。
 
-- **`Service` trait** (`service/mod.rs`)：24 个业务方法 + `new`/`close` 生命周期（含流式 3 方法：`create_streaming_speech_task`/`send_streaming_message`/`cancel_streaming_task`）。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
+- **`Service` trait** (`service/mod.rs`)：25 个业务方法 + `new`/`close` 生命周期（含流式 3 方法：`create_streaming_speech_task`/`send_streaming_message`/`cancel_streaming_task`；含模型当前设备 `set_model_current_device`）。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
 - **`client::ApiClient`** (`client/mod.rs`)：持有 `api_url` + 可选 `api_token`，方法签名与 `Service` trait 业务方法一一对应。**当前为占位实现**--`placeholder()` 打印 method/url/params 后 `bail!("client HTTP 调用尚未接入")`，即 Remote 模式当前会报错，不可用。
 - **`client::paths`** / **`client::entity`**：远端 API 路径常量 + `CommonResponse<T>`/分页响应边界转换。
 - **`utils::HttpClient`** (`utils/http.rs`)：封装 `reqwest::Client`（30s 超时 + Bearer Token），`#[allow(dead_code)]` 前瞻基础设施。
@@ -156,6 +157,14 @@ Pipeline 通过 shell 脚本包装器 `begin_llm_task` 执行 Python 脚本（�
 
 ### speakers 表 speaker_name 列
 DB 列 `speakers.speaker_name`（`rename_column_if_needed` 守卫）。`entity/speaker.rs` 字段 `speaker_name`。`service/models.rs` 的 `SpeakerInfo`/`CreateSpeakerPayload`/`UpdateSpeakerPayload`/`ImportModelAsSpeakerPayload` 字段统一 `speaker_name`（camelCase `speakerName`）。前端联动见 [[tech-stack-frontend]]，DB 文件同步见 [[db-schema-sync-rule]]。
+
+### model_info.current_device 列
+DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260723_000012`）。存储用户在模型管理页选择的当前设备（`Option<HardwareType>`）。
+- **写入**：`LocalService::set_model_current_device_impl`（`service/local/model_info.rs`）先校验 device ∈ `supported_devices`（非法 bail，不触达脚本），再 `update` 写库 + 刷新 `modify_time`，返回最新 `ModelInfo`。`parse_current_device` 将 None/空串/非法值统一归一为 None。
+- **sync 回填/保留**：`supported_models.rs::resolve_current_device_value` 在每次启动 sync 的 upsert insert+update 两分支均跑——已有值仍属 supportedDevices 则保留（跨会话持久化用户选择），失效且单设备则回填唯一设备，多设备无选择则 None。
+- **speaker.rs** 的 `map_speaker_*` 也映射 currentDevice 到内嵌 ModelInfo。
+- **Remote**：`RemoteService` 委托 `ApiClient::set_model_current_device` -> `PUT /api/models/{id}/current-device`（`client/paths.rs::MODEL_CURRENT_DEVICE`，当前占位实现）。
+- **测试**：`tests/model_hooks.rs` 4 个新用例（单设备回填 / 合法写入持久化 / 不支持设备拒绝 / 未知 model_id 报错）。
 
 ### 流式语音生成 (StreamingSpeech)
 会话级长期进程的实时流式语音合成，区别于一次性脚本的 TTS/克隆/设计。完整架构（任务类型/DB/hooks/Service/LocalService 会话层/Pipeline runner/帧协议/并发模型/清扫/测试）见 [[streaming-speech-architecture]]。要点：
@@ -175,6 +184,7 @@ DB 列 `speakers.speaker_name`（`rename_column_if_needed` 守卫）。`entity/s
 | `get_device_type` | model_info | 查询设备类型 |
 | `install_model` | model_info | 安装模型 |
 | `uninstall_model` | model_info | 卸载模型 |
+| `set_model_current_device` | model_info | 设置模型当前设备（校验 ∈ supportedDevices 后持久化 currentDevice） |
 | `create_speaker_info` | speaker_info | 创建说话人 |
 | `import_model_as_speaker` | speaker_info | 导入模型为说话人 |
 | `list_speaker_infos` | speaker_info | 列出说话人 - **分页** `PageRequest<SpeakerFilter>` -> `SpeakerPageResult` |

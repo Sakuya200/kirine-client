@@ -138,6 +138,16 @@ impl ApiClient {
         self.placeholder("DELETE", &path, &params).await
     }
 
+    pub async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        let path = paths::with_id(paths::MODEL_CURRENT_DEVICE, model_id);
+        let params = json!({ "modelId": model_id, "device": device }).to_string();
+        self.placeholder("PUT", &path, &params).await
+    }
+
     // ================================ History ================================
 
     pub async fn list_history_records(

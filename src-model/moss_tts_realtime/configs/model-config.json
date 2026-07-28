@@ -8,7 +8,7 @@
       "requiredModelNameList": ["moss_tts_realtime"],
       "requiredModelRepoIdList": [],
       "supportedDevices": ["cuda"],
-      "supportedFeatureList": ["streaming-speech", "model-training"],
+      "supportedFeatureList": ["streaming-speech"],
       "supportedLanguages": ["chinese", "english", "japanese", "korean"]
     }
   ],

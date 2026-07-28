@@ -428,6 +428,7 @@ pub struct ModelInfo {
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,
     pub supported_devices: Vec<HardwareType>,
+    pub current_device: Option<HardwareType>,
     pub supported_languages: Vec<AppLanguage>,
     pub downloaded: bool,
     pub create_time: String,

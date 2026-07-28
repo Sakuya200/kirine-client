@@ -25,6 +25,7 @@ if ([string]::IsNullOrWhiteSpace($baseModel)) {
 $modelRoot = Join-Path $srcModelRoot $baseModel
 $requirementsFile = Join-Path $modelRoot 'requirements.txt'
 $torchRequirementsFile = Join-Path $modelRoot 'requirements-torch.txt'
+$postTorchRequirementsFile = Join-Path $modelRoot 'requirements-post-torch.txt'
 # Prefer the environment that already exists on disk (venv or conda_env).
 # Only when neither exists do we fall back to conda-CLI detection to decide
 # which one to create — this keeps an existing venv working after the user
@@ -387,6 +388,15 @@ function Ensure-BaseDependencies {
     Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] base Python dependencies are ready'
 }
 
+function Ensure-PostTorchDependencies {
+    if (-not (Test-Path -LiteralPath $postTorchRequirementsFile)) {
+        return
+    }
+
+    Invoke-LoggedCommand -Description 'install post-torch requirements' -Command $venvPython -Arguments @('-m', 'pip', 'install', '-r', $postTorchRequirementsFile)
+    Append-TaskLog -TaskLogFile $taskLogFile -Value '[init-task-runtime] post-torch dependencies are ready'
+}
+
 function Test-TorchCpuRuntime {
     return Test-LoggedCommand -Description 'verify existing torch runtime' -Command $venvPython -Arguments (Get-TorchCpuVerifyArguments)
 }
@@ -509,6 +519,8 @@ try {
             $null = Install-CompatibleTorchCuda -CudaCandidates $cudaCandidates
         }
     }
+
+    Ensure-PostTorchDependencies
 
     if ($parsed['--cpu-mode']) {
         Invoke-LoggedCommand -Description 'verify torch CPU runtime after dependency install' -Command $venvPython -Arguments (Get-TorchCpuVerifyArguments)

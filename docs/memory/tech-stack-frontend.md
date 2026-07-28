@@ -9,7 +9,7 @@ metadata:
 
 # 前端架构 (Vue 3 + TypeScript)
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`
+> 状态截至 2026-07-27 · 分支 `v.0.12.0`
 
 ## 目录结构
 ```
@@ -18,7 +18,7 @@ src/
 ├── components/
 │   ├── common/             # 通用 UI 组件
 │   │   ├── BaseDialog.vue
-│   │   ├── BaseListbox.vue
+│   │   ├── BaseListbox.vue          # 通用下拉（`teleport` prop 可将面板 Teleport 到 body 以 fixed 跟随按钮，避免被表格 overflow 裁切）
 │   │   ├── BaseLoadingIndicator.vue
 │   │   ├── BaseLoadingBanner.vue
 │   │   ├── BaseButton.vue
@@ -70,7 +70,7 @@ src/
 │   └── usePollingResume.ts  # 系统睡眠/锁屏唤醒后追赶刷新
 ├── routers/index.ts         # 路由定义 (10 路由，含 /streaming-speech)
 ├── stores/
-│   ├── models.ts            # 模型列表 CRUD + 设备类型 + 功能检测 + 安装失败追踪 (failedModelIds)
+│   ├── models.ts            # 模型列表 CRUD + 设备类型 + 功能检测 + 当前设备选择 (setCurrentDevice) + 安装失败追踪 (failedModelIds)
 │   ├── speakers.ts          # 说话人 CRUD + 导入
 │   ├── streamingSpeech.ts   # 流式语音会话状态 (说话人/消息/会话配置 + create/send/cancel invoke)
 │   ├── taskPreferences.ts   # 任务偏好 (fixedBaseModel)
@@ -89,7 +89,7 @@ src/
 │   ├── TextToSpeechView.vue     # TTS
 │   ├── VoiceCloneView.vue       # 声音克隆
 │   ├── VoiceDesignView.vue      # 音色设计
-│   ├── ModelManageView.vue      # 模型管理
+│   ├── ModelManageView.vue      # 模型管理（含「当前设备」列，BaseListbox teleport）
 │   ├── SpeakersView.vue         # 说话人
 │   ├── StreamingSpeechView.vue  # 流式语音 (ChatUI)
 │   ├── HistoryView.vue          # 历史记录
@@ -117,7 +117,7 @@ src/
 - `streaming.ts` 为流式语音前端类型，与 Rust 后端契约对齐（见 [[data-flow-and-types]]）
 
 ### 状态管理
-- `models` store：模型列表、设备检测、install/uninstall、feature 检测（`supportsFeature`）、设备/语言访问器（`getSupportedDevices` / `getSupportedLanguages`，空时回退全部）
+- `models` store：模型列表、设备检测、install/uninstall、feature 检测（`supportsFeature`）、设备/语言访问器（`getSupportedDevices` / `getSupportedLanguages`，空时回退全部）。`normalizeModelInfo` 将 `currentDevice` 归一为合法且 ∈ supportedDevices 的 HardwareType，否则 null；`setCurrentDevice(modelId, device)` invoke `set_model_current_device` 写库并即时替换本地条目。`installModel`/`reinstallModel` 需显式 device 参数（不再默认 Cpu），ModelManageView 传当前模型的 `currentDevice`，未选设备时安装按钮禁用。
 - `speakers` store：说话人 CRUD、模型导入为说话人
 - `streamingSpeech` store：流式语音会话状态--本地说话人列表（语音克隆式，不接入 speakers）、聊天消息、会话配置、抽屉开关。`sendMessage` 首条消息 `invoke('create_streaming_speech_task')` 拿 taskId 回填，后续 `invoke('send_streaming_message', { onEvent: Channel })` 接收流式事件；取消 `invoke('cancel_streaming_task')`。防连点/回车连击产生僵尸会话。流式接收交 `StreamableAudioPlayer(mode='stream')`。
 - `taskPreferences` store：当前任务的偏好设置（如固定基础模型）

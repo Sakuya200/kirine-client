@@ -98,6 +98,14 @@ impl Service for RemoteService {
         self.client.uninstall_model(model_id).await
     }
 
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        self.client.set_model_current_device(model_id, device).await
+    }
+
     async fn list_history_records(
         &self,
         request: PageRequest<HistoryFilter>,

@@ -55,6 +55,7 @@ Kirine Client 的模型链路分为三层，适配器位于最底层：
 | `download.py` | 克隆上游仓库 / 下载权重（`downloadType: Custom` 时） | 视情况 |
 | `requirements.txt` | 基础 Python 依赖 | ✅ |
 | `requirements-torch.txt` | Torch 运行时依赖（CPU/CUDA 由脚本切换） | ✅ |
+| `requirements-post-torch.txt` | 依赖 torch 的运行时依赖（如 deepspeed），由 init_task_runtime 在 torch 装完后安装 | 可选 |
 | `__init__.py` | 包标识（部分适配器兼作 TTS 入口） | ✅ |
 
 > 各适配器因上游差异略有不同（见 [§8 各适配器实现差异](#8-各适配器实现差异)），新增适配器建议遵循上述 irodori 结构。
@@ -351,12 +352,13 @@ if __name__ == "__main__":
 
 仅在 `model-config.json` 的 `downloadType` 为 `Custom` 时由下载脚本调用。职责是克隆上游仓库、下载权重、预热 tokenizer/codec 等离线资产。`downloadType: HF-Like` 的适配器（如 `qwen3_tts`）不需要此文件，由运行时脚本按 `requiredModelRepoIdList` 直接从 Hugging Face 拉取。
 
-### 5.6 `requirements.txt` / `requirements-torch.txt`
+### 5.6 `requirements.txt` / `requirements-torch.txt` / `requirements-post-torch.txt`
 
-- `requirements.txt`：基础 Python 依赖（transformers、safetensors、librosa 等），由 `init_task_runtime` 在创建 venv/conda_env 时安装。
+- `requirements.txt`：基础 Python 依赖（transformers、safetensors、librosa 等），由 `init_task_runtime` 在创建 venv/conda_env 时安装（此时 torch 尚未装入，故此文件不得包含依赖 torch 的包）。
 - `requirements-torch.txt`：Torch 运行时依赖，由 `ensure_torch_runtime` 在 CPU/CUDA 切换时按 `index-url` 安装对应轮子。
+- `requirements-post-torch.txt`：可选；依赖 torch 的运行时依赖（构建需要 torch 已就绪），由 `init_task_runtime` 在 torch 安装完成后安装。文件不存在则跳过，其他适配器不受影响。
 
-两个文件共同保证不同适配器的依赖互不污染（每个适配器独立 venv/conda_env）。
+三个文件共同保证不同适配器的依赖互不污染（每个适配器独立 venv/conda_env）。
 
 ---
 

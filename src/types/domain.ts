@@ -150,6 +150,7 @@ export interface ModelInfo {
   requiredModelRepoIdList: string[];
   supportedFeatureList: string[];
   supportedDevices: HardwareType[];
+  currentDevice: HardwareType | null;
   supportedLanguages: AppLanguage[];
   downloaded: boolean;
   createTime: string;

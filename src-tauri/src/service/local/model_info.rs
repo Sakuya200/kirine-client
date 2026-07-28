@@ -238,6 +238,31 @@ impl LocalService {
         })
     }
 
+    pub(crate) async fn set_model_current_device_impl(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        let row = self.find_model_info_row_by_id(model_id).await?;
+        let model_info = map_model_info(row.clone())?;
+        if !model_info.supported_devices.contains(&device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                model_info.model_name,
+                model_info.model_version,
+                device,
+                model_info.supported_devices
+            );
+        }
+
+        let mut active_model: model_info_entity::ActiveModel = row.into();
+        active_model.current_device = Set(Some(device.as_str().to_string()));
+        active_model.modify_time = Set(now_string()?);
+        active_model.update(self.orm()).await?;
+
+        self.get_model_info_impl(model_id).await
+    }
+
     pub(crate) async fn get_device_type_impl(
         &self,
         base_model: &str,
@@ -420,6 +445,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,
         supported_devices: parse_json_field::<Vec<HardwareType>>(&row.supported_devices)?,
+        current_device: parse_current_device(row.current_device.as_deref()),
         supported_languages: parse_json_field::<Vec<AppLanguage>>(&row.supported_languages)?,
         downloaded: row.downloaded,
         create_time: row.create_time,
@@ -435,6 +461,15 @@ where
         let normalized = value.replace(r#"\""#, r#"""#);
         serde_json::from_str(&normalized).map_err(|_| first_err.into())
     })
+}
+
+/// 解析 model_info.current_device：None / 空串 / 非法值统一归一为 None，
+/// 合法 "cpu" / "cuda" / "cuda:0" 解析为对应 HardwareType。
+fn parse_current_device(value: Option<&str>) -> Option<HardwareType> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<HardwareType>().ok())
 }
 
 fn parse_detected_device_type(output: &str) -> Option<HardwareType> {

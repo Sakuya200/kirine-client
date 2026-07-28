@@ -54,6 +54,7 @@ create table if not exists model_info
     required_model_repo_id_list_json text                                             not null,
     supported_feature_list_json      text                                             not null,
     supported_devices                text        default '[]'::text                   not null,
+    current_device                   text,
     supported_languages              text        default '["chinese","english","japanese"]'::text not null,
     create_time                      timestamp                                        not null,
     modify_time                      timestamp                                        not null,

@@ -7,7 +7,6 @@ from pathlib import Path
 
 
 class TaskKind(str, Enum):
-    TRAINING = "Training"
     TEXT_TO_SPEECH = "TextToSpeech"
     VOICE_CLONE = "VoiceClone"
     VOICE_DESIGN = "VoiceDesign"
@@ -28,7 +27,6 @@ class TaskKind(str, Enum):
 # kind="StreamingSpeech" 而 args 嵌套键="Streaming"。故显式映射，避免用 kind.value
 # 取 args 键时失配（irodori 无流式，故其 params_entity 可直接用 kind.value）。
 _ARGS_KEY_BY_KIND: dict["TaskKind", str] = {
-    TaskKind.TRAINING: "Training",
     TaskKind.TEXT_TO_SPEECH: "TextToSpeech",
     TaskKind.VOICE_CLONE: "VoiceClone",
     TaskKind.VOICE_DESIGN: "VoiceDesign",
@@ -60,13 +58,6 @@ def _coerce_required_int(value: object, label: str) -> int:
     if value is None:
         raise ValueError(f"Malformed params payload: {label} is required")
     return int(value)
-
-
-def _coerce_required_speaker_name(value: dict[str, object], label: str) -> str:
-    candidate = value.get("speaker_name")
-    if candidate is None:
-        raise ValueError(f"Malformed params payload: {label} is required")
-    return str(candidate)
 
 
 def _coerce_optional_bool(value: object, fallback: bool = False) -> bool:
@@ -123,39 +114,6 @@ class CommonTaskArgs:
             model_root_path=_coerce_optional_str(value.get("model_root_path")),
             speaker_dir_name=_coerce_optional_str(value.get("speaker_dir_name")),
             model_params_json=model_params_json,
-        )
-
-
-@dataclass(frozen=True)
-class TrainingArgs:
-    common: CommonTaskArgs
-    input_jsonl: str
-    output_jsonl: str
-    output_model_path: str
-    batch_size: int
-    lr: str | None
-    num_epochs: int
-    speaker_name: str
-    gradient_accumulation_steps: int
-
-    @classmethod
-    def from_mapping(cls, value: dict[str, object]) -> "TrainingArgs":
-        return cls(
-            common=CommonTaskArgs.from_mapping(value),
-            input_jsonl=_coerce_required_str(value.get("input_jsonl"), "args.Training.input_jsonl"),
-            output_jsonl=_coerce_required_str(value.get("output_jsonl"), "args.Training.output_jsonl"),
-            output_model_path=_coerce_required_str(
-                value.get("output_model_path"),
-                "args.Training.output_model_path",
-            ),
-            batch_size=_coerce_required_int(value.get("batch_size"), "args.Training.batch_size"),
-            lr=_coerce_optional_str(value.get("lr")),
-            num_epochs=_coerce_required_int(value.get("num_epochs"), "args.Training.num_epochs"),
-            speaker_name=_coerce_required_speaker_name(value, "args.Training.speaker_name"),
-            gradient_accumulation_steps=_coerce_required_int(
-                value.get("gradient_accumulation_steps"),
-                "args.Training.gradient_accumulation_steps",
-            ),
         )
 
 
@@ -260,7 +218,7 @@ class ParamsEntity:
     model_version: str
     kind: TaskKind
     runtime: RuntimeOptions
-    args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs | StreamingArgs
+    args: TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs | StreamingArgs
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "ParamsEntity":
@@ -269,12 +227,10 @@ class ParamsEntity:
         args_key = _ARGS_KEY_BY_KIND[kind]
         nested_args = _expect_mapping(raw_args.get(args_key), f"args.{args_key}")
 
-        if kind is TaskKind.TRAINING:
+        if kind is TaskKind.TEXT_TO_SPEECH:
             parsed_args: (
-                TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs | StreamingArgs
-            ) = TrainingArgs.from_mapping(nested_args)
-        elif kind is TaskKind.TEXT_TO_SPEECH:
-            parsed_args = TextToSpeechArgs.from_mapping(nested_args)
+                TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs | StreamingArgs
+            ) = TextToSpeechArgs.from_mapping(nested_args)
         elif kind is TaskKind.VOICE_CLONE:
             parsed_args = VoiceCloneArgs.from_mapping(nested_args)
         elif kind is TaskKind.VOICE_DESIGN:
@@ -329,12 +285,6 @@ class ParamsEntity:
                 f"Expected {expected.value} params payload, got: {self.kind.value}"
             )
         return self
-
-    def training_args(self) -> TrainingArgs:
-        self.ensure_kind(TaskKind.TRAINING)
-        if not isinstance(self.args, TrainingArgs):
-            raise TypeError("Malformed params payload: training args were not parsed")
-        return self.args
 
     def tts_args(self) -> TextToSpeechArgs:
         self.ensure_kind(TaskKind.TEXT_TO_SPEECH)

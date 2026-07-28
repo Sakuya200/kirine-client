@@ -135,6 +135,14 @@ impl Service for LocalService {
         self.uninstall_model_impl(model_id).await
     }
 
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        self.set_model_current_device_impl(model_id, device).await
+    }
+
     async fn list_history_records(
         &self,
         request: PageRequest<HistoryFilter>,

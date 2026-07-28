@@ -61,16 +61,11 @@ def test_streaming_args_rejects_wrong_kind(tmp_path):
     p = _write(
         tmp_path,
         {
-            "kind": "Training",
+            "kind": "TextToSpeech",
             "args": {
-                "Training": {
-                    "input_jsonl": "/i",
-                    "output_jsonl": "/o",
-                    "output_model_path": "/m",
-                    "batch_size": 1,
-                    "num_epochs": 1,
-                    "speaker_name": "s",
-                    "gradient_accumulation_steps": 1,
+                "TextToSpeech": {
+                    "text": "hi",
+                    "output_path": "/o",
                 }
             },
         },

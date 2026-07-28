@@ -12,6 +12,7 @@ use sea_orm::{
 };
 
 use crate::{
+    config::HardwareType,
     service::{
         local::entity::speaker as speaker_entity,
         models::{
@@ -275,6 +276,12 @@ impl LocalService {
             )?,
             supported_feature_list: serde_json::from_str(&row.supported_feature_list_json)?,
             supported_devices: serde_json::from_str(&row.supported_devices)?,
+            current_device: row
+                .current_device
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse::<HardwareType>().ok()),
             supported_languages: serde_json::from_str(&row.supported_languages)?,
             downloaded: row.downloaded,
             create_time: row.create_time,

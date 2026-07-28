@@ -49,6 +49,7 @@ CREATE TABLE
         required_model_repo_id_list_json TEXT NOT NULL,
         supported_feature_list_json TEXT NOT NULL,
         supported_devices TEXT NOT NULL DEFAULT '[]',
+        current_device TEXT,
         supported_languages TEXT NOT NULL DEFAULT '["chinese","english","japanese"]',
         create_time TEXT NOT NULL,
         modify_time TEXT NOT NULL,

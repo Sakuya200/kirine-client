@@ -9,7 +9,7 @@ metadata:
 
 # 模型适配器架构
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`
+> 状态截至 2026-07-27 · 分支 `v.0.12.0`
 
 ## 模型体系
 项目采用 **Git 子模块 + 配置驱动** 的模型适配器架构。每个模型作为独立 Git 子模块存在于 `src-model/` 目录，通过标准化的命令行接口（`--params-file`）与后端 Pipeline 通信。
@@ -23,7 +23,7 @@ metadata:
 | **qwen3_tts** | 1.7B/0.6B | `src-model/qwen3_tts` | ✅ | ✅ | ✅ | ✅ | CPU/CUDA | Qwen3 系列 TTS 模型 |
 | **vox_cpm2** | 2B | `src-model/vox_cpm2` | ✅ | ✅ | ✅ | ✅ | CPU/CUDA | 支持音色设计 (Voice Design) |
 | **moss_tts_local** | 1.7B | `src-model/moss_tts_local` | ✅ | ✅ | ✅ | ❌ | CPU/CUDA | MOSS-TTS Local，标准脚本调用模式（`tts.py`/`voice_clone.py`/`training.py` + `--params-file`） |
-| **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ✅ | ❌ | CUDA | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech` + `model-training`），上游 OpenMOSS/MOSS-TTS |
+| **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ❌ | ❌ | CUDA | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech`），上游 OpenMOSS/MOSS-TTS |
 | **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，V2+ 为实验性 |
 
 > 特性矩阵、设备支持与支持语言以各子模块 `configs/model-config.json` 的 `supportedFeatureList` / `supportedDevices` / `supportedLanguages` 为准（应用启动时扫描）。
@@ -68,6 +68,12 @@ python <model>/<task>.py --params-file /path/to/params.json
 - 下载方式 (Git LFS / HTTP 等)
 
 > 说话人对象的 `languages` 字段已移除；模型级 `supportedLanguages` 取而代之。`AppLanguage` 枚举含 Chinese/English/Japanese/**Korean** 四种（`service/models.rs` + `src/enums/language.ts`）。
+
+### 模型当前设备选择 (currentDevice)
+`model_info.current_device`（schema 29）存储用户在模型管理页为每模型选择的当前设备，决定 `install_model`/重装使用的设备（不再默认 Cpu）。
+- 单设备模型（如 moss_tts_realtime 仅 cuda、gpt_sovits_cpufast 仅 cpu）：sync 时自动回填唯一设备，前端下拉只读。
+- 多设备模型（cpu+cuda）：初始留空，用户须主动选择后才能点安装（按钮禁用兜底）。
+- 选择跨 sync 持久化：已有值仍属 `supportedDevices` 则保留，失效才纠偏。详见 [[tech-stack-backend]] `model_info.current_device 列` 与 [[data-flow-and-types]]。
 
 ## dots_tts 模型详解
 
@@ -116,6 +122,16 @@ src-model/dots_tts/
 
 任务执行统一由包装器脚本 `begin_llm_task.{ps1,sh}`（见 [[tech-stack-backend]] Pipeline 执行模型）驱动：解析 `--base-model/--script-path/--params-file/--log-path/--task-log-file`，选 python，注入 `-X utf8 -X faulthandler -u`，stdout/stderr 追加写入 task-log-file。Windows 与 Unix 包装器均已存在。
 
+### 依赖文件与安装顺序（init_task_runtime）
+
+每个适配器在 `<model_root>/` 下维护三类 requirements 文件，`init_task_runtime` 按固定顺序装入 venv/conda_env：
+
+1. `requirements.txt`：基础 Python 依赖（transformers/safetensors/librosa 等），建 venv 后最先装。**不得包含依赖 torch 的包**（此时 torch 尚未装入）。
+2. `requirements-torch.txt`：Torch 运行时依赖（torch/torchvision/torchaudio/torchcodec），按 CPU/CUDA `--index-url` 从 pytorch wheel 索引安装。
+3. `requirements-post-torch.txt`（可选）：依赖 torch 的运行时依赖（构建需 torch 已就绪），在 torch 装完后安装。文件不存在则跳过，其他适配器不受影响。
+
+`ensure_torch_runtime`（任务时切换 torch CPU/CUDA）只重装 `requirements-torch.txt`，不触碰基础/post-torch 依赖。torch 已初始化时 `init_task_runtime` 走早退路径，整体跳过依赖安装。
+
 ## irodori_tts_v3 模型详解
 
 - 上游: GitHub `Aratako/Irodori-TTS`，权重 HF `Aratako/Irodori-TTS-500M-v3`（基座）+ `Aratako/Irodori-TTS-600M-v3-VoiceDesign`（音色设计）
@@ -126,13 +142,14 @@ src-model/dots_tts/
 ## moss_tts_realtime 模型详解
 
 - 上游: GitHub `OpenMOSS/MOSS-TTS`（克隆到 `base-models/moss_tts_realtime/`，cwd=仓库根，零改动上游，只 `import` `mossttsrealtime` 包）；权重 HF `OpenMOSS-Team/MOSS-TTS-Realtime`（基座）+ `OpenMOSS-Team/MOSS-Audio-Tokenizer`（codec）。
-- **仅 CUDA**（`supportedDevices: ["cuda"]`）；`supportedFeatureList: ["streaming-speech", "model-training"]`（无 TTS/克隆/设计单次任务）。
+- **仅 CUDA**（`supportedDevices: ["cuda"]`）；`supportedFeatureList: ["streaming-speech"]`（无 TTS/克隆/设计/微调）。
 - **首个实现会话级 `streaming.py` 契约的适配器**：自写会话循环（读 `streaming.params.json` + `context.json` basic.speakers，轮询 `input.jsonl`，按 `contextId` 顺序合成，stdout 输出 started/chunk/finished/error 帧）。用法对齐上游 `example_multiturn_stream_to_tts.py`（`MossTTSRealtimeStreamingSession`/`MossTTSRealtimeInference`/`AudioStreamDecoder`）。多轮语义取最简：每消息独立合成（voice prompt + 文本 -> 音频），轮间不保 KV cache、不采集 user 音频。
 - **chunk 字节格式**：首 chunk = 44 字节 WAV 头（data size 哨兵 `0xFFFFFFFF`）+ PCM16，后续 chunk = PCM16，前端 `useStreamableAudioPlayer` 累加成单个 `audio/wav` Blob 整播。
-- **微调**：统一 JSONL `{fid,audio,text,language?}` -> MOSS `conversations` 格式（`map_to_conversations`）-> subprocess 上游 `finetuning/prepare_data.py`（预编码 audio_codes）+ `finetuning/sft.py`（accelerate SFT）-> 规整最大 `checkpoint-epoch-{N}` 为 `checkpoint_final/`。单卡直接 `python` 调上游脚本（`Accelerator` 单进程），多卡 `accelerate launch` 留待未来。
-- **trained 说话人回接流式**：微调产物 `<model_root_path>/<speaker_dir_name>/checkpoint_final/` 经 `StreamingSpeakerForm` trained 类别从 `list_speaker_infos`(status=Ready) 选择；streaming.py 加载该 checkpoint 合成。一会话至多一个 trained 说话人。
-- 入口脚本: `streaming.py` / `training.py` / `download.py` / `common.py` / `params.py` / `params_entity.py`（含 `StreamingSpeech` TaskKind，显式映射 `TaskKind -> args 嵌套键`，因 kind="StreamingSpeech" 而 args 键="Streaming"）。
-- 适配器纯逻辑单测: `src-model/moss_tts_realtime/tests/`（pytest，31 用例，覆盖 configs/common/params_entity/params/wav_frames/training_mapping）。
+- **不提供微调**：上游 deepspeed 仅用于微调（`finetuning/sft.py` 的 ZeRO-3 可选路径）且在 Windows 构建安装受阻（pip build isolation 临时环境无 torch 触发 "Unable to pre-compile ops without torch installed"），故本适配器移除 `model-training` 能力与 `training.py`，仅保留推理。如需用已训练说话人，可外部产出 checkpoint 后按下条加载。
+- **trained 说话人回接流式**：外部产出的 `<model_root_path>/<speaker_dir_name>/checkpoint_final/` 经 `StreamingSpeakerForm` trained 类别从 `list_speaker_infos`(status=Ready) 选择；streaming.py 加载该 checkpoint 合成。一会话至多一个 trained 说话人。
+- 入口脚本: `streaming.py` / `download.py` / `common.py` / `params.py` / `params_entity.py`（含 `StreamingSpeech` TaskKind，显式映射 `TaskKind -> args 嵌套键`，因 kind="StreamingSpeech" 而 args 键="Streaming"）。
+- 适配器纯逻辑单测: `src-model/moss_tts_realtime/tests/`（pytest，覆盖 configs/common/params_entity/params/wav_frames）。
+- **打包与许可**：已纳入 Windows src-model 打包脚本 `scripts/windows/package_src_model.ps1`（`modelDirectories` 含 `moss_tts_realtime`）；子模块带 Apache 2.0 `LICENSE`（上游 OpenMOSS 许可）。
 
 ## 关联记忆
 - [[project-overview]] - 项目全貌

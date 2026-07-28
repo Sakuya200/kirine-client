@@ -154,3 +154,119 @@ async fn model_downloaded_flag_round_trips_in_db() -> Result<()> {
 
     harness.shutdown().await
 }
+
+#[tokio::test]
+async fn sync_backfills_current_device_for_single_device_models() -> Result<()> {
+    // sync_supported_models 的回填契约：
+    // - 单设备模型：current_device 自动回填为唯一设备（如 moss_tts_realtime -> cuda）
+    // - 多设备模型：current_device 留空（要求用户先选）
+    // 覆盖 upsert insert 分支的 resolve_current_device_value(None, ...)。
+    let harness = LocalServiceHarness::new("model-current-device-backfill").await?;
+    let models = harness.list_model_infos().await?;
+
+    let mut seen_single = false;
+    for m in &models {
+        if m.supported_devices.len() == 1 {
+            seen_single = true;
+            assert_eq!(
+                m.current_device,
+                Some(m.supported_devices[0]),
+                "单设备模型 {} 的 current_device 应被回填",
+                m.base_model
+            );
+        } else {
+            assert!(
+                m.current_device.is_none(),
+                "多设备模型 {} 初始 current_device 应为 None",
+                m.base_model
+            );
+        }
+    }
+    assert!(
+        seen_single,
+        "测试需要至少一个单设备模型以验证回填（检查 src-model 配置）"
+    );
+
+    harness.shutdown().await
+}
+
+#[tokio::test]
+async fn set_model_current_device_valid_updates_and_persists() -> Result<()> {
+    // 合法设备写入：返回值含新 currentDevice，且重新列表读取仍保留（跨会话持久化）。
+    let harness = LocalServiceHarness::new("model-set-device-valid").await?;
+    let models = harness.list_model_infos().await?;
+
+    let target = models
+        .iter()
+        .find(|m| m.supported_devices.len() >= 2)
+        .expect("需要至少一个多设备模型");
+    assert!(
+        target.current_device.is_none(),
+        "多设备模型初始 current_device 应为 None"
+    );
+    let device = target.supported_devices[0];
+
+    let updated = harness
+        .service()
+        .set_model_current_device(target.id, device)
+        .await?;
+    assert_eq!(updated.id, target.id);
+    assert_eq!(updated.current_device, Some(device));
+
+    let reloaded = harness.list_model_infos().await?;
+    let reloaded_target = reloaded
+        .iter()
+        .find(|m| m.id == target.id)
+        .expect("模型应存在");
+    assert_eq!(reloaded_target.current_device, Some(device));
+
+    harness.shutdown().await
+}
+
+#[tokio::test]
+async fn set_model_current_device_rejects_unsupported_device() -> Result<()> {
+    // 非法设备：单设备模型写入其不支持的另一设备 -> Err（不触达脚本，仅 DB 校验）。
+    let harness = LocalServiceHarness::new("model-set-device-invalid").await?;
+    let models = harness.list_model_infos().await?;
+
+    let target = models
+        .iter()
+        .find(|m| m.supported_devices.len() == 1)
+        .expect("需要至少一个单设备模型");
+    let only = target.supported_devices[0];
+    let other = if only == HardwareType::Cpu {
+        HardwareType::Cuda
+    } else {
+        HardwareType::Cpu
+    };
+
+    let err = harness
+        .service()
+        .set_model_current_device(target.id, other)
+        .await;
+    assert!(err.is_err(), "不支持设备应报错");
+
+    // 原值不被破坏
+    let reloaded = harness.list_model_infos().await?;
+    let reloaded_target = reloaded
+        .iter()
+        .find(|m| m.id == target.id)
+        .expect("模型应存在");
+    assert_eq!(reloaded_target.current_device, Some(only));
+
+    harness.shutdown().await
+}
+
+#[tokio::test]
+async fn set_model_current_device_errors_for_unknown_id() -> Result<()> {
+    // 负路径：不存在的 model_id 在行查找阶段即 Err。
+    let harness = LocalServiceHarness::new("model-set-device-unknown").await?;
+
+    let err = harness
+        .service()
+        .set_model_current_device(999_999, HardwareType::Cpu)
+        .await;
+    assert!(err.is_err(), "未知 model_id 应报错");
+
+    harness.shutdown().await
+}

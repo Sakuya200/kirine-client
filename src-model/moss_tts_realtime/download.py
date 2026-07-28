@@ -3,13 +3,13 @@
 流程：
 1. 将上游项目 git clone 到 ``<target-root-dir>/<base-model>``（即
    ``base-models/moss_tts_realtime`` = OpenMOSS/MOSS-TTS 仓库根）。
-2. 下载推理/训练所需权重到克隆目录的 ``models/`` 下：
-   - ``OpenMOSS-Team/MOSS-TTS-Realtime``      -> 基座权重（流式基座合成 / 训练初始化）
+2. 下载推理所需权重到克隆目录的 ``models/`` 下：
+   - ``OpenMOSS-Team/MOSS-TTS-Realtime``      -> 基座权重（流式基座合成）
    - ``OpenMOSS-Team/MOSS-Audio-Tokenizer``    -> 编解码器（voice prompt 编码 + 音频解码）
 
 依赖安装不在本脚本内完成--由 ``init_task_runtime.ps1`` 通过适配器的
 ``requirements.txt`` / ``requirements-torch.txt`` 装入共享的 conda_env/venv。
-本脚本不做 editable install：streaming.py / training.py 从克隆仓库根目录运行即可经
+本脚本不做 editable install：streaming.py 从克隆仓库根目录运行即可经
 ``sys.path[0]`` 导入 ``mossttsrealtime`` 包。
 """
 

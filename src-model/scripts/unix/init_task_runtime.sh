@@ -51,6 +51,7 @@ if [ -z "$REQUIREMENTS_FILE" ]; then
     REQUIREMENTS_FILE="$MODEL_ROOT/requirements.txt"
 fi
 TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-torch.txt"
+POST_TORCH_REQUIREMENTS_FILE="$MODEL_ROOT/requirements-post-torch.txt"
 
 # Prefer the environment that already exists on disk (venv or conda_env). Only when neither exists
 # do we fall back to conda-CLI detection to decide which one to create — this keeps an existing
@@ -296,6 +297,15 @@ ensure_base_dependencies() {
     append_log "[init-task-runtime] base Python dependencies are ready"
 }
 
+ensure_post_torch_dependencies() {
+    if [ ! -f "$POST_TORCH_REQUIREMENTS_FILE" ]; then
+        return 0
+    fi
+
+    run_checked "install post-torch requirements" "$VENV_PYTHON" -m pip install -r "$POST_TORCH_REQUIREMENTS_FILE"
+    append_log "[init-task-runtime] post-torch dependencies are ready"
+}
+
 install_compatible_torch_cuda() {
     candidates=$1
     failed_tags=''
@@ -364,6 +374,8 @@ else
         install_compatible_torch_cuda "$cuda_candidates" >/dev/null
     fi
 fi
+
+ensure_post_torch_dependencies
 
 if [ "$CPU_MODE" -eq 1 ]; then
     verify_torch_cpu_runtime "verify torch CPU runtime after dependency install"

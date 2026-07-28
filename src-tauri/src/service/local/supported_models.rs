@@ -8,7 +8,7 @@ use sea_orm::{
 use serde::Deserialize;
 
 use crate::{
-    config::{discover_model_config_file_paths, MODEL_CONFIG_FILE_NAME},
+    config::{discover_model_config_file_paths, HardwareType, MODEL_CONFIG_FILE_NAME},
     service::{
         local::entity::{model_info as model_info_entity, speaker as speaker_entity},
         models::{AppLanguage, ModelDownloadType, SpeakerSource, SpeakerStatus},
@@ -264,6 +264,12 @@ where
     if let Some(row) = existing {
         let downloaded = row.downloaded;
         let create_time = row.create_time.clone();
+        // current_device 跨 sync 保留用户选择：仅当原值失效（不再属于 supported_devices）
+        // 时才纠偏；单设备模型在原值缺失时回填唯一设备。
+        let current_device = resolve_current_device_value(
+            row.current_device.as_deref(),
+            &definition.supported_devices,
+        );
         let mut active_model: model_info_entity::ActiveModel = row.into();
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.model_name = Set(definition.model_name.trim().to_string());
@@ -275,11 +281,14 @@ where
         active_model.supported_devices = Set(supported_devices_json);
         active_model.supported_languages = Set(supported_languages_json);
         active_model.downloaded = Set(downloaded);
+        active_model.current_device = Set(current_device);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
         active_model.deleted = Set(0);
         active_model.update(connection).await?;
     } else {
+        // 新插入行：单设备模型自动回填 current_device，多设备留空待用户选择。
+        let current_device = resolve_current_device_value(None, &definition.supported_devices);
         model_info_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
             base_model: Set(definition.base_model.trim().to_string()),
@@ -290,6 +299,7 @@ where
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),
             supported_devices: Set(supported_devices_json),
+            current_device: Set(current_device),
             supported_languages: Set(supported_languages_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
@@ -301,6 +311,34 @@ where
     }
 
     Ok(())
+}
+
+/// 计算 model_info.current_device 应写入的值：
+/// - 已有值仍属于 supported_devices -> 保留（跨会话持久化用户选择）
+/// - 已有值缺失/失效且 supported_devices 仅 1 项 -> 回填该唯一设备（单设备自动选中）
+/// - 其余（多设备且无有效选择）-> None（要求用户先选）
+fn resolve_current_device_value(
+    existing: Option<&str>,
+    supported_devices: &[String],
+) -> Option<String> {
+    let parsed: Vec<HardwareType> = supported_devices
+        .iter()
+        .filter_map(|item| item.trim().to_ascii_lowercase().parse::<HardwareType>().ok())
+        .collect();
+
+    if let Some(existing_value) = existing {
+        if let Ok(existing_device) = existing_value.trim().parse::<HardwareType>() {
+            if parsed.contains(&existing_device) {
+                return Some(existing_device.as_str().to_string());
+            }
+        }
+    }
+
+    if parsed.len() == 1 {
+        return Some(parsed[0].as_str().to_string());
+    }
+
+    None
 }
 
 async fn upsert_speaker_definition<C>(

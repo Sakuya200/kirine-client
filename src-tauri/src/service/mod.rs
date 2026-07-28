@@ -70,6 +70,11 @@ pub trait Service: Send + Sync {
         device: HardwareType,
     ) -> Result<ModelMutationResult>;
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult>;
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo>;
     async fn list_history_records(
         &self,
         request: PageRequest<HistoryFilter>,

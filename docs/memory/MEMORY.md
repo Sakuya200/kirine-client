@@ -1,12 +1,12 @@
 # Kirine Client 项目记忆索引
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
+> 状态截至 2026-07-27 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
 
 - [Project Overview](project-overview.md) - 项目全貌、技术栈、核心功能、存储模式（Local/Remote）概览
 - [Frontend Architecture](tech-stack-frontend.md) - Vue 3 前端目录结构、配置驱动参数表单、UI 组件体系
 - [Backend Architecture](tech-stack-backend.md) - Tauri/Rust 后端模块、Hooks 层、配置系统、Pipeline、远程 client/RemoteService、流式语音会话层
 - [Streaming Speech Architecture](streaming-speech-architecture.md) - 流式语音生成全栈架构：会话级长期进程 runner、stdout 帧协议、contextId 多路分发、清扫、远程不支持
-- [Model Adapter Pattern](model-adapter-pattern.md) - 6 个模型适配器（含 irodori_tts_v3）、特性矩阵、参数文件执行、venv/conda_env 运行时
+- [Model Adapter Pattern](model-adapter-pattern.md) - 7 个模型适配器（含 irodori_tts_v3/moss_tts_realtime）、特性矩阵、参数文件执行、venv/conda_env 运行时、当前设备选择
 - [Data Flow & Types](data-flow-and-types.md) - 前后端通信、完整命令列表、类型与枚举对应、UI 配置类型、远程模式与 AudioAsset
 - [DB Schema Sync Rule](db-schema-sync-rule.md) - 表结构变更须同时更新 db/tables.sql 与 db/tables_pgsql.sql
 - [HistoryTaskType Sync Rule](history-task-type-sync-rule.md) - 前端 HistoryTaskType 枚举须与 Rust 端逐一对齐，新增任务类型两侧同步

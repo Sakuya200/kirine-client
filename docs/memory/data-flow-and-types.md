@@ -9,7 +9,7 @@ metadata:
 
 # 数据流与类型体系
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`
+> 状态截至 2026-07-27 · 分支 `v.0.12.0`
 
 ## 前后端通信
 前端通过 `@tauri-apps/api/core` 的 `invoke<T>(command, payload)` 调用后端 Tauri 命令。所有数据经过 serde 自动序列化/反序列化（后端用 `camelCase`，前端一致）。流式语音额外用 Tauri 2 `ipc::Channel<AudioStreamEvent>` 下发实时事件。
@@ -20,6 +20,7 @@ metadata:
 | `list_model_infos` | model_info | -> | 获取模型列表 (含特性矩阵、设备支持、下载状态) - **分页**: `PageRequest<ModelFilter>` -> `Page<ModelInfo>` |
 | `install_model` | model_info | -> | 安装模型 (init+download) |
 | `uninstall_model` | model_info | -> | 卸载模型 (清理产物+venv) |
+| `set_model_current_device` | model_info | -> | 设置模型当前设备 (校验 ∈ supportedDevices 后持久化 currentDevice，返回 ModelInfo) |
 | `get_device_type` | model_info | -> | 查询设备类型 (cpu/cuda) |
 | `create_speaker_info` | speaker_info | -> | 创建说话人 |
 | `import_model_as_speaker` | speaker_info | -> | 导入外部模型为说话人 |
@@ -101,7 +102,7 @@ runner (run_streaming_session, 长期存活):
 
 | TS 接口 (domain.ts) | Rust 结构体 (models.rs) | 用途 |
 |---------------------|------------------------|------|
-| `ModelInfo` | `ModelInfo` | 模型信息 (含特性矩阵、设备、下载状态) |
+| `ModelInfo` | `ModelInfo` | 模型信息 (含特性矩阵、supportedDevices、currentDevice、下载状态) |
 | `ModelMutationResult` | `ModelMutationResult` | 安装/卸载操作结果 (含路径变更) |
 | `SpeakerProfile` | `SpeakerInfo` | 说话人信息 |
 | `HistoryRecordBase` | `HistoryRecord` | 历史记录 (含 device, taskLog 字段) |
@@ -178,10 +179,19 @@ runner (run_streaming_session, 长期存活):
 - 前端 `useModelStore` 提供 `getSupportedLanguages(baseModel, modelVersion)`。4 个任务页的"输出语言"`BaseListbox` 用 computed `languageOptions`，watcher 在模型切换时重置。
 - 说话人侧无语言字段（`speakers.languages_json` 列已删除）；任务级 `language` 字段保留。
 
+## 模型当前设备 (currentDevice)
+
+模型管理页每模型可选「当前设备」，决定 `install_model`/`reinstallModel` 使用的设备（不再默认 Cpu）。
+
+- **字段**：`ModelInfo.currentDevice: HardwareType | null`（TS）/ `current_device: Option<HardwareType>`（Rust）。DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260723_000012`）。
+- **回填规则**（`supported_models.rs::resolve_current_device_value`，每次启动 sync 跑）：单设备模型自动回填唯一设备；多设备模型留空待用户选；已有值仍属 supportedDevices 则保留（跨 sync 持久化用户选择），失效则按上述规则纠偏。
+- **写入**：`set_model_current_device(modelId, device)` Tauri 命令 -> LocalService 校验 device ∈ supportedDevices 后写库（非法设备 Err，不触达脚本）；RemoteService 委托 ApiClient `PUT /api/models/{id}/current-device`。
+- **前端**：`models` store `normalizeModelInfo` 将缺省/非法/失效 currentDevice 归一为 null；`setCurrentDevice(modelId, device)` 写库并即时替换本地条目。ModelManageView 用 `BaseListbox(teleport)` 下拉展示，安装按钮在 currentDevice 为 null 时禁用。
+
 ## speakers 字段 speakerName + 远程存储模式
 
 - **speaker 字段**：`SpeakerProfile.speakerName`（对齐后端 `SpeakerInfo.speaker_name`）。create/update/import 三处 `invoke` payload key 统一为 `speakerName`。
-- **远程存储模式**：后端 `Service` trait 含 `RemoteService` 实现，`StorageMode::Remote` 时启用，经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`Service` trait 共 **24 业务方法** + `new`/`close`（含流式 3 方法）。`ApiClient` 当前为占位实现，Remote 模式不可用；流式三方法直接 bail 不支持。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
+- **远程存储模式**：后端 `Service` trait 含 `RemoteService` 实现，`StorageMode::Remote` 时启用，经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`Service` trait 共 **25 业务方法** + `new`/`close`（含流式 3 方法）。`ApiClient` 当前为占位实现，Remote 模式不可用；流式三方法直接 bail 不支持。`set_model_current_device` 对应远端 `PUT /api/models/{id}/current-device`。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
 
 ## UI 配置类型
 

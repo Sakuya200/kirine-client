@@ -19,6 +19,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         model_info::get_device_type,
         model_info::install_model,
         model_info::uninstall_model,
+        model_info::set_model_current_device,
         task_history::list_history_records,
         task_history::get_history_record,
         task_history::get_text_to_speech_audio,
