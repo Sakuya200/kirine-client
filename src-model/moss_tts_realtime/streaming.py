@@ -3,9 +3,10 @@
 对接 Rust 后端 ``run_streaming_session`` 契约：
 - 读 ``streaming.params.json`` (kind=StreamingSpeech) 取路径与运行时；
 - 读 ``context.json`` 的 ``basic.speakers``（trained 说话人带 speakerDirName）；
-- 轮询 ``input.jsonl``，按 contextId 顺序合成，stdout 输出 started/chunk/finished/error 帧；
-- chunk 字节：首 chunk = 44 字节 WAV 头（data size 哨兵 0xFFFFFFFF）+ PCM16，后续 chunk = PCM16，
-  拼接为合法 WAV（前端 useStreamableAudioPlayer 累加整播）。
+- 轮询 ``input.jsonl``，按 contextId 顺序合成，向 ``frames.jsonl`` 缓冲文件追加
+  started/chunk/finished/error 帧（Rust runner 轮询 tail 读取，不经 stdout）；
+- chunk 字节以 base64 编码；首 chunk = 44 字节 WAV 头（data size 哨兵 0xFFFFFFFF）
+  + PCM16，后续 chunk = PCM16，拼接为合法 WAV（前端 useStreamableAudioPlayer 累加整播）。
 
 多轮语义：每消息独立合成（voice prompt + 文本 -> 音频），轮间不保 KV cache，不采集 user 音频
 （超出"只实现流式语音生成"范围）。上游 API 用法对齐 ``example_multiturn_stream_to_tts.py``。
@@ -14,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import struct
 import sys
@@ -21,7 +23,14 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-from common import base_checkpoint, codec_path, resolve_trained_checkpoint
+from common import (
+    base_checkpoint,
+    codec_path,
+    ensure_ffmpeg_dlls,
+    ensure_package_on_path,
+    normalize_device,
+    resolve_trained_checkpoint,
+)
 from params import load_streaming_params
 
 SAMPLE_RATE = 24000
@@ -31,10 +40,14 @@ POLL_INTERVAL_SECONDS = 0.1
 # --------------------------------------------------------------------------- #
 # 帧协议
 # --------------------------------------------------------------------------- #
-def emit_frame(payload: dict) -> None:
-    """向 stdout 输出一行 JSON 帧（Rust runner 逐行读取分帧）。"""
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+def emit_frame(frames_file, payload: dict) -> None:
+    """向 frames.jsonl 追加一行 JSON 帧（Rust runner 轮询 tail 读取分帧）。
+
+    ``frames_file`` 为二进制 append 句柄（``run_session`` 打开，会话级持有）。
+    二进制模式避免 Windows 文本模式把 ``\\n`` 翻译成 ``\\r\\n``。
+    """
+    frames_file.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
+    frames_file.flush()
 
 
 def wav_header_sentinel(sample_rate: int = SAMPLE_RATE, channels: int = 1, bits: int = 16) -> bytes:
@@ -82,14 +95,14 @@ def _float32_np_to_pcm16(arr) -> bytes:
     return (arr * 32767).astype("<i2").tobytes()
 
 
-def emit_chunk(context_id: str, pcm: bytes, header_sent: bool) -> bool:
+def emit_chunk(context_id: str, pcm: bytes, header_sent: bool, frames_file) -> bool:
     """发一帧 chunk。首帧自动前置 WAV 头。返回（新的）header_sent 状态。"""
     if not pcm:
         return header_sent
     parts: list[bytes] = [] if header_sent else [wav_header_sentinel()]
     parts.append(pcm)
     data = b"".join(parts)
-    emit_frame({"type": "chunk", "contextId": context_id, "bytes": list(data)})
+    emit_frame(frames_file, {"type": "chunk", "contextId": context_id, "bytes": base64.b64encode(data).decode("ascii")})
     return True
 
 
@@ -190,35 +203,64 @@ def select_model_path(params, speakers: list[dict]) -> tuple[str, str | None]:
 
 
 def load_model_and_codec(params, speakers: list[dict]):
-    """加载 model + tokenizer + processor + codec。返回 (model, tokenizer, processor, codec, device)。"""
+    """加载 model + tokenizer + processor + codec。返回 (model, tokenizer, processor, codec, device)。
+
+    设备由 ``params.device``（经 ``normalize_device`` 归一化）决定：
+    - cuda：bf16/fp16 + sdpa，需可用 GPU；
+    - cpu：fp32 + eager，供本地无 GPU 测试（速度慢，仅用于验证流程）。
+    """
     import torch
     from transformers import AutoModel, AutoTokenizer
 
     from mossttsrealtime.modeling_mossttsrealtime import MossTTSRealtime
     from mossttsrealtime.processing_mossttsrealtime import MossTTSRealtimeProcessor
 
-    if not torch.cuda.is_available():
-        raise SystemExit("❌ MOSS-TTS-Realtime 仅支持 CUDA，未检测到可用 GPU。")
-
-    device = torch.device("cuda")
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    device_str = normalize_device(params.device)
+    if device_str.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise SystemExit(
+                "❌ 指定 device=cuda 但未检测到可用 GPU。如需本地无 GPU 测试，"
+                "请在模型设置中将设备选为 cpu。"
+            )
+        torch_device = torch.device("cuda")
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        attn_implementation = "sdpa"
+    elif device_str == "cpu":
+        torch_device = torch.device("cpu")
+        dtype = torch.float32
+        attn_implementation = "eager"
+    else:
+        raise SystemExit(
+            f"❌ 不支持的设备: {device_str}（moss_tts_realtime 仅支持 cuda / cpu）"
+        )
 
     model_path, trained_dir = select_model_path(params, speakers)
     print(
         f"[moss_tts_realtime] loading model from {model_path}"
-        + (f" (trained speaker dir={trained_dir})" if trained_dir else " (base)"),
+        + (f" (trained speaker dir={trained_dir})" if trained_dir else " (base)")
+        + f" on {device_str} ({dtype})",
+        file=sys.stderr,
         flush=True,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     processor = MossTTSRealtimeProcessor(tokenizer)
+    # 基座 checkpoint 以 bfloat16 存储（config.dtype=bfloat16），该 dtype 传播到
+    # language_config / local_config。MossTTSRealtime.__init__ 经 _from_config 构建
+    # language_model(Qwen3) 与 local_transformer 时，子模型按子 config 的 bf16 初始化；
+    # 而 top-level embed_tokens 按 from_pretrained 请求的 dtype 初始化。transformers 5.0
+    # 加载时（core_model_loading.py:1174）对每个参数取 ``empty_param.dtype != _dtype``
+    # 即回退到子模型 init dtype，故子模型落 bf16、embed_tokens 落请求 dtype——CPU 上请求
+    # fp32 即产生 fp32 embed 输出撞 bf16 language_model 权重，报
+    # "expected m1 and m2 to have the same dtype, but got: float != BFloat16"。
+    # 显式 ``.to(torch_device, dtype)`` 把整模型统一到目标 dtype（cpu=fp32 / cuda=bf16）。
     model = MossTTSRealtime.from_pretrained(
-        model_path, attn_implementation="sdpa", torch_dtype=dtype
-    ).to(device)
+        model_path, attn_implementation=attn_implementation, torch_dtype=dtype
+    ).to(torch_device, dtype)
     model.eval()
 
-    codec = AutoModel.from_pretrained(str(codec_path()), trust_remote_code=True).eval().to(device)
-    return model, tokenizer, processor, codec, device
+    codec = AutoModel.from_pretrained(str(codec_path()), trust_remote_code=True).eval().to(torch_device)
+    return model, tokenizer, processor, codec, torch_device
 
 
 def _sanitize_tokens(tokens, codebook_size: int, audio_eos_token: int):
@@ -271,6 +313,7 @@ def synthesize_one(
     text: str,
     context_id: str,
     output_audio_dir: Path,
+    frames_file,
 ) -> None:
     """单条消息合成：started -> chunk* -> finished（异常 -> error，不退出进程）。"""
     from mossttsrealtime.streaming_mossttsrealtime import (
@@ -279,7 +322,7 @@ def synthesize_one(
         MossTTSRealtimeStreamingSession,
     )
 
-    emit_frame({"type": "started", "contextId": context_id})
+    emit_frame(frames_file, {"type": "started", "contextId": context_id})
     accumulated = bytearray()
     header_sent = False
     try:
@@ -305,6 +348,24 @@ def synthesize_one(
             session.set_voice_prompt_tokens(speaker["_prompt_tokens"])
         # trained 说话人：模型已是微调 checkpoint，不设 voice prompt。
 
+        # 构建单轮 voice-clone TTS 的 input_ids 并 reset_turn：系统提示（含声音克隆
+        # 上下文；trained 则无）+ assistant 前缀。不采集 user 音频，对齐
+        # example_llm_stream_to_tts.py。未调用 reset_turn 会让上游 _prefill_if_needed
+        # 抛 "reset_turn must be called before streaming text."。
+        import numpy as np
+
+        voice_prompt = speaker["_prompt_tokens"] if category == "voice-clone" else None
+        system_prompt = processor.make_ensemble(voice_prompt)
+        assistant_prefix_ids = tokenizer.encode("<|im_end|>\n<|im_start|>assistant\n")
+        assistant_prefix = np.full(
+            (len(assistant_prefix_ids), system_prompt.shape[1]),
+            fill_value=processor.audio_channel_pad,
+            dtype=np.int64,
+        )
+        assistant_prefix[:, 0] = assistant_prefix_ids
+        input_ids = np.concatenate([system_prompt, assistant_prefix], axis=0)
+        session.reset_turn(input_ids=input_ids, include_system_prompt=False, reset_cache=True)
+
         decoder = AudioStreamDecoder(
             codec,
             chunk_frames=3,
@@ -320,7 +381,7 @@ def synthesize_one(
             for wav_np in wav_iter:
                 pcm = _float32_np_to_pcm16(wav_np)
                 if pcm:
-                    header_sent = emit_chunk(context_id, pcm, header_sent)
+                    header_sent = emit_chunk(context_id, pcm, header_sent, frames_file)
                     accumulated.extend(pcm)
 
         with codec.streaming(batch_size=1):
@@ -338,14 +399,14 @@ def synthesize_one(
             if final is not None and final.numel() > 0:
                 pcm = _float32_np_to_pcm16(final.detach().cpu().numpy().reshape(-1))
                 if pcm:
-                    header_sent = emit_chunk(context_id, pcm, header_sent)
+                    header_sent = emit_chunk(context_id, pcm, header_sent, frames_file)
                     accumulated.extend(pcm)
 
         if accumulated:
             save_wav(output_audio_dir / f"{context_id}.wav", bytes(accumulated), SAMPLE_RATE)
-        emit_frame({"type": "finished", "contextId": context_id})
+        emit_frame(frames_file, {"type": "finished", "contextId": context_id})
     except Exception as exc:  # noqa: BLE001
-        emit_frame({"type": "error", "contextId": context_id, "message": str(exc)})
+        emit_frame(frames_file, {"type": "error", "contextId": context_id, "message": str(exc)})
 
 
 # --------------------------------------------------------------------------- #
@@ -359,12 +420,17 @@ def load_context_speakers(context_file_path: str) -> list[dict]:
 
 
 def run_session(params) -> None:
+    # 先注册 ffmpeg shared 库目录，确保后续 torch/torchaudio 能加载 avcodec 等共享库。
+    ensure_ffmpeg_dlls()
+
     import torch
 
     speakers = load_context_speakers(params.context_file_path)
     if not speakers:
         raise SystemExit("❌ context.json 无 speakers，无法启动流式会话。")
 
+    # 把 mossttsrealtime 包目录注入 sys.path（streaming.py 不在仓库根运行）。
+    ensure_package_on_path()
     model, tokenizer, processor, codec, device = load_model_and_codec(params, speakers)
 
     # 预编码 voice-clone 说话人 prompt（缓存到 speaker["_prompt_tokens"]）。
@@ -373,43 +439,51 @@ def run_session(params) -> None:
             ref = spk.get("refAudioPath") or ""
             if not ref:
                 raise SystemExit(f"❌ voice-clone 说话人 {spk.get('name')} 缺参考音频。")
-            print(f"[moss_tts_realtime] encoding voice prompt for {spk.get('name')}", flush=True)
+            print(f"[moss_tts_realtime] encoding voice prompt for {spk.get('name')}", file=sys.stderr, flush=True)
             spk["_prompt_tokens"] = encode_voice_prompt(codec, ref, device)
 
     speakers_by_name = {s["name"]: s for s in speakers if "name" in s}
     input_path = Path(params.input_cache_file_path)
     output_audio_dir = Path(params.output_audio_dir)
+    frames_path = Path(params.frames_file_path)
+    frames_path.parent.mkdir(parents=True, exist_ok=True)
+    # 二进制 append：会话级持有，跨平台无换行翻译；Rust runner 轮询 tail 读取。
+    frames_file = frames_path.open("ab")
     last_offset = 0
 
-    print("[moss_tts_realtime] session ready, polling input.jsonl", flush=True)
-    while True:
-        lines, last_offset = poll_new_lines(input_path, last_offset)
-        for line in lines:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError as exc:
-                print(f"[moss_tts_realtime] skip bad input line: {exc}", file=sys.stderr, flush=True)
-                continue
-            context_id = str(entry.get("contextId", ""))
-            speaker_name = str(entry.get("speakerName", ""))
-            text = str(entry.get("text", ""))
-            if not context_id or not speaker_name:
-                print(f"[moss_tts_realtime] skip input lacking contextId/speakerName", file=sys.stderr, flush=True)
-                continue
-            speaker = speakers_by_name.get(speaker_name)
-            if speaker is None:
-                emit_frame({
-                    "type": "error",
-                    "contextId": context_id,
-                    "message": f"unknown speaker: {speaker_name}",
-                })
-                continue
-            with torch.inference_mode():
-                synthesize_one(
-                    params, model, tokenizer, processor, codec, device,
-                    speaker, text, context_id, output_audio_dir,
-                )
-        time.sleep(POLL_INTERVAL_SECONDS)
+    print("[moss_tts_realtime] session ready, polling input.jsonl", file=sys.stderr, flush=True)
+    try:
+        while True:
+            lines, last_offset = poll_new_lines(input_path, last_offset)
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    print(f"[moss_tts_realtime] skip bad input line: {exc}", file=sys.stderr, flush=True)
+                    continue
+                context_id = str(entry.get("contextId", ""))
+                speaker_name = str(entry.get("speakerName", ""))
+                text = str(entry.get("text", ""))
+                if not context_id or not speaker_name:
+                    print(f"[moss_tts_realtime] skip input lacking contextId/speakerName", file=sys.stderr, flush=True)
+                    continue
+                speaker = speakers_by_name.get(speaker_name)
+                if speaker is None:
+                    emit_frame(frames_file, {
+                        "type": "error",
+                        "contextId": context_id,
+                        "message": f"unknown speaker: {speaker_name}",
+                    })
+                    continue
+                with torch.inference_mode():
+                    synthesize_one(
+                        params, model, tokenizer, processor, codec, device,
+                        speaker, text, context_id, output_audio_dir, frames_file,
+                    )
+            time.sleep(POLL_INTERVAL_SECONDS)
+    finally:
+        frames_file.flush()
+        frames_file.close()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

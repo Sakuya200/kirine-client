@@ -21,6 +21,7 @@ const VOICE_DESIGN_PARAMS_JSON_NAME: &str = "voice_design.params.json";
 const STREAMING_CONTEXT_JSON_NAME: &str = "context.json";
 const STREAMING_INPUT_CACHE_NAME: &str = "input.jsonl";
 const STREAMING_AUDIO_DIR_NAME: &str = "audio";
+const STREAMING_FRAMES_NAME: &str = "frames.jsonl";
 const TRAINING_REFERENCE_AUDIO_BASENAME: &str = "ref_audio";
 
 pub(crate) fn task_sample_dir(
@@ -98,6 +99,13 @@ pub(crate) fn streaming_output_audio_dir(sample_root: &Path) -> PathBuf {
 
 pub(crate) fn streaming_message_audio_path(audio_dir: &Path, context_id: &str) -> PathBuf {
     audio_dir.join(format!("{}.wav", context_id))
+}
+
+/// 流式帧缓冲文件：Python 逐行 append NDJSON 帧（started/chunk/finished/error），
+/// Rust runner 轮询 tail 读取。与 `streaming_input_cache_path`（Rust->Python 输入）对称，
+/// 本文件是 Python->Rust 的输出通道。会话级临时载体，非产物，会话结束清理。
+pub(crate) fn streaming_frames_path(sample_root: &Path) -> PathBuf {
+    sample_root.join(STREAMING_FRAMES_NAME)
 }
 
 pub(crate) fn training_reference_audio_path(sample_root: &Path, extension: &str) -> PathBuf {

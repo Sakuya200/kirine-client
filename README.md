@@ -228,14 +228,14 @@ Tauri 在本地构建和开发模式下都会校验 `bundle.resources` 中列出
 ```
 src-tauri/resources/
 ├── config.toml                          # 可以复制仓库中的文件
-├── ffmpeg-8.0.1-essentials_build.zip    # ffmpeg Windows 构建包
+├── ffmpeg-8.1.2.zip                      # ffmpeg Windows 构建包（shared build）
 ├── sox-14.4.2-win32.zip                 # SoX Windows 构建包
 └── src-model-runtime.zip                # Python 模型运行时打包
 ```
 
 获取方式：
 
-- `ffmpeg-8.0.1-essentials_build.zip`：从 https://www.gyan.dev/ffmpeg/builds/ 下载 essentials build，版本号必须与文件名一致。
+- `ffmpeg-8.1.2.zip`：ffmpeg **shared build**（含 avcodec 等 DLL，供 torchcodec/torchaudio 加载）。从 https://www.gyan.dev/ffmpeg/builds/ 下载 full shared build，重打包为顶层目录 `ffmpeg-8.1.2/`（或保留原名，安装钩子会规整）。版本号须与文件名一致。
 - `sox-14.4.2-win32.zip`：从 https://sourceforge.net/projects/sox/files/sox/ 下载对应版本的 Windows 包。
 - `src-model-runtime.zip`：是仓库 `src-model/` 目录的打包产物。在开发阶段应用会自动识别 workspace 根目录下的 `src-model/`（即仓库 clone 下来的目录），因此本地开发时该 zip 文件缺失不影响运行时功能，但 Tauri 在启动/构建前会检查文件存在性。可以先创建一个空 zip 文件占位，或联系项目维护者获取正式的运行时包。
 

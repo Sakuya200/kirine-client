@@ -8,7 +8,7 @@ def test_model_config_declares_streaming_only():
     cfg = json.loads((CONFIGS / "model-config.json").read_text(encoding="utf-8"))
     m = cfg["models"][0]
     assert m["baseModel"] == "moss_tts_realtime"
-    assert m["supportedDevices"] == ["cuda"]
+    assert m["supportedDevices"] == ["cuda", "cpu"]
     assert m["supportedFeatureList"] == ["streaming-speech"]
 
 

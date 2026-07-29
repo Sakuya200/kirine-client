@@ -9,8 +9,8 @@
 
 依赖安装不在本脚本内完成--由 ``init_task_runtime.ps1`` 通过适配器的
 ``requirements.txt`` / ``requirements-torch.txt`` 装入共享的 conda_env/venv。
-本脚本不做 editable install：streaming.py 从克隆仓库根目录运行即可经
-``sys.path[0]`` 导入 ``mossttsrealtime`` 包。
+本脚本不做 editable install：``streaming.py`` 运行时由 ``common.ensure_package_on_path()``
+把 ``<repo_root>/moss_tts_realtime/`` 注入 ``sys.path`` 以导入 ``mossttsrealtime`` 包。
 """
 
 from __future__ import annotations

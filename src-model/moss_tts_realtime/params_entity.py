@@ -193,6 +193,7 @@ class StreamingArgs:
     input_cache_file_path: str
     output_audio_dir: str
     model_root_path: str
+    frames_file_path: str
 
     @classmethod
     def from_mapping(cls, value: dict[str, object]) -> "StreamingArgs":
@@ -208,6 +209,7 @@ class StreamingArgs:
                 value.get("output_audio_dir"), "args.Streaming.output_audio_dir"
             ),
             model_root_path=_coerce_optional_str(value.get("model_root_path")) or "",
+            frames_file_path=_coerce_optional_str(value.get("frames_file_path")) or "",
         )
 
 

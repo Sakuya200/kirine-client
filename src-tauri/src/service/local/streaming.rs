@@ -40,8 +40,8 @@ use crate::{
     Result,
 };
 
-/// 单条流式消息等待终帧的超时上限。脚本在产出 finished/error 前卡住、stdout 帧丢失
-/// 或 runner 异常退出未发 done 信号时，强制收尾避免 `send_streaming_message` 永久挂起。
+/// 单条流式消息等待终帧的超时上限。脚本在产出 finished/error 前卡住、帧缓冲文件
+/// 丢失或 runner 异常退出未发 done 信号时，强制收尾避免 `send_streaming_message` 永久挂起。
 /// 按真实合成耗时调整（建议单消息上限 5 分钟）。
 const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
 

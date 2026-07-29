@@ -1,15 +1,15 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::BufRead,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
     sync::{oneshot, watch, Mutex},
 };
@@ -19,8 +19,8 @@ use crate::{
     common::{
         local_paths::resolve_local_log_dir,
         task_paths::{
-            streaming_context_json_path, streaming_input_cache_path, streaming_output_audio_dir,
-            task_log_file_path, task_sample_dir,
+            streaming_context_json_path, streaming_frames_path, streaming_input_cache_path,
+            streaming_output_audio_dir, task_log_file_path, task_sample_dir,
         },
     },
     config::HardwareType,
@@ -180,6 +180,8 @@ pub(crate) struct ResolvedStreamingPaths {
     pub context_json_path: PathBuf,
     pub input_cache_path: PathBuf,
     pub output_audio_dir: PathBuf,
+    /// Python->Rust 帧缓冲文件（NDJSON append），runner 轮询 tail。
+    pub frames_path: PathBuf,
     /// = service.model_dir()，trained 说话人 checkpoint 解析所需。
     pub model_root_path: PathBuf,
     pub params_json_path: PathBuf,
@@ -203,6 +205,7 @@ pub(crate) fn resolve_streaming_paths(
     let context_json_path = streaming_context_json_path(&sample_root);
     let input_cache_path = streaming_input_cache_path(&sample_root);
     let output_audio_dir = streaming_output_audio_dir(&sample_root);
+    let frames_path = streaming_frames_path(&sample_root);
     let params_json_path = sample_root.join("streaming.params.json");
 
     Ok(ResolvedStreamingPaths {
@@ -215,6 +218,7 @@ pub(crate) fn resolve_streaming_paths(
         context_json_path,
         input_cache_path,
         output_audio_dir,
+        frames_path,
         model_root_path: PathBuf::from(service.model_dir()),
         params_json_path,
     })
@@ -243,6 +247,7 @@ pub(crate) fn build_streaming_invocation(
             input_cache_file_path: paths.input_cache_path.to_string_lossy().to_string(),
             output_audio_dir: paths.output_audio_dir.to_string_lossy().to_string(),
             model_root_path: paths.model_root_path.to_string_lossy().to_string(),
+            frames_file_path: paths.frames_path.to_string_lossy().to_string(),
             model_params_json: model_params,
             speakers: speakers
                 .into_iter()
@@ -309,11 +314,12 @@ pub(crate) struct LoadedStreamingDetail {
     pub speakers: Vec<StreamingSpeakerInput>,
 }
 
-/// 长期存活的流式会话 runner：spawn `begin_llm_task` -> streaming.py，逐行读 stdout
-/// 分帧、按 contextId 分发到 `message_channels`；cancel 信号到达即 kill 子进程并
-/// 通知所有 pending 消息。会话状态机：Running（spawn 后）-> Cancelled/Failed（退出）。
-/// `detail` / `extra` 由 `start_streaming_session`（Task 5）从 DB / 会话注册表取后传入，
-/// 本函数不调用 `load_streaming_task_detail` / `streaming_session_extra`，避免前向依赖。
+/// 长期存活的流式会话 runner：spawn `begin_llm_task` -> streaming.py，轮询 tail
+/// `frames.jsonl` 缓冲文件分帧、按 contextId 分发到 `message_channels`；cancel 信号
+/// 到达即 kill 子进程并通知所有 pending 消息。会话状态机：Running（spawn 后）->
+/// Cancelled/Failed/Exited（退出）。`detail` / `extra` 由 `start_streaming_session`
+/// （Task 5）从 DB / 会话注册表取后传入，本函数不调用 `load_streaming_task_detail` /
+/// `streaming_session_extra`，避免前向依赖。
 pub(crate) async fn run_streaming_session(
     service: &LocalService,
     request: StreamingPipelineRequest,
@@ -365,38 +371,29 @@ pub(crate) async fn run_streaming_session(
         &detail.base_model,
     ));
 
+    // 清理可能残留的旧帧缓冲（上次会话异常退出未清理），避免 tail 读到陈旧帧。
+    let _ = std::fs::remove_file(&paths.frames_path);
+
+    // 帧走缓冲文件 frames.jsonl（Python append -> Rust tail），不再经 stdout。
+    // PS1 恢复非流式标行为（`& $cmd 2>&1 | Out-File $taskLog`）独占写 task log；
+    // 本 runner 不再持有 task log 句柄，从根上消除此前“正由另一进程使用”的写-写争用。
+    // 子进程 stdout/stderr 均 null：stdout 无帧；stderr 经 PS1 `2>&1` 落 task log。
     let mut child = Command::new(platform.shell_program())
         .args(&shell_args)
         .current_dir(&paths.src_model_root)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .with_context(|| "failed to spawn streaming begin_llm_task")?;
 
-    let stdout = child.stdout.take().expect("stdout piped");
-    let stderr = child.stderr.take().expect("stderr piped");
-    let task_log_path_clone = task_log_path.clone();
-    // stderr -> task-log-file（异步落盘）
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        let mut file = match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&task_log_path_clone)
-        {
-            Ok(f) => f,
-            Err(_) => return,
-        };
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = writeln!(file, "{line}");
-        }
-    });
-
-    let outcome = drive_streaming_stdout(&mut child, stdout, &extra, &mut cancel_rx).await;
+    let outcome = drive_streaming_buffer(&mut child, &paths.frames_path, &extra, &mut cancel_rx).await;
 
     // 退出前清理所有 pending 消息（cancel / 进程退出）
     drain_pending_channels(&extra, outcome.is_cancelled());
+
+    // 帧缓冲文件是会话级临时传输载体（非产物），会话结束清理。
+    let _ = std::fs::remove_file(&paths.frames_path);
 
     let final_status = match &outcome {
         StreamSessionOutcome::Cancelled => TaskStatus::Cancelled,
@@ -430,63 +427,141 @@ impl StreamSessionOutcome {
     }
 }
 
-async fn drive_streaming_stdout(
+/// 帧缓冲文件 tail：持有读句柄，每次 poll 从上次位置读出新增完整行并转发。
+///
+/// 与 `input.jsonl`（Rust 写 -> Python 轮询读）同构，方向相反：Python append 写
+/// `frames.jsonl`，本结构轮询读取。读写分属不同进程的不同访问模式（Python 写 /
+/// Rust 读），Windows 文件共享互不排斥（Rust `File::open` 默认共享 R|W|DELETE，
+/// Python 写句柄默认共享 R），不会重蹈此前"写-写争用同一 task log"的覆辙。
+struct FrameFileTail {
+    reader: Option<std::io::BufReader<std::fs::File>>,
+    path: PathBuf,
+    /// 跨 poll 保留的半行：`read_until` 在 EOF 处读到不含 `'\n'` 的尾巴时缓存，
+    /// 下次 poll 追加新字节继续拼接，避免把半截 JSON 当坏行丢弃。
+    pending: Vec<u8>,
+}
+
+impl FrameFileTail {
+    fn new(path: PathBuf) -> Self {
+        Self { reader: None, path, pending: Vec::new() }
+    }
+
+    /// 读出文件当前所有可用完整帧行并转发；文件尚未创建时静默返回。
+    fn poll_and_forward(&mut self, extra: &StreamingSessionExtra) {
+        if self.reader.is_none() {
+            let file = match std::fs::File::open(&self.path) {
+                Ok(f) => f,
+                Err(_) => return, // Python 尚未创建 frames.jsonl
+            };
+            self.reader = Some(std::io::BufReader::new(file));
+        }
+        let reader = self.reader.as_mut().expect("frames reader initialized");
+        loop {
+            let n = match reader.read_until(b'\n', &mut self.pending) {
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            if n == 0 {
+                break; // EOF，本次无新数据（pending 中可能仍残留半行待下次）
+            }
+            if !self.pending.ends_with(b"\n") {
+                break; // 半行，等下次 poll 拼接
+            }
+            // 完整一行（含 '\n'）：剥离换行后解析转发
+            let line_bytes = std::mem::take(&mut self.pending);
+            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]);
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            match parse_streaming_frame(trimmed) {
+                Ok(Some(frame)) => {
+                    if let Some(event) = frame_to_event(&frame) {
+                        forward_event(extra, &frame.context_id, event);
+                    }
+                    if matches!(frame.payload, StreamingFramePayload::Error { .. }) {
+                        warn!(context_id = %frame.context_id, "streaming frame error");
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(error = %err, line = %trimmed, "ignoring unparseable streaming line");
+                }
+            }
+        }
+    }
+}
+
+/// 帧缓冲轮询间隔。文件增长无 readiness 事件，靠轮询 tail；20ms 对音频流足够
+///（chunk 本就 ~100ms 级），CPU 可忽略。
+const FRAME_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// 流式会话驱动：轮询 tail `frames.jsonl` 取帧并按 contextId 分发；`try_wait` 探活
+/// 子进程退出；cancel 信号到达即 kill。会话状态机：Running（spawn 后）->
+/// Cancelled/Failed/Exited（退出）。
+async fn drive_streaming_buffer(
     child: &mut Child,
-    stdout: tokio::process::ChildStdout,
+    frames_path: &Path,
     extra: &StreamingSessionExtra,
     cancel_rx: &mut watch::Receiver<bool>,
 ) -> StreamSessionOutcome {
-    let mut reader = BufReader::new(stdout).lines();
+    let mut tail = FrameFileTail::new(frames_path.to_path_buf());
     let mut failed = false;
     let mut cancelled = false;
     loop {
+        // 1. 排空当前可用帧
+        tail.poll_and_forward(extra);
+
+        // 2. 非阻塞探活：进程退出则再 tail 一次（收尾帧，含 finished/error）后结束
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    failed = true;
+                }
+                tail.poll_and_forward(extra);
+                break;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                error!(error = %err, "streaming child try_wait failed");
+                failed = true;
+                break;
+            }
+        }
+
+        // 3. 等待 cancel 或轮询间隔
         tokio::select! {
             biased;
             _ = cancel_rx.changed() => {
                 if *cancel_rx.borrow() {
                     info!("streaming cancel signal received, killing child");
-                    let _ = child.kill().await;
+                    // child.kill() 仅 TerminateProcess 直系 shell 子进程（powershell.exe），
+                    // 不杀 PS1 经 `& $venvPython | Out-File` 拉起的 python.exe 孙进程，
+                    // 致其孤儿化、长期占用 GPU/模型——表现为“终止会话”后进程仍阻塞。
+                    // 按 PID 强杀整棵进程树（Windows = taskkill /T /F），与
+                    // run_logged_command_cancellable 一致；PID 未知则回退 child.kill()。
+                    if let Some(pid) = child.id() {
+                        if let Err(err) = crate::utils::process::force_terminate_process(pid) {
+                            warn!(error = %err, "force terminate process tree failed, falling back to child.kill");
+                            let _ = child.kill().await;
+                        }
+                    } else {
+                        let _ = child.kill().await;
+                    }
                     cancelled = true;
+                    tail.poll_and_forward(extra);
                     break;
                 }
             }
-            line = reader.next_line() => {
-                match line {
-                    Ok(Some(raw)) => {
-                        match parse_streaming_frame(&raw) {
-                            Ok(Some(frame)) => {
-                                if let Some(event) = frame_to_event(&frame) {
-                                    forward_event(extra, &frame.context_id, event);
-                                }
-                                if matches!(frame.payload, StreamingFramePayload::Error { .. }) {
-                                    warn!(context_id = %frame.context_id, "streaming frame error");
-                                }
-                            }
-                            Ok(None) => {}
-                            Err(err) => {
-                                warn!(error = %err, line = %raw, "ignoring unparseable streaming line");
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        // stdout EOF：进程结束
-                        break;
-                    }
-                    Err(err) => {
-                        error!(error = %err, "streaming stdout read error");
-                        failed = true;
-                        break;
-                    }
-                }
-            }
+            _ = tokio::time::sleep(FRAME_POLL_INTERVAL) => {}
         }
     }
 
     // 始终 reap 子进程，避免僵尸进程（对齐既有 run_logged_shell_script_cancellable 的 wait 语义）。
-    let status = child.wait().await;
+    let _ = child.wait().await;
     if cancelled {
         StreamSessionOutcome::Cancelled
-    } else if failed || status.map(|s| !s.success()).unwrap_or(true) {
+    } else if failed {
         StreamSessionOutcome::Failed
     } else {
         StreamSessionOutcome::Exited

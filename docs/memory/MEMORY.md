@@ -1,6 +1,6 @@
 # Kirine Client 项目记忆索引
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
+> 状态截至 2026-07-28 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
 
 - [Project Overview](project-overview.md) - 项目全貌、技术栈、核心功能、存储模式（Local/Remote）概览
 - [Frontend Architecture](tech-stack-frontend.md) - Vue 3 前端目录结构、配置驱动参数表单、UI 组件体系
@@ -15,3 +15,4 @@
 - [Retain Future-Use Fields](retain-future-use-fields.md) - 勿为消警告删预留待用字段（如 ResolvedStreamingPaths 的 base_model/model_version）
 - [src-tauri Not rustfmt-clean](src-tauri-not-rustfmt-clean.md) - src-tauri HEAD 非 rustfmt-1.8.0 干净；全局 cargo fmt 会改 30 个无关文件，勿用
 - [Tests Dir Over Inline](tests-dir-over-inline.md) - 单测放 tests/ 经 test_support 桥接，不用内联 #[cfg(test)]；pub(crate) 项先提 pub 再重导出
+- [FFmpeg Bundling](ffmpeg-bundling.md) - ffmpeg shared build 打包/解压（src-model 同级）/PATH 注销重注册 + moss_tts_realtime DLL 注册

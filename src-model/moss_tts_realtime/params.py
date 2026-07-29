@@ -34,6 +34,7 @@ class MossRealtimeStreamingParams:
     input_cache_file_path: str
     output_audio_dir: str
     model_root_path: str
+    frames_file_path: str
     device: str
     temperature: float
     top_p: float
@@ -52,6 +53,7 @@ def load_streaming_params(path: str | Path) -> MossRealtimeStreamingParams:
         input_cache_file_path=args.input_cache_file_path,
         output_audio_dir=args.output_audio_dir,
         model_root_path=args.model_root_path,
+        frames_file_path=args.frames_file_path,
         device=normalize_device(params.runtime.device),
         temperature=_float_param(params, "temperature", 0.8),
         top_p=_float_param(params, "topP", 0.6),

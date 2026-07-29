@@ -9,7 +9,7 @@ metadata:
 
 # 流式语音生成（StreamingSpeech）架构
 
-> 状态截至 2026-07-21 · 分支 `v.0.12.0`
+> 状态截至 2026-07-28 · 分支 `v.0.12.0`
 
 区别于 TTS/克隆/设计的「一次性脚本跑完出文件」，流式语音是**会话级长期进程**：一个 task 拉起一个常驻 `streaming.py`，多条聊天消息复用同一进程，音频按 chunk 实时经 Tauri IPC Channel 下发前端播放。
 
@@ -39,19 +39,19 @@ metadata:
 
 ## Pipeline 层（`service/pipeline/streaming.rs`）- 核心 runner
 
-- **帧解析纯函数**：`parse_streaming_frame`（stdout JSON 行 -> `StreamingFrame`）、`frame_to_event`（-> `AudioStreamEvent`）、`serialize_input_entry`。`StreamingFramePayload` = Started/Chunk/Finished/Error。
+- **帧解析纯函数**：`parse_streaming_frame`（NDJSON 行 -> `StreamingFrame`）、`frame_to_event`（-> `AudioStreamEvent`）、`serialize_input_entry`。`StreamingFramePayload` = Started/Chunk/Finished/Error。帧源是缓冲文件 `frames.jsonl`（非 stdout），见下「帧协议 / 传输」。
 - **类型**：`StreamingContextJson`/`StreamingContextBasic`/`StreamingSpeaker`/`StreamingMessageEntry`（context.json 结构）；`ResolvedStreamingPaths`（含 `base_model`/`model_version`/`sample_root`/`model_root_path` 等待用字段，见 [[retain-future-use-fields]]）；`LoadedStreamingDetail`（含 `model_params`）。
-- `StreamingSpeaker`/`StreamingSpeakerArg`/`StreamingSpeakerInput` 扩展 `category`（"voice-clone"|"trained"，缺省视为 voice-clone）+ `speaker_dir_name: Option<String>`（trained=speaker_id）；`StreamingArgs` 扩展 `model_root_path`（= service.model_dir()）+ `model_params_json`（流式 UI 参数透传至 Python）。
+- `StreamingSpeaker`/`StreamingSpeakerArg`/`StreamingSpeakerInput` 扩展 `category`（"voice-clone"|"trained"，缺省视为 voice-clone）+ `speaker_dir_name: Option<String>`（trained=speaker_id）；`StreamingArgs` 扩展 `model_root_path`（= service.model_dir()）+ `model_params_json`（流式 UI 参数透传至 Python）+ `frames_file_path`（帧缓冲文件路径，`#[serde(default)]`）。
 - `resolve_streaming_paths` + `build_streaming_invocation`（`PythonScriptTaskKind::StreamingSpeech` + `StreamingArgs`，写 `streaming.params.json`；签名含 `model_params: serde_json::Value`，填 `model_root_path` + 映射 speaker 新字段）。
 - `StreamingSessionExtra`：`message_channels: Arc<RwLock<HashMap<String, MessageChannel>>>` + `context_lock: Arc<Mutex<()>>`，存于 `ActiveTaskControl.streaming_extra`，runner 与 send 共享。
 - `MessageChannel { on_event: Channel, done: oneshot::Sender<StreamMessageOutcome> }`；`StreamMessageOutcome { cancelled, errored }`。
-- `run_streaming_session`：spawn `begin_llm_task` -> `streaming.py`，逐行读 stdout 分帧按 `contextId` 分发；cancel 信号 kill 子进程；状态机 **Running(spawn 后) -> Cancelled/Failed(退出)**，进程自然退出视为 Cancelled；stderr 异步落 task-log；退出前 `drain_pending_channels` 通知所有 pending 消息。
-- `drive_streaming_stdout`：`tokio::select! { cancel_rx.changed() | reader.next_line() }`，biased 优先 cancel；始终 `child.wait()` reap 防僵尸。
+- `run_streaming_session`：spawn `begin_llm_task` -> `streaming.py`，轮询 tail `frames.jsonl` 缓冲文件分帧按 `contextId` 分发；cancel 信号 kill 子进程；状态机 **Running(spawn 后) -> Cancelled/Failed/Exited(退出)**，进程自然退出视为 Exited（映射 Cancelled 终态）。子进程 stdout/stderr 均 null——帧走 frames.jsonl，stderr 经 PS1 `2>&1 | Out-File` 落 task-log（PS1 独占写 task log，Rust 不持有该句柄，消除写-写争用）；启动前清理残留 frames.jsonl，退出前 `drain_pending_channels` + 删 frames.jsonl。
+- `drive_streaming_buffer` + `FrameFileTail`：`FrameFileTail` 持读句柄轮询 `read_until('\n')`（半行跨 poll 拼接），`tokio::select! { cancel_rx.changed() | sleep(20ms) }` + 每轮 `child.try_wait()` 非阻塞探活；进程退出后再 tail 一次收尾帧；始终 `child.wait()` reap 防僵尸。
 - `forward_event`：**终帧**（Finished/Error）写锁 remove channel + `on_event.send` + `done.send`；**非终帧**（Chunk）读锁 `on_event.send`（避免高频 chunk 写锁竞争）。
 
-## 帧协议
+## 帧协议 / 传输
 
-脚本 stdout 每行一个 JSON：`{type:"started"|"chunk"|"finished"|"error", contextId, bytes?(base64), message?}` ↔ Rust `StreamingFrame` ↔ `AudioStreamEvent`（serde tag=type camelCase）下发给前端。`contextId` 由前端生成，多路复用同一会话进程。
+脚本向缓冲文件 `frames.jsonl`（sample_dir 下，二进制 append）每行一个 JSON：`{type:"started"|"chunk"|"finished"|"error", contextId, bytes?(base64), message?}`。Rust `FrameFileTail` 轮询 tail 读取 ↔ `StreamingFrame` ↔ `AudioStreamEvent`（serde tag=type camelCase）下发给前端。`contextId` 由前端生成，多路复用同一会话进程。**不走 stdout**：此前 stdout 传输有两大缺陷--(1) Rust stderr 落盘句柄与 PS1 `Out-File` 写-写争用同一 task log 触发"正由另一进程使用"；(2) Python `emit_chunk` 误用 `list(data)` 而 Rust 期望 base64 字符串，chunk 全被丢弃。改缓冲文件后 Python 写/Rust 读分属不同访问模式不争用，bytes 统一 base64。`frames.jsonl` 是会话级临时载体，非产物，会话结束清理。
 
 ## 并发与一致性模型
 
@@ -62,7 +62,7 @@ metadata:
 
 ## 会话产物路径（`common/task_paths.rs`，sample_dir 下）
 
-`streaming_context_json_path`（context.json）/ `streaming_input_cache_path`（input.jsonl）/ `streaming_output_audio_dir`（按 contextId 分音频文件）/ `streaming.params.json` / task-log-file。`history.rs::load_streaming_detail` 支持历史回放 StreamingSpeech 详情。
+`streaming_context_json_path`（context.json）/ `streaming_input_cache_path`（input.jsonl，Rust->Python 输入）/ `streaming_frames_path`（frames.jsonl，Python->Rust 帧输出，临时）/ `streaming_output_audio_dir`（按 contextId 分音频文件）/ `streaming.params.json` / task-log-file。`history.rs::load_streaming_detail` 支持历史回放 StreamingSpeech 详情。
 
 ## 前端（详见 [[tech-stack-frontend]] / [[data-flow-and-types]]）
 
@@ -79,7 +79,7 @@ metadata:
 
 - `streaming_frames.rs`：帧解析 9 用例（started/chunk/finished/error/blank/malformed/unknown_type/context_json_round_trip/input_entry + `frame_to_event` 映射）。
 - `streaming_schema.rs`：`streaming_tasks` 表 14 列存在性 + `StreamingSpeech.as_str()`/`storage_dir()`。
-- `streaming_contract.rs`：`StreamingArgs`/`StreamingSpeakerArg`/`StreamingSpeaker` serde 往返（含 `model_root_path`/`model_params_json`/`category`/`speaker_dir_name` 新字段，及缺省回填）。
+- `streaming_contract.rs`：`StreamingArgs`/`StreamingSpeakerArg`/`StreamingSpeaker` serde 往返（含 `model_root_path`/`frames_file_path`/`model_params_json`/`category`/`speaker_dir_name` 新字段，及缺省回填）。
 - `streaming_service.rs`：启动清扫--残留 Running 流式会话标 Cancelled，且不误伤非 streaming Running 任务。
 - `streaming_hooks.rs`：`AudioStreamEvent` serde 协议（tag/camelCase）单测。
 

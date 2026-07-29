@@ -158,7 +158,7 @@ async fn model_downloaded_flag_round_trips_in_db() -> Result<()> {
 #[tokio::test]
 async fn sync_backfills_current_device_for_single_device_models() -> Result<()> {
     // sync_supported_models 的回填契约：
-    // - 单设备模型：current_device 自动回填为唯一设备（如 moss_tts_realtime -> cuda）
+    // - 单设备模型：current_device 自动回填为唯一设备（如 gpt_sovits_cpufast -> cpu）
     // - 多设备模型：current_device 留空（要求用户先选）
     // 覆盖 upsert insert 分支的 resolve_current_device_value(None, ...)。
     let harness = LocalServiceHarness::new("model-current-device-backfill").await?;

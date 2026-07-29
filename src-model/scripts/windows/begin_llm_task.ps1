@@ -105,9 +105,9 @@ try {
     # the target Python script.  They are consumed by this wrapper for its
     # own task-log output (Append-TaskLog / Out-File above).  The params-file
     # entry scripts (voice_clone/tts/training/voice_design across all models)
-    # only accept --params-file and would fail with argparse "unrecognized
-    # arguments" if these were passed through.  Scripts that genuinely need
-    # them (e.g. download.py) receive them via the forwarded args after `--`.
+    # only accept --params-file and would fail with argparse
+    # "unrecognized arguments" if these were passed through.  Scripts that genuinely
+    # need them (e.g. download.py) receive them via the forwarded args after `--`.
     $pythonArgs = @(
         '-X', 'utf8',
         '-X', 'faulthandler',

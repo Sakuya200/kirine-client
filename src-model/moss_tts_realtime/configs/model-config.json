@@ -7,7 +7,7 @@
       "downloadType": "Custom",
       "requiredModelNameList": ["moss_tts_realtime"],
       "requiredModelRepoIdList": [],
-      "supportedDevices": ["cuda"],
+      "supportedDevices": ["cuda", "cpu"],
       "supportedFeatureList": ["streaming-speech"],
       "supportedLanguages": ["chinese", "english", "japanese", "korean"]
     }

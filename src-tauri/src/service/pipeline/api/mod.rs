@@ -102,6 +102,10 @@ pub struct StreamingArgs {
     /// = service.model_dir()，streaming.py 解析 <model_root_path>/<speaker_dir_name>。
     #[serde(default)]
     pub model_root_path: String,
+    /// 流式帧缓冲文件路径：streaming.py 往此文件 append NDJSON 帧，Rust runner
+    /// 轮询 tail 读取（替代 stdout 传输）。
+    #[serde(default)]
+    pub frames_file_path: String,
     /// 流式 UI 参数（temperature/topP 等），透传给 streaming.py。
     #[serde(default)]
     pub model_params_json: serde_json::Value,

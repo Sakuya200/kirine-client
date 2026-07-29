@@ -250,7 +250,7 @@ fn request_process_termination(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     let status = std::process::Command::new("kill")
         .args(["-KILL", &process_id.to_string()])
         .status()?;
@@ -265,7 +265,7 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     let _ = process_id;
     Err(std::io::Error::other(
         "forceful process termination is not implemented on this platform",
@@ -273,7 +273,7 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     if terminate_process_tree_windows(process_id, true).is_ok() {
         return Ok(());
     }

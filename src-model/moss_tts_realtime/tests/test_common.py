@@ -1,7 +1,12 @@
 from pathlib import Path
 
+import pytest
+
+import common
 from common import (
     CHECKPOINT_FINAL_DIR,
+    FFMPEG_DIR_NAME,
+    ensure_ffmpeg_dlls,
     normalize_device,
     resolve_speaker_dir,
     resolve_trained_checkpoint,
@@ -45,3 +50,26 @@ def test_normalize_device():
     assert normalize_device("cuda:0") == "cuda"
     assert normalize_device("CUDA") == "cuda"
     assert normalize_device("cpu") == "cpu"
+
+
+def test_ensure_ffmpeg_dlls_raises_when_missing(monkeypatch, tmp_path):
+    # ffmpeg 位于 src-model 同级目录；缺失时应报错（SystemExit），而非静默跳过。
+    monkeypatch.setattr(common, "_SRC_MODEL_ROOT", tmp_path / "src-model")
+    with pytest.raises(SystemExit):
+        ensure_ffmpeg_dlls()
+
+
+def test_ensure_ffmpeg_dlls_registers_sibling_of_src_model(monkeypatch, tmp_path):
+    # ffmpeg bin 应解析到 src-model 的同级目录（_SRC_MODEL_ROOT.parent/ffmpeg-8.1.2/bin）。
+    src_model = tmp_path / "src-model"
+    src_model.mkdir()
+    ffmpeg_bin = tmp_path / FFMPEG_DIR_NAME / "bin"
+    ffmpeg_bin.mkdir(parents=True)
+    monkeypatch.setattr(common, "_SRC_MODEL_ROOT", src_model)
+
+    calls = []
+    monkeypatch.setattr(common.os, "add_dll_directory", lambda p: calls.append(p))
+
+    result = ensure_ffmpeg_dlls()
+    assert result == ffmpeg_bin
+    assert calls == [str(ffmpeg_bin)]
