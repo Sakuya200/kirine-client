@@ -43,11 +43,23 @@ POLL_INTERVAL_SECONDS = 0.1
 def emit_frame(frames_file, payload: dict) -> None:
     """向 frames.jsonl 追加一行 JSON 帧（Rust runner 轮询 tail 读取分帧）。
 
-    ``frames_file`` 为二进制 append 句柄（``run_session`` 打开，会话级持有）。
-    二进制模式避免 Windows 文本模式把 ``\\n`` 翻译成 ``\\r\\n``。
+    ``frames_file`` 可以是真实的二进制文件句柄（``run_session`` 打开，会话级持有），
+    也可以是测试中使用的内存缓冲对象。二进制模式避免 Windows 文本模式把
+    ``\\n`` 翻译成 ``\\r\\n``。
     """
-    frames_file.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
-    frames_file.flush()
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+
+    if hasattr(frames_file, "write"):
+        frames_file.write(data)
+        if hasattr(frames_file, "flush"):
+            frames_file.flush()
+        return
+
+    if hasattr(frames_file, "append"):
+        frames_file.append(data)
+        return
+
+    raise TypeError(f"Unsupported frames sink: {type(frames_file).__name__}")
 
 
 def wav_header_sentinel(sample_rate: int = SAMPLE_RATE, channels: int = 1, bits: int = 16) -> bytes:
@@ -104,6 +116,13 @@ def emit_chunk(context_id: str, pcm: bytes, header_sent: bool, frames_file) -> b
     data = b"".join(parts)
     emit_frame(frames_file, {"type": "chunk", "contextId": context_id, "bytes": base64.b64encode(data).decode("ascii")})
     return True
+
+
+def emit_error_frame(frames_file, context_id: str, message: str) -> None:
+    """发 error 帧并把错误内容打印到 stderr，便于 Rust 任务日志看到。"""
+    payload = {"type": "error", "contextId": context_id, "message": message}
+    emit_frame(frames_file, payload)
+    print(f"[moss_tts_realtime] error for {context_id}: {message}", file=sys.stderr, flush=True)
 
 
 def save_wav(path: Path, pcm: bytes, sample_rate: int = SAMPLE_RATE) -> None:
@@ -323,6 +342,7 @@ def synthesize_one(
     )
 
     emit_frame(frames_file, {"type": "started", "contextId": context_id})
+    print(f"[moss_tts_realtime] synthesize_one contextId={context_id} speaker={speaker.get('name')} text={text}", file=sys.stderr, flush=True)
     accumulated = bytearray()
     header_sent = False
     try:
@@ -406,7 +426,7 @@ def synthesize_one(
             save_wav(output_audio_dir / f"{context_id}.wav", bytes(accumulated), SAMPLE_RATE)
         emit_frame(frames_file, {"type": "finished", "contextId": context_id})
     except Exception as exc:  # noqa: BLE001
-        emit_frame(frames_file, {"type": "error", "contextId": context_id, "message": str(exc)})
+        emit_error_frame(frames_file, context_id, str(exc))
 
 
 # --------------------------------------------------------------------------- #
@@ -460,28 +480,30 @@ def run_session(params) -> None:
             for line in lines:
                 try:
                     entry = json.loads(line)
+                    context_id = str(entry.get("contextId", ""))
+                    speaker_name = str(entry.get("speakerName", ""))
+                    text = str(entry.get("text", ""))
+                    if not context_id or not speaker_name:
+                        print(f"[moss_tts_realtime] skip input lacking contextId/speakerName", file=sys.stderr, flush=True)
+                        continue
+                    speaker = speakers_by_name.get(speaker_name)
+                    if speaker is None:
+                        emit_error_frame(
+                            frames_file,
+                            context_id,
+                            f"unknown speaker: {speaker_name}",
+                        )
+                        continue
+                    with torch.inference_mode():
+                        synthesize_one(
+                            params, model, tokenizer, processor, codec, device,
+                            speaker, text, context_id, output_audio_dir, frames_file,
+                        )
                 except json.JSONDecodeError as exc:
                     print(f"[moss_tts_realtime] skip bad input line: {exc}", file=sys.stderr, flush=True)
                     continue
-                context_id = str(entry.get("contextId", ""))
-                speaker_name = str(entry.get("speakerName", ""))
-                text = str(entry.get("text", ""))
-                if not context_id or not speaker_name:
-                    print(f"[moss_tts_realtime] skip input lacking contextId/speakerName", file=sys.stderr, flush=True)
-                    continue
-                speaker = speakers_by_name.get(speaker_name)
-                if speaker is None:
-                    emit_frame(frames_file, {
-                        "type": "error",
-                        "contextId": context_id,
-                        "message": f"unknown speaker: {speaker_name}",
-                    })
-                    continue
-                with torch.inference_mode():
-                    synthesize_one(
-                        params, model, tokenizer, processor, codec, device,
-                        speaker, text, context_id, output_audio_dir, frames_file,
-                    )
+                except Exception as exc:
+                    emit_error_frame(frames_file, context_id, str(exc))
             time.sleep(POLL_INTERVAL_SECONDS)
     finally:
         frames_file.flush()

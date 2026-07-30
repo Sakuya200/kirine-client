@@ -14,8 +14,15 @@ $scriptArgs = $args
 $forwardedScriptArgs = @()
 $separatorIndex = [Array]::IndexOf($scriptArgs, '--')
 if ($separatorIndex -ge 0) {
-    $forwardedScriptArgs = $scriptArgs[($separatorIndex + 1)..($scriptArgs.Length - 1)]
-    $scriptArgs = $scriptArgs[0..($separatorIndex - 1)]
+    if ($separatorIndex + 1 -lt $scriptArgs.Length) {
+        $forwardedScriptArgs = $scriptArgs[($separatorIndex + 1)..($scriptArgs.Length - 1)]
+    }
+    if ($separatorIndex -gt 0) {
+        $scriptArgs = $scriptArgs[0..($separatorIndex - 1)]
+    }
+    else {
+        $scriptArgs = @()
+    }
 }
 try {
     $parsed = Parse-CliArguments -Arguments $scriptArgs -OptionsWithValues @('--base-model', '--params-file', '--script-path', '--log-path', '--task-log-file') -ActionName 'begin-llm-task'
@@ -86,6 +93,47 @@ function Invoke-LoggedCommand {
     }
 }
 
+function Convert-ToCmdArgument {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    if ($Value -match '[\s"&|<>^]') {
+        return '"' + $Value.Replace('"', '\"') + '"'
+    }
+
+    return $Value
+}
+
+function Invoke-LoggedPythonCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExecutable,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$PythonArguments
+    )
+
+    $vsDevCmdPath = Get-VisualStudioDeveloperCommandPrompt
+    if (-not [string]::IsNullOrWhiteSpace($vsDevCmdPath)) {
+        $commandLine = 'call "{0}" -arch=x64 -no_logo && set VSCMD_ARG_TGT_ARCH=x64 && {1}' -f $vsDevCmdPath, (Convert-ToCmdArgument -Value $PythonExecutable)
+        foreach ($argument in $PythonArguments) {
+            $commandLine += ' ' + (Convert-ToCmdArgument -Value $argument)
+        }
+
+        Invoke-LoggedCommand -Description 'Running Python command' -Command 'cmd.exe' -Arguments @('/d', '/c', $commandLine)
+        return
+    }
+
+    Invoke-LoggedCommand -Description 'Running Python command' -Command $PythonExecutable -Arguments $PythonArguments
+}
+
 Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Starting LLM task with base model '$baseModel'."
 
 if (-not (Test-Path -LiteralPath $scriptPath)) {
@@ -118,7 +166,7 @@ try {
         $pythonArgs += @('--params-file', $paramsFile)
     }
     $pythonArgs += $forwardedScriptArgs
-    Invoke-LoggedCommand -Description "Running Python command" -Command $venvPython -Arguments $pythonArgs
+    Invoke-LoggedPythonCommand -PythonExecutable $venvPython -PythonArguments $pythonArgs
 }
 catch {
     Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: $_"
