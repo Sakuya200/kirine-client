@@ -719,10 +719,24 @@ pub struct SendStreamingMessagePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum GeneratedAudioSource {
-    TextToSpeech { history_id: i64 },
-    VoiceClone { history_id: i64 },
-    VoiceDesign { history_id: i64 },
-    StreamingSpeech { history_id: i64, context_id: String },
+    TextToSpeech {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    VoiceClone {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    VoiceDesign {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    StreamingSpeech {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+        #[serde(rename = "contextId")]
+        context_id: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
