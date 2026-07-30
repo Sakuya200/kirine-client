@@ -59,8 +59,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     modelParams: {}
   });
   const audioStates = reactive<Record<string, AudioState>>({});
-  const audioBuffers = new Map<string, number[]>();
-  const audioUrls = new Map<string, { url: string; length: number }>();
+  const audioBuffers = ref(new Map<string, number[]>());
+  const audioUrls = ref(new Map<string, { url: string; length: number }>());
 
   const speakerOptions = computed(() =>
     speakers.value.map(speaker => ({
@@ -85,16 +85,16 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   };
 
   const revokeAudioUrl = (messageId: string) => {
-    const cached = audioUrls.get(messageId);
+    const cached = audioUrls.value.get(messageId);
     if (cached) {
       URL.revokeObjectURL(cached.url);
-      audioUrls.delete(messageId);
+      audioUrls.value.delete(messageId);
     }
   };
 
   const clearAudioForMessage = (messageId: string) => {
     revokeAudioUrl(messageId);
-    audioBuffers.delete(messageId);
+    audioBuffers.value.delete(messageId);
     delete audioStates[messageId];
   };
 
@@ -103,18 +103,18 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     if (!state?.hasData) {
       return null;
     }
-    const buffer = audioBuffers.get(messageId);
+    const buffer = audioBuffers.value.get(messageId);
     if (!buffer || buffer.length === 0) {
       return null;
     }
-    const cached = audioUrls.get(messageId);
+    const cached = audioUrls.value.get(messageId);
     if (cached && cached.length === buffer.length) {
       return cached.url;
     }
     revokeAudioUrl(messageId);
     const blob = new Blob([Uint8Array.from(buffer)], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
-    audioUrls.set(messageId, { url, length: buffer.length });
+    audioUrls.value.set(messageId, { url, length: buffer.length });
     return url;
   };
 
@@ -251,7 +251,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     state.hasData = false;
     state.streamComplete = false;
     state.errorMessage = null;
-    audioBuffers.delete(assistantId);
+    audioBuffers.value.delete(assistantId);
     revokeAudioUrl(assistantId);
 
     const channel = new Channel<AudioStreamEvent>();
@@ -264,8 +264,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           state.isStreaming = true;
           state.hasData = true;
           const bytes = message.bytes ?? [];
-          const nextBuffer = [...(audioBuffers.get(assistantId) ?? []), ...bytes];
-          audioBuffers.set(assistantId, nextBuffer);
+          const nextBuffer = [...(audioBuffers.value.get(assistantId) ?? []), ...bytes];
+          audioBuffers.value.set(assistantId, nextBuffer);
           break;
         }
         case 'finished': {

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, type Ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface UseStreamableAudioPlayerOptions {
@@ -15,6 +15,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   const hasData = options.hasData ?? ref(false);
 
   const currentPlaybackSeconds = computed(() => Math.round(audioCurrentTime.value));
+  const currentSourceUrl = computed(() => options.sourceUrl?.() ?? pathUrl);
 
   let audioElement: HTMLAudioElement | null = null;
   let pathUrl: string | null = null;
@@ -45,8 +46,10 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     }
   };
 
-  const ensureAudioElement = (src: string) => {
-    if (!audioElement || audioElement.src !== src) {
+  const ensureAudioElement = (src: string, playbackOptions: { autoplay?: boolean; resumeTime?: number } = {}) => {
+    const shouldRecreate = !audioElement || audioElement.src !== src;
+    if (shouldRecreate) {
+      const resumeTime = playbackOptions.resumeTime ?? 0;
       destroyAudioElement();
       const next = new Audio(src);
 
@@ -86,6 +89,13 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
       };
 
       audioElement = next;
+      if (resumeTime > 0 && Number.isFinite(resumeTime)) {
+        next.currentTime = Math.min(resumeTime, next.duration || resumeTime);
+        audioCurrentTime.value = next.currentTime;
+      }
+    }
+    if (playbackOptions.autoplay && audioElement) {
+      audioElement.play().catch(() => options.onPlaybackError?.());
     }
     return audioElement;
   };
@@ -102,8 +112,34 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     if (!src) {
       return;
     }
-    const element = ensureAudioElement(src);
-    element.play().catch(() => options.onPlaybackError?.());
+    const resumeTime = audioElement?.currentTime ?? audioCurrentTime.value;
+    const element = ensureAudioElement(src, {
+      autoplay: true,
+      resumeTime: Number.isFinite(resumeTime) ? resumeTime : 0
+    });
+    if (!element) {
+      options.onPlaybackError?.();
+    }
+  };
+
+  const startPlayback = () => {
+    if (!hasData.value || isPlaying.value) {
+      return false;
+    }
+    const src = options.sourceUrl?.() ?? pathUrl;
+    if (!src) {
+      return false;
+    }
+    const resumeTime = audioElement?.currentTime ?? audioCurrentTime.value;
+    const element = ensureAudioElement(src, {
+      autoplay: true,
+      resumeTime: Number.isFinite(resumeTime) ? resumeTime : 0
+    });
+    if (!element) {
+      options.onPlaybackError?.();
+      return false;
+    }
+    return true;
   };
 
   const setAudioPath = (filePath: string) => {
@@ -111,6 +147,20 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     pathUrl = filePath ? convertFileSrc(filePath) : null;
     hasData.value = !!pathUrl;
   };
+
+  watch(currentSourceUrl, (nextSource, previousSource) => {
+    if (!nextSource || !isPlaying.value || nextSource === previousSource) {
+      return;
+    }
+    const currentTime = audioElement?.currentTime ?? 0;
+    const element = ensureAudioElement(nextSource, {
+      autoplay: true,
+      resumeTime: currentTime
+    });
+    if (!element) {
+      options.onPlaybackError?.();
+    }
+  });
 
   onBeforeUnmount(() => {
     reset({ releaseSource: true });
@@ -122,6 +172,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     playbackProgress,
     currentPlaybackSeconds,
     setAudioPath,
+    startPlayback,
     togglePlayback,
     stopPlayback,
     reset

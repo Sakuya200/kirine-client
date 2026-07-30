@@ -128,6 +128,18 @@ fn input_entry_serializes_single_line() {
 }
 
 #[test]
+fn input_entry_serializes_camel_case_fields_for_python_reader() {
+    let line = serialize_input_entry("msg-2", "A", "你好", "/p/a.wav");
+    let v: serde_json::Value = serde_json::from_str(&line).expect("parse");
+    assert_eq!(v["contextId"], "msg-2");
+    assert_eq!(v["speakerName"], "A");
+    assert_eq!(v["text"], "你好");
+    assert_eq!(v["audioPath"], "/p/a.wav");
+    assert!(v.get("context_id").is_none());
+    assert!(v.get("speaker_name").is_none());
+}
+
+#[test]
 fn unknown_frame_type_is_err() {
     let result = parse_streaming_frame(r#"{"type":"bogus","contextId":"msg-1"}"#);
     assert!(result.is_err());

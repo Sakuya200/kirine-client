@@ -23,7 +23,7 @@ interface Props {
   width?: number;
 }
 
-const props = withDefaults(defineProps<Props>(), { width: 380 });
+const props = withDefaults(defineProps<Props>(), { width: 460 });
 const emit = defineEmits<{ close: []; 'update:width': [value: number] }>();
 
 const store = useStreamingSpeechStore();
@@ -51,7 +51,9 @@ const languageOptions = computed(() =>
     label: APP_LANGUAGE_LABELS[language] ?? language
   }))
 );
-const activeTaskConfig = computed<TaskParamConfig | null>(() => uiConfigStore.getTaskConfig(store.sessionConfig.baseModel, HistoryTaskType.StreamingSpeech));
+const activeTaskConfig = computed<TaskParamConfig | null>(() =>
+  uiConfigStore.getTaskConfig(store.sessionConfig.baseModel, HistoryTaskType.StreamingSpeech)
+);
 
 const normalizeModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
   const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.StreamingSpeech);
@@ -157,7 +159,7 @@ const removeSpeaker = (speaker: StreamingSpeakerConfig) => {
 
 const categoryLabel = (speaker: StreamingSpeakerConfig) => (speaker.category === 'voice-clone' ? '语音克隆' : speaker.category);
 
-// 左边缘拖拽调宽（320–560）
+// 左边缘拖拽调宽（320–1080）
 const startDrag = (event: PointerEvent) => {
   event.preventDefault();
   const startX = event.clientX;
@@ -165,7 +167,7 @@ const startDrag = (event: PointerEvent) => {
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
   const onMove = (ev: PointerEvent) => {
-    const next = Math.min(560, Math.max(320, startW - (ev.clientX - startX)));
+    const next = Math.min(1080, Math.max(320, startW - (ev.clientX - startX)));
     drawerWidth.value = next;
     emit('update:width', next);
   };
@@ -215,7 +217,12 @@ onBeforeUnmount(() => {
           <div class="flex-1 space-y-4 overflow-y-auto p-5">
             <PanelCard class="z-30" title="基础配置" subtitle="选择模型、设备与输出语言">
               <div class="grid gap-4 md:grid-cols-2">
-                <BaseListbox :model-value="store.sessionConfig.baseModel" label="基础模型" :options="modelOptions" @update:model-value="onBaseModelChange" />
+                <BaseListbox
+                  :model-value="store.sessionConfig.baseModel"
+                  label="基础模型"
+                  :options="modelOptions"
+                  @update:model-value="onBaseModelChange"
+                />
                 <BaseListbox
                   :model-value="store.sessionConfig.modelVersion"
                   label="模型版本"
@@ -223,8 +230,19 @@ onBeforeUnmount(() => {
                   :disabled="modelVersionOptions.length === 0"
                   @update:model-value="onModelVersionChange"
                 />
-                <BaseListbox :model-value="store.sessionConfig.device" label="设备类型" :options="deviceOptions" :disabled="deviceOptions.length === 0" @update:model-value="onDeviceChange" />
-                <BaseListbox :model-value="store.sessionConfig.language" label="输出语言" :options="languageOptions" @update:model-value="onLanguageChange" />
+                <BaseListbox
+                  :model-value="store.sessionConfig.device"
+                  label="设备类型"
+                  :options="deviceOptions"
+                  :disabled="deviceOptions.length === 0"
+                  @update:model-value="onDeviceChange"
+                />
+                <BaseListbox
+                  :model-value="store.sessionConfig.language"
+                  label="输出语言"
+                  :options="languageOptions"
+                  @update:model-value="onLanguageChange"
+                />
               </div>
             </PanelCard>
 
@@ -242,7 +260,9 @@ onBeforeUnmount(() => {
                     <div class="min-w-0">
                       <div class="flex items-center gap-2">
                         <h3 class="truncate text-sm font-semibold text-slate-900">{{ speaker.name }}</h3>
-                        <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] text-brand-700">{{ categoryLabel(speaker) }}</span>
+                        <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] text-brand-700">{{
+                          categoryLabel(speaker)
+                        }}</span>
                       </div>
                       <p class="mt-1 truncate text-xs text-stone-500">参考音频：{{ speaker.refAudioName || '未设置' }}</p>
                       <p v-if="speaker.refText" class="mt-0.5 line-clamp-2 text-xs text-slate-600">参考台词：{{ speaker.refText }}</p>
@@ -271,7 +291,11 @@ onBeforeUnmount(() => {
             </PanelCard>
 
             <PanelCard title="模型参数" subtitle="根据所选模型动态生成">
-              <GenericTaskParamsForm :model-value="store.sessionConfig.modelParams" :task-config="activeTaskConfig" @update:model-value="onModelParamsChange" />
+              <GenericTaskParamsForm
+                :model-value="store.sessionConfig.modelParams"
+                :task-config="activeTaskConfig"
+                @update:model-value="onModelParamsChange"
+              />
             </PanelCard>
           </div>
         </aside>

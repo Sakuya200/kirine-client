@@ -138,14 +138,35 @@ onMounted(async () => {
         </div>
 
         <template v-else>
-          <div v-for="message in store.messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-            <div class="max-w-[78%]">
-              <div v-if="message.role === 'user'" class="rounded-2xl rounded-br-md bg-brand-500 px-4 py-2.5 text-sm text-white shadow-soft">
-                <p class="whitespace-pre-wrap break-words">{{ message.text }}</p>
+          <div v-for="message in store.messages.filter(item => item.role === 'assistant')" :key="message.id" class="flex justify-end">
+            <div class="flex w-fit max-w-[92%] flex-col items-end sm:max-w-[82%]">
+              <div class="mb-1.5 flex items-center justify-end gap-2 text-[11px] text-stone-500">
+                <span class="truncate font-medium text-slate-600">{{ message.speakerName || '默认说话人' }}</span>
+                <span class="h-1 w-1 rounded-full bg-stone-300" />
+                <span
+                  class="shrink-0 rounded-full border px-2 py-0.5"
+                  :class="
+                    message.status === 'completed'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : message.status === 'error'
+                        ? 'border-rose-200 bg-rose-50 text-rose-700'
+                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                  "
+                >
+                  {{ message.status === 'completed' ? '已完成' : message.status === 'error' ? '异常' : '生成中' }}
+                </span>
               </div>
-              <div v-else class="rounded-2xl rounded-bl-md border border-brand-200 bg-white/95 px-4 py-3 shadow-soft">
-                <p class="mb-2 text-xs text-stone-500">{{ message.speakerName ? `说话人：${message.speakerName}` : '流式生成中…' }}</p>
-                <StreamableAudioPlayer mode="stream" :message-id="message.id" />
+
+              <div
+                class="relative max-w-full rounded-[18px] rounded-br-[8px] border border-sky-200/80 bg-sky-50/70 px-4 py-3 shadow-[0_10px_24px_rgba(14,116,144,0.08)]"
+              >
+                <p class="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{{ message.synthText || message.text }}</p>
+              </div>
+
+              <div class="mt-2 flex justify-end self-end">
+                <div class="max-w-[28rem]">
+                  <StreamableAudioPlayer mode="stream" :message-id="message.id" :speaker-name="message.speakerName" />
+                </div>
               </div>
             </div>
           </div>
@@ -153,28 +174,30 @@ onMounted(async () => {
       </div>
 
       <div class="border-t border-brand-100 p-4">
-        <div class="mb-3 w-60">
-          <BaseListbox
-            :model-value="selectedSpeakerId"
-            :options="store.speakerOptions"
-            label="说话人"
-            :placeholder="hasSpeakers ? '选择说话人' : '未配置说话人'"
-            :disabled="!hasSpeakers"
-            @update:model-value="onSpeakerChange"
-          />
-        </div>
-        <div class="flex items-end gap-2">
-          <textarea
-            v-model="inputText"
-            rows="2"
-            class="min-h-[44px] flex-1 resize-none rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="输入要说的话，回车发送…"
-            @keydown="onTextareaKeydown"
-          />
-          <BaseButton :disabled="!canSend" @click="send">
+        <div class="mb-3 flex items-end justify-between gap-3">
+          <div class="w-60">
+            <BaseListbox
+              :model-value="selectedSpeakerId"
+              :options="store.speakerOptions"
+              label="说话人"
+              :placeholder="hasSpeakers ? '选择说话人' : '未配置说话人'"
+              :disabled="!hasSpeakers"
+              @update:model-value="onSpeakerChange"
+            />
+          </div>
+          <BaseButton class="w-20" :disabled="!canSend" @click="send">
             <PaperAirplaneIcon class="h-4 w-4" aria-hidden="true" />
             <span>发送</span>
           </BaseButton>
+        </div>
+        <div>
+          <textarea
+            v-model="inputText"
+            rows="2"
+            class="min-h-[96px] w-full resize-none rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
+            placeholder="输入要说的话，回车发送…"
+            @keydown="onTextareaKeydown"
+          />
         </div>
       </div>
     </div>

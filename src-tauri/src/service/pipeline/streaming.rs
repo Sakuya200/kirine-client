@@ -469,6 +469,8 @@ struct FrameFileTail {
     /// 跨 poll 保留的半行：`read_until` 在 EOF 处读到不含 `'\n'` 的尾巴时缓存，
     /// 下次 poll 追加新字节继续拼接，避免把半截 JSON 当坏行丢弃。
     pending: Vec<u8>,
+    /// 上次观察到的文件大小；若文件被截断/重建则重置 reader 从头读。
+    last_size: Option<u64>,
 }
 
 impl FrameFileTail {
@@ -477,19 +479,40 @@ impl FrameFileTail {
             reader: None,
             path,
             pending: Vec::new(),
+            last_size: None,
         }
     }
 
     /// 读出文件当前所有可用完整帧行并转发；文件尚未创建时静默返回。
     fn poll_and_forward(&mut self) -> Vec<StreamingFrame> {
         let mut frames = Vec::new();
+        let metadata = match std::fs::metadata(&self.path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                self.reader = None;
+                self.pending.clear();
+                self.last_size = None;
+                return frames; // Python 尚未创建 frames.jsonl
+            }
+        };
+        let current_size = metadata.len();
+        if self
+            .last_size
+            .is_some_and(|last_size| current_size < last_size)
+        {
+            self.reader = None;
+            self.pending.clear();
+            self.last_size = None;
+        }
         if self.reader.is_none() {
             let file = match std::fs::File::open(&self.path) {
                 Ok(f) => f,
-                Err(_) => return frames, // Python 尚未创建 frames.jsonl
+                Err(_) => return frames,
             };
             self.reader = Some(std::io::BufReader::new(file));
         }
+        self.last_size = Some(current_size);
+
         let reader = self.reader.as_mut().expect("frames reader initialized");
         loop {
             let n = match reader.read_until(b'\n', &mut self.pending) {
