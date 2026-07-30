@@ -26,21 +26,13 @@ const store = useStreamingSpeechStore();
 
 const audioState = computed(() => (props.messageId ? store.audioStates[props.messageId] : undefined));
 const hasData = computed(() => !!audioState.value?.hasData);
-const isStreaming = computed(() => !!audioState.value?.isStreaming);
 const streamComplete = computed(() => !!audioState.value?.streamComplete);
 const sourceUrl = computed(() => (props.messageId ? store.getAudioUrl(props.messageId) : null));
-const requiresManualResume = ref(false);
 const isDownloading = ref(false);
 
-const { isPlaying, togglePlayback, startPlayback, setAudioPath } = useStreamableAudioPlayer({
+const { isPlaying, togglePlayback, setAudioPath } = useStreamableAudioPlayer({
   sourceUrl: () => sourceUrl.value,
   hasData,
-  onPlaybackEnded: () => {
-    if (props.mode === 'stream') {
-      // 流式播放在分片耗尽后改为手动续播，避免后续分片到达时自动抢播。
-      requiresManualResume.value = true;
-    }
-  },
   onPlaybackError: () => {
     uiStore.notifyError('音频播放失败，请检查音频数据是否可解码。');
   }
@@ -86,27 +78,6 @@ watch(
     if (path !== undefined) {
       setAudioPath(path);
     }
-  },
-  { immediate: true }
-);
-
-watch(
-  () => props.messageId,
-  () => {
-    requiresManualResume.value = false;
-  }
-);
-
-watch(
-  [hasData, sourceUrl, isStreaming, streamComplete],
-  ([nextHasData, nextSource]) => {
-    if (props.mode !== 'stream') {
-      return;
-    }
-    if (!nextHasData || !nextSource || isPlaying.value || requiresManualResume.value) {
-      return;
-    }
-    startPlayback();
   },
   { immediate: true }
 );
