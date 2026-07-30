@@ -122,8 +122,8 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
 }
 
 fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
-    let config_paths = discover_model_config_file_paths(MODEL_CONFIG_FILE_NAME)
-        .context("发现模型配置文件失败")?;
+    let config_paths =
+        discover_model_config_file_paths(MODEL_CONFIG_FILE_NAME).context("发现模型配置文件失败")?;
 
     let mut models = Vec::new();
     let mut speakers = Vec::new();
@@ -137,11 +137,7 @@ fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
             .with_context(|| format!("解析模型配置文件失败: {}", config_path.display()))?;
 
         for model in file_config.models {
-            let key = format!(
-                "{}:{}",
-                model.base_model.trim(),
-                model.model_version.trim()
-            );
+            let key = format!("{}:{}", model.base_model.trim(), model.model_version.trim());
             if !model_keys.insert(key.clone()) {
                 tracing::warn!(
                     key = %key,
@@ -168,10 +164,7 @@ fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
     }
 
     if models.is_empty() {
-        bail!(
-            "未从 {} 聚合到任何模型定义",
-            MODEL_CONFIG_FILE_NAME
-        );
+        bail!("未从 {} 聚合到任何模型定义", MODEL_CONFIG_FILE_NAME);
     }
 
     Ok(SupportedModelsConfig { models, speakers })
@@ -323,7 +316,12 @@ fn resolve_current_device_value(
 ) -> Option<String> {
     let parsed: Vec<HardwareType> = supported_devices
         .iter()
-        .filter_map(|item| item.trim().to_ascii_lowercase().parse::<HardwareType>().ok())
+        .filter_map(|item| {
+            item.trim()
+                .to_ascii_lowercase()
+                .parse::<HardwareType>()
+                .ok()
+        })
         .collect();
 
     if let Some(existing_value) = existing {

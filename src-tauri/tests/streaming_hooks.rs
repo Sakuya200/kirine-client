@@ -14,10 +14,7 @@ fn audio_stream_event_serializes_with_type_tag_and_camel_case() {
     let started = serde_json::to_value(&AudioStreamEvent::Started).unwrap();
     assert_eq!(started, serde_json::json!({"type":"started"}));
 
-    let chunk = serde_json::to_value(&AudioStreamEvent::Chunk {
-        bytes: vec![0, 1],
-    })
-    .unwrap();
+    let chunk = serde_json::to_value(&AudioStreamEvent::Chunk { bytes: vec![0, 1] }).unwrap();
     assert_eq!(chunk, serde_json::json!({"type":"chunk","bytes":[0,1]}));
 
     let finished = serde_json::to_value(&AudioStreamEvent::Finished).unwrap();

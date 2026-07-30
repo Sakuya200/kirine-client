@@ -23,9 +23,21 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(StreamingTasks::HistoryId).integer().not_null())
-                    .col(ColumnDef::new(StreamingTasks::BaseModel).string().not_null())
-                    .col(ColumnDef::new(StreamingTasks::ModelVersion).string().not_null())
+                    .col(
+                        ColumnDef::new(StreamingTasks::HistoryId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StreamingTasks::BaseModel)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StreamingTasks::ModelVersion)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(StreamingTasks::Language).string().not_null())
                     .col(
                         ColumnDef::new(StreamingTasks::Device)
@@ -39,17 +51,37 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("{}"),
                     )
-                    .col(ColumnDef::new(StreamingTasks::ContextFilePath).text().not_null())
-                    .col(ColumnDef::new(StreamingTasks::InputCacheFilePath).text().not_null())
-                    .col(ColumnDef::new(StreamingTasks::OutputAudioDir).text().not_null())
+                    .col(
+                        ColumnDef::new(StreamingTasks::ContextFilePath)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StreamingTasks::InputCacheFilePath)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StreamingTasks::OutputAudioDir)
+                            .text()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(StreamingTasks::MessageCount)
                             .integer()
                             .not_null()
                             .default(0),
                     )
-                    .col(ColumnDef::new(StreamingTasks::CreateTime).string().not_null())
-                    .col(ColumnDef::new(StreamingTasks::ModifyTime).string().not_null())
+                    .col(
+                        ColumnDef::new(StreamingTasks::CreateTime)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StreamingTasks::ModifyTime)
+                            .string()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(StreamingTasks::Deleted)
                             .integer()

@@ -15,19 +15,19 @@ use crate::Result;
 pub use crate::config::HardwareType;
 pub use crate::hooks::streaming::AudioStreamEvent;
 pub use crate::service::models;
-pub use crate::service::pipeline::build_llm_task_script_args;
+pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
 pub use crate::service::pipeline::api::{
     PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
     PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
     VoiceCloneArgs, VoiceDesignArgs,
 };
+pub use crate::service::pipeline::build_llm_task_script_args;
 pub use crate::service::pipeline::streaming::{
     frame_to_event, parse_streaming_frame, serialize_input_entry, StreamingContextBasic,
     StreamingContextJson, StreamingFrame, StreamingFramePayload, StreamingMessageEntry,
     StreamingSpeaker,
 };
 pub use crate::service::{LocalService, Service};
-pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
 
 /// 临时库测试设施：每个 `LocalServiceHarness::new` 在 `std::env::temp_dir` 下创建独立
 /// 临时目录，经 `LocalService::from_paths` 走「建库 → 全量迁移 → sync 模型目录」链路，
@@ -45,8 +45,7 @@ impl LocalServiceHarness {
         let data_dir = root_dir.join("data");
         let model_dir = root_dir.join("models");
         let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone())
-                .await?;
+            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone()).await?;
 
         Ok(Self {
             root_dir,
@@ -78,7 +77,9 @@ impl LocalServiceHarness {
     }
 
     pub async fn speakers_query_succeeds(&self) -> Result<bool> {
-        self.service.list_speaker_infos(PageRequest::default()).await?;
+        self.service
+            .list_speaker_infos(PageRequest::default())
+            .await?;
         Ok(true)
     }
 
@@ -151,7 +152,10 @@ impl LocalServiceHarness {
             .await?;
         pool.close().await;
         let row = row.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("history row {history_id} not found"))
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("history row {history_id} not found"),
+            )
         })?;
         let status: String = row.get("status");
         status
@@ -190,11 +194,7 @@ impl LocalServiceHarness {
 
     // ---- 模型下载状态（覆盖 install/uninstall 的 DB 侧，不真正执行脚本） ----
 
-    pub async fn model_downloaded(
-        &self,
-        base_model: &str,
-        model_version: &str,
-    ) -> Result<bool> {
+    pub async fn model_downloaded(&self, base_model: &str, model_version: &str) -> Result<bool> {
         self.service
             .model_downloaded_impl(base_model, model_version)
             .await
@@ -425,9 +425,7 @@ impl LocalServiceHarness {
         history_id: i64,
     ) -> Result<Option<i64>> {
         let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let sql = format!(
-            "SELECT id FROM {table_name} WHERE history_id = ? AND deleted = 0"
-        );
+        let sql = format!("SELECT id FROM {table_name} WHERE history_id = ? AND deleted = 0");
         let row = sqlx::query(&sql)
             .bind(history_id)
             .fetch_optional(&pool)

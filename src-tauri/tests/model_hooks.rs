@@ -26,14 +26,30 @@ async fn list_model_infos_syncs_six_models_with_full_fields() -> Result<()> {
     let harness = LocalServiceHarness::new("model-list").await?;
 
     let models = harness.list_model_infos().await?;
-    assert!(models.len() >= 6, "expected >=6 synced models, got {}", models.len());
+    assert!(
+        models.len() >= 6,
+        "expected >=6 synced models, got {}",
+        models.len()
+    );
 
     // 每个模型应携带 supported_languages / supported_devices / 特性矩阵
     for m in &models {
         assert!(!m.base_model.is_empty());
-        assert!(!m.supported_languages.is_empty(), "{} missing languages", m.base_model);
-        assert!(!m.supported_devices.is_empty(), "{} missing devices", m.base_model);
-        assert!(!m.supported_feature_list.is_empty(), "{} missing features", m.base_model);
+        assert!(
+            !m.supported_languages.is_empty(),
+            "{} missing languages",
+            m.base_model
+        );
+        assert!(
+            !m.supported_devices.is_empty(),
+            "{} missing devices",
+            m.base_model
+        );
+        assert!(
+            !m.supported_feature_list.is_empty(),
+            "{} missing features",
+            m.base_model
+        );
     }
 
     // 至少包含 qwen3_tts

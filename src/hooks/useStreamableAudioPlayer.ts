@@ -1,44 +1,24 @@
-import { computed, onBeforeUnmount, ref } from 'vue';
-import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
-
-type AudioStreamEvent =
-  | { type: 'started' }
-  | { type: 'chunk'; bytes: number[] }
-  | { type: 'finished' }
-  | { type: 'error'; message: string };
+import { computed, onBeforeUnmount, ref, type Ref } from 'vue';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface UseStreamableAudioPlayerOptions {
+  sourceUrl?: () => string | null;
+  hasData?: Ref<boolean>;
   onPlaybackEnded?: () => void;
   onPlaybackError?: () => void;
-  onStreamError?: (message: string) => void;
-  /** 流式收到 `finished` 帧（数据完整）时触发，用于回写消息状态为 completed。 */
-  onStreamFinished?: () => void;
 }
 
 export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOptions = {}) => {
   const isPlaying = ref(false);
-  const hasData = ref(false);
-  const isStreaming = ref(false);
-  const streamComplete = ref(false);
   const playbackProgress = ref(0);
   const audioCurrentTime = ref(0);
+  const hasData = options.hasData ?? ref(false);
 
   const currentPlaybackSeconds = computed(() => Math.round(audioCurrentTime.value));
 
   let audioElement: HTMLAudioElement | null = null;
-  let audioObjectUrl: string | null = null;
-  let accumulated: number[] = [];
   let pathUrl: string | null = null;
   let removeAudioListeners: (() => void) | null = null;
-  let streamObjectUrlLength = 0;
-
-  const releaseObjectUrl = () => {
-    if (audioObjectUrl) {
-      URL.revokeObjectURL(audioObjectUrl);
-      audioObjectUrl = null;
-    }
-    streamObjectUrlLength = 0;
-  };
 
   const destroyAudioElement = () => {
     if (audioElement) {
@@ -61,12 +41,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   const reset = ({ releaseSource = false } = {}) => {
     destroyAudioElement();
     if (releaseSource) {
-      releaseObjectUrl();
-      accumulated = [];
       pathUrl = null;
-      hasData.value = false;
-      isStreaming.value = false;
-      streamComplete.value = false;
     }
   };
 
@@ -76,11 +51,9 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
       const next = new Audio(src);
 
       const handleTimeUpdate = () => {
-        const duration =
-          Number.isFinite(next.duration) && next.duration > 0 ? next.duration : 0;
+        const duration = Number.isFinite(next.duration) && next.duration > 0 ? next.duration : 0;
         audioCurrentTime.value = next.currentTime;
-        playbackProgress.value =
-          duration > 0 ? Math.min(100, (next.currentTime / duration) * 100) : 0;
+        playbackProgress.value = duration > 0 ? Math.min(100, (next.currentTime / duration) * 100) : 0;
       };
       const handlePause = () => {
         isPlaying.value = false;
@@ -117,23 +90,6 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     return audioElement;
   };
 
-  const resolveSourceUrl = (): string | null => {
-    if (pathUrl) {
-      return pathUrl;
-    }
-    if (accumulated.length > 0) {
-      if (audioObjectUrl && streamObjectUrlLength === accumulated.length) {
-        return audioObjectUrl;
-      }
-      releaseObjectUrl();
-      const blob = new Blob([Uint8Array.from(accumulated)], { type: 'audio/wav' });
-      audioObjectUrl = URL.createObjectURL(blob);
-      streamObjectUrlLength = accumulated.length;
-      return audioObjectUrl;
-    }
-    return null;
-  };
-
   const togglePlayback = () => {
     if (!hasData.value) {
       return;
@@ -142,7 +98,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
       stopPlayback();
       return;
     }
-    const src = resolveSourceUrl();
+    const src = options.sourceUrl?.() ?? pathUrl;
     if (!src) {
       return;
     }
@@ -150,53 +106,8 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
     element.play().catch(() => options.onPlaybackError?.());
   };
 
-  const startStreaming = async (taskId: number, contextId: string, speakerName: string, text: string) => {
-    accumulated = [];
-    hasData.value = false;
-    streamComplete.value = false;
-    isStreaming.value = true;
-    destroyAudioElement();
-    releaseObjectUrl();
-    pathUrl = null;
-
-    const channel = new Channel<AudioStreamEvent>();
-    channel.onmessage = (message: AudioStreamEvent) => {
-      switch (message.type) {
-        case 'started':
-          break;
-        case 'chunk':
-          accumulated.push(...message.bytes);
-          if (!hasData.value) {
-            hasData.value = true;
-          }
-          break;
-        case 'finished':
-          streamComplete.value = true;
-          isStreaming.value = false;
-          options.onStreamFinished?.();
-          break;
-        case 'error':
-          isStreaming.value = false;
-          options.onStreamError?.(message.message);
-          break;
-      }
-    };
-
-    try {
-      await invoke('send_streaming_message', {
-        payload: { taskId, contextId, speakerName, text },
-        onEvent: channel
-      });
-    } catch (error) {
-      isStreaming.value = false;
-      options.onStreamError?.(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const setAudioPath = (filePath: string) => {
     destroyAudioElement();
-    releaseObjectUrl();
-    accumulated = [];
     pathUrl = filePath ? convertFileSrc(filePath) : null;
     hasData.value = !!pathUrl;
   };
@@ -208,14 +119,11 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   return {
     isPlaying,
     hasData,
-    isStreaming,
-    streamComplete,
     playbackProgress,
     currentPlaybackSeconds,
-    startStreaming,
     setAudioPath,
     togglePlayback,
     stopPlayback,
-    reset,
+    reset
   };
 };

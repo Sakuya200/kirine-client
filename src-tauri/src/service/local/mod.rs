@@ -3,12 +3,12 @@ pub(crate) mod entity;
 mod history;
 mod model_info;
 mod speaker;
+mod streaming;
 mod supported_models;
 mod training;
 mod tts;
 mod voice_clone;
 mod voice_design;
-mod streaming;
 
 use std::{
     collections::HashMap,
@@ -34,14 +34,14 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
-            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
-            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
-            ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
-            ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload,
-            SpeakerFilter, SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult,
-            TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
-            VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
+            CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord, HistoryRecordSummary,
+            HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
+            ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
+            SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
+            StreamingSpeechTaskResult, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -53,8 +53,7 @@ struct ActiveTaskControl {
     task_type: HistoryTaskType,
     cancel_tx: watch::Sender<bool>,
     _cancel_rx_guard: watch::Receiver<bool>,
-    streaming_extra:
-        Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>,
+    streaming_extra: Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,10 +111,7 @@ impl Service for LocalService {
         self.delete_speaker_info_impl(speaker_id).await
     }
 
-    async fn list_model_infos(
-        &self,
-        request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>> {
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
         self.list_model_infos_impl(request).await
     }
 

@@ -1,6 +1,11 @@
 # Kirine Client 项目记忆索引
 
-> 状态截至 2026-07-28 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
+> 状态截至 2026-07-30 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
+
+## 当前项目上下文快照
+- 当前仓库是基于 Tauri 2 + Vue 3 + Rust 的桌面端 AI 语音合成客户端，重点能力已覆盖 TTS / Voice Clone / Voice Design / Model Training / Streaming Speech。
+- Local 模式下流式语音会话已落地：会话级长期进程、`contextId` 多路分发、帧缓冲文件协议与实时音频回传均已就绪；Remote 模式仍处于占位，当前不可用。
+- 模型体系仍由 `src-model/` 下 7 个独立 adapter 子模块驱动，`moss_tts_realtime` 是首个实现会话级 `streaming.py` 契约的适配器。
 
 - [Project Overview](project-overview.md) - 项目全貌、技术栈、核心功能、存储模式（Local/Remote）概览
 - [Frontend Architecture](tech-stack-frontend.md) - Vue 3 前端目录结构、配置驱动参数表单、UI 组件体系

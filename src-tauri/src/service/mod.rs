@@ -59,10 +59,7 @@ pub trait Service: Send + Sync {
     ) -> Result<SpeakerPageResult>;
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
-    async fn list_model_infos(
-        &self,
-        request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>>;
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>>;
     async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType>;
     async fn install_model(
         &self,

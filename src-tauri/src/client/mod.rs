@@ -13,12 +13,12 @@ use crate::{
     config::HardwareType,
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
-        HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-        ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, SpeakerFilter,
-        SpeakerInfo, TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
-        UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult,
-        VoiceDesignAudioAsset, VoiceDesignTaskResult,
+        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord,
+        HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
+        ModelMutationResult, ModelTrainingTaskResult, SpeakerFilter, SpeakerInfo,
+        TextToSpeechAudioAsset, TextToSpeechTaskResult, UpdateSpeakerPayload,
+        UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
+        VoiceDesignTaskResult,
     },
     Result,
 };
@@ -42,10 +42,7 @@ impl ApiClient {
         if api_url.is_empty() {
             bail!("api_url 不能为空（请在 config.toml 配置 [remote].api_url）");
         }
-        Ok(ApiClient {
-            api_url,
-            api_token,
-        })
+        Ok(ApiClient { api_url, api_token })
     }
 
     /// 拼接完整请求地址：`api_url + path`。
@@ -60,7 +57,12 @@ impl ApiClient {
             %method, %url, %params,
             "[client] 远端接口占位：HTTP 调用尚未接入"
         );
-        bail!("client HTTP 调用尚未接入: {} {} | 参数: {}", method, url, params)
+        bail!(
+            "client HTTP 调用尚未接入: {} {} | 参数: {}",
+            method,
+            url,
+            params
+        )
     }
 
     /// 序列化参数为 JSON 字符串（序列化失败时回退为占位文本）。
@@ -179,10 +181,7 @@ impl ApiClient {
         self.placeholder("GET", &path, &params).await
     }
 
-    pub async fn read_voice_design_audio(
-        &self,
-        history_id: i64,
-    ) -> Result<VoiceDesignAudioAsset> {
+    pub async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset> {
         let path = paths::with_id(paths::HISTORY_AUDIO_VOICE_DESIGN, history_id);
         let params = json!({ "historyId": history_id }).to_string();
         self.placeholder("GET", &path, &params).await

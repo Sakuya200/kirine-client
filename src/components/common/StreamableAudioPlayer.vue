@@ -4,55 +4,39 @@ import { computed, watch } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import { useStreamableAudioPlayer } from '@/hooks/useStreamableAudioPlayer';
+import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiStore } from '@/stores/ui';
 
 interface Props {
   mode: 'stream' | 'path';
-  taskId?: number;
-  contextId?: string;
   audioPath?: string;
-  speakerName?: string;
-  synthText?: string;
-  /** assistant 消息 id，流式 finished/error 时随事件回传父级以流转消息状态。 */
+  /** assistant 消息 id，流式音频由 store 持有。 */
   messageId?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  taskId: undefined,
-  contextId: '',
   audioPath: undefined,
-  speakerName: '',
-  synthText: '',
-  messageId: undefined,
+  messageId: undefined
 });
 
-const emit = defineEmits<{
-  (e: 'stream-finished', messageId: string): void;
-  (e: 'stream-error', messageId: string): void;
-}>();
-
 const uiStore = useUiStore();
+const store = useStreamingSpeechStore();
 
-const { isPlaying, hasData, isStreaming, togglePlayback, startStreaming, setAudioPath } =
-  useStreamableAudioPlayer({
-    onPlaybackEnded: () => {
-      uiStore.notifyInfo('音频播放结束。', 2200);
-    },
-    onPlaybackError: () => {
-      uiStore.notifyError('音频播放失败，请检查音频数据是否可解码。');
-    },
-    onStreamError: message => {
-      uiStore.notifyError(`音频流式接收失败：${message}`);
-      if (props.messageId) {
-        emit('stream-error', props.messageId);
-      }
-    },
-    onStreamFinished: () => {
-      if (props.messageId) {
-        emit('stream-finished', props.messageId);
-      }
-    },
-  });
+const audioState = computed(() => (props.messageId ? store.audioStates[props.messageId] : undefined));
+const hasData = computed(() => !!audioState.value?.hasData);
+const isStreaming = computed(() => !!audioState.value?.isStreaming);
+const sourceUrl = computed(() => (props.messageId ? store.getAudioUrl(props.messageId) : null));
+
+const { isPlaying, togglePlayback, setAudioPath } = useStreamableAudioPlayer({
+  sourceUrl: () => sourceUrl.value,
+  hasData,
+  onPlaybackEnded: () => {
+    uiStore.notifyInfo('音频播放结束。', 2200);
+  },
+  onPlaybackError: () => {
+    uiStore.notifyError('音频播放失败，请检查音频数据是否可解码。');
+  }
+});
 
 const actionLabel = computed(() => {
   if (isPlaying.value) return '暂停播放';
@@ -60,27 +44,15 @@ const actionLabel = computed(() => {
   return '播放音频';
 });
 
-if (props.mode === 'stream') {
-  watch(
-    () => [props.taskId, props.contextId, props.speakerName, props.synthText] as const,
-    ([taskId, contextId, speakerName, synthText]) => {
-      if (taskId != null) {
-        void startStreaming(taskId, contextId, speakerName, synthText);
-      }
-    },
-    { immediate: true },
-  );
-} else {
-  watch(
-    () => props.audioPath,
-    path => {
-      if (path !== undefined) {
-        setAudioPath(path);
-      }
-    },
-    { immediate: true },
-  );
-}
+watch(
+  () => props.audioPath,
+  path => {
+    if (path !== undefined) {
+      setAudioPath(path);
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <template>

@@ -3,8 +3,8 @@ use tauri::Wry;
 mod model_info;
 mod settings;
 mod speaker_info;
-mod task_history;
 pub(crate) mod streaming;
+mod task_history;
 
 pub use settings::{EnvConfigState, UiConfigState};
 

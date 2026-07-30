@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Cog6ToothIcon, PaperAirplaneIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
+import { Cog6ToothIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -22,12 +22,11 @@ const inputText = ref('');
 const messagesContainerRef = ref<HTMLElement | null>(null);
 
 const canSend = computed(
-  () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && !store.isStartingSession
+  () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && store.activeTaskId !== null && !store.isStartingSession
 );
 const hasSpeakers = computed(() => store.speakers.length > 0);
 const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? '未选择');
 
-// 说话人列表变化时，保持有效选中（无选中时回退首个）
 watch(
   () => store.speakers,
   speakers => {
@@ -54,11 +53,9 @@ const send = async () => {
   if (!canSend.value) {
     if (!hasSpeakers.value) {
       uiStore.notifyWarning('请先在配置抽屉中添加说话人。');
+    } else if (store.activeTaskId === null) {
+      uiStore.notifyWarning('请先点击「开启会话」。');
     }
-    return;
-  }
-  // 二次保险：建会话期间忽略回车连击（canSend 已守卫按钮，此处防 keydown 直达）
-  if (store.isStartingSession) {
     return;
   }
   const text = inputText.value;
@@ -67,8 +64,15 @@ const send = async () => {
   try {
     await store.sendMessage(text, selectedSpeakerId.value);
   } catch (err) {
-    // 建会话/发送失败：回填文本以便重试，并通知用户（消除未处理 rejection）
     inputText.value = text;
+    uiStore.notifyError(err instanceof Error ? err.message : String(err));
+  }
+};
+
+const startSession = async () => {
+  try {
+    await store.startSession();
+  } catch (err) {
     uiStore.notifyError(err instanceof Error ? err.message : String(err));
   }
 };
@@ -96,7 +100,7 @@ onMounted(async () => {
 
 <template>
   <div class="flex h-[calc(100vh-3.5rem)] flex-col gap-4">
-    <PageHeader title="流式语音" description="选择说话人，输入文本即可实时流式生成语音。" eyebrow="Streaming Speech" />
+    <PageHeader title="流式语音" description="先开启会话，再输入文本生成实时语音。" eyebrow="Streaming Speech" />
 
     <div class="flex items-center justify-between gap-3">
       <p class="text-xs text-stone-500">
@@ -104,12 +108,11 @@ onMounted(async () => {
         · 回车发送，Shift+Enter 换行
       </p>
       <div class="flex gap-2">
-        <BaseButton
-          tone="ghost"
-          size="sm"
-          :disabled="store.activeTaskId === null"
-          @click="store.terminateSession"
-        >
+        <BaseButton tone="ghost" size="sm" :disabled="store.activeTaskId !== null || store.isStartingSession" @click="startSession">
+          <PlayCircleIcon class="h-4 w-4" aria-hidden="true" />
+          <span>{{ store.isStartingSession ? '加载模型中…' : '开启会话' }}</span>
+        </BaseButton>
+        <BaseButton tone="ghost" size="sm" :disabled="store.activeTaskId === null" @click="store.terminateSession">
           <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
           <span>终止会话</span>
         </BaseButton>
@@ -129,7 +132,7 @@ onMounted(async () => {
         <div v-if="store.messages.length === 0" class="flex h-full items-center justify-center">
           <div class="text-center text-sm text-stone-500">
             <p class="text-base font-medium text-slate-700">开始流式语音对话</p>
-            <p class="mt-2">输入文本、选择说话人，回车即可生成实时语音。</p>
+            <p class="mt-2">先点击「开启会话」，再输入文本即可生成实时语音。</p>
             <p v-if="!hasSpeakers" class="mt-2 text-brand-700">尚未配置说话人，请先点击右上角「配置」添加。</p>
           </div>
         </div>
@@ -142,16 +145,7 @@ onMounted(async () => {
               </div>
               <div v-else class="rounded-2xl rounded-bl-md border border-brand-200 bg-white/95 px-4 py-3 shadow-soft">
                 <p class="mb-2 text-xs text-stone-500">{{ message.speakerName ? `说话人：${message.speakerName}` : '流式生成中…' }}</p>
-                <StreamableAudioPlayer
-                  mode="stream"
-                  :message-id="message.id"
-                  :task-id="message.taskId"
-                  :context-id="message.contextId"
-                  :speaker-name="message.speakerName ?? ''"
-                  :synth-text="message.synthText"
-                  @stream-finished="id => store.updateMessageStatus(id, 'completed')"
-                  @stream-error="id => store.updateMessageStatus(id, 'error')"
-                />
+                <StreamableAudioPlayer mode="stream" :message-id="message.id" />
               </div>
             </div>
           </div>

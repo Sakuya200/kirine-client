@@ -22,12 +22,15 @@ fn parses_started_frame() {
 #[test]
 fn parses_chunk_frame_with_base64_bytes() {
     // "hi" -> base64 "aGk="
-    let frame = parse_streaming_frame(
-        r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#,
-    )
-    .expect("parse")
-    .expect("some");
-    assert_eq!(frame.payload, StreamingFramePayload::Chunk { bytes: vec![b'h', b'i'] });
+    let frame = parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
+        .expect("parse")
+        .expect("some");
+    assert_eq!(
+        frame.payload,
+        StreamingFramePayload::Chunk {
+            bytes: vec![b'h', b'i']
+        }
+    );
 }
 
 #[test]
@@ -37,15 +40,32 @@ fn parses_finished_and_error_frames() {
         .expect("some");
     assert_eq!(fin.payload, StreamingFramePayload::Finished);
 
-    let err = parse_streaming_frame(
-        r#"{"type":"error","contextId":"msg-1","message":"boom"}"#,
-    )
-    .expect("parse")
-    .expect("some");
+    let err = parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
+        .expect("parse")
+        .expect("some");
     assert_eq!(
         err.payload,
-        StreamingFramePayload::Error { message: "boom".to_string() }
+        StreamingFramePayload::Error {
+            message: "boom".to_string()
+        }
     );
+}
+
+#[test]
+fn parses_session_ready_frame() {
+    let frame = parse_streaming_frame(r#"{"type":"session_ready","contextId":"__session__"}"#)
+        .expect("parse")
+        .expect("some");
+    assert_eq!(frame.context_id, "__session__");
+    assert_eq!(frame.payload, StreamingFramePayload::SessionReady);
+}
+
+#[test]
+fn session_ready_frame_is_not_forwarded_as_audio_event() {
+    let frame = parse_streaming_frame(r#"{"type":"session_ready","contextId":"__session__"}"#)
+        .expect("parse")
+        .expect("some");
+    assert!(frame_to_event(&frame).is_none());
 }
 
 #[test]
@@ -124,10 +144,9 @@ fn frame_to_event_maps_each_payload() {
         other => panic!("expected Started, got {other:?}"),
     }
 
-    let chunk =
-        parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
-            .expect("parse")
-            .expect("some");
+    let chunk = parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
+        .expect("parse")
+        .expect("some");
     match frame_to_event(&chunk) {
         Some(AudioStreamEvent::Chunk { bytes }) => assert_eq!(bytes, vec![b'h', b'i']),
         other => panic!("expected Chunk, got {other:?}"),
@@ -141,10 +160,9 @@ fn frame_to_event_maps_each_payload() {
         other => panic!("expected Finished, got {other:?}"),
     }
 
-    let error =
-        parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
-            .expect("parse")
-            .expect("some");
+    let error = parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
+        .expect("parse")
+        .expect("some");
     match frame_to_event(&error) {
         Some(AudioStreamEvent::Error { message }) => assert_eq!(message, "boom"),
         other => panic!("expected Error, got {other:?}"),

@@ -12,10 +12,10 @@ use sea_orm::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::watch;
 use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
-use tokio::sync::watch;
 
 use crate::{
     common::{
@@ -120,7 +120,10 @@ impl LocalService {
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
-        if !selected_model_info.supported_devices.contains(&selected_training_device) {
+        if !selected_model_info
+            .supported_devices
+            .contains(&selected_training_device)
+        {
             bail!(
                 "模型 {} {} 不支持设备 {}，请切换为 {:?}",
                 selected_model_info.model_name,
@@ -136,8 +139,7 @@ impl LocalService {
         };
         let selected_training_mode_text = format!(
             "{} / {}",
-            selected_model_info.model_name,
-            selected_training_mode_label,
+            selected_model_info.model_name, selected_training_mode_label,
         );
 
         let txn = self.orm().begin().await?;

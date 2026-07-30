@@ -42,8 +42,8 @@ impl LocalService {
         let page = request.page.max(1);
         let page_size = request.page_size.max(1);
 
-        let mut query = model_info_entity::Entity::find()
-            .filter(model_info_entity::Column::Deleted.eq(0));
+        let mut query =
+            model_info_entity::Entity::find().filter(model_info_entity::Column::Deleted.eq(0));
 
         if let Some(filter) = &request.filter {
             if let Some(keyword) = filter
@@ -66,9 +66,8 @@ impl LocalService {
             if let Some(feature) = filter.feature {
                 // supported_feature_list_json 存储 JSON 数组，按功能标识子串匹配
                 let pattern = format!("%\"{}\"%", feature.as_str());
-                query = query.filter(
-                    model_info_entity::Column::SupportedFeatureListJson.like(&pattern),
-                );
+                query = query
+                    .filter(model_info_entity::Column::SupportedFeatureListJson.like(&pattern));
             }
         }
 

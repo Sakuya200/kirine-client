@@ -2,8 +2,7 @@ use std::path::Path;
 
 use anyhow::bail;
 use sea_orm::{
-    ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
-    ActiveModelTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
 use tokio::sync::watch;
 
@@ -59,7 +58,8 @@ impl LocalService {
             bail!("目标台词不能为空");
         }
 
-        let export_audio_name = super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_design");
+        let export_audio_name =
+            super::sanitize_file_stem(&payload.export_audio_name, "kirine_voice_design");
         let mut model_params = payload.model_params.clone();
         let char_count = text.chars().count();
         let title = super::build_task_title("音色设计", None, &create_time);

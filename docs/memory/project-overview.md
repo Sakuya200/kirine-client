@@ -9,7 +9,7 @@ metadata:
 
 # Kirine Client - 项目全貌
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`
+> 状态截至 2026-07-30 · 分支 `v.0.12.0`
 
 ## 项目简介
 Kirine Client 是一款桌面端 AI 语音合成应用，支持 TTS（文本转语音）、声音克隆（Voice Clone）、音色设计（Voice Design）、模型微调（Model Training）和流式语音（Streaming Speech）五大核心能力。基于 Tauri 2 + Vue 3 构建，跨 Windows/macOS/Linux。
@@ -65,7 +65,8 @@ Kirine Client 是一款桌面端 AI 语音合成应用，支持 TTS（文本转�
 - 数据库 schema version `29`；最新迁移 `m20260723_000012_add_model_current_device`
 - 已集成 7 个模型子模块（均为独立 GitHub adapter 仓库）：irodori_tts_v3, dots_tts, qwen3_tts, vox_cpm2, moss_tts_local, moss_tts_realtime, gpt_sovits_cpufast
 - 远程存储模式（RemoteService）开发中：`client::ApiClient` + `utils::HttpClient` 基础设施 + `docs/remote-api.yaml` 契约就位，但 ApiClient 各方法为占位实现（bail「HTTP 调用尚未接入」），Remote 模式当前不可用
-- 流式语音生成（StreamingSpeech）全栈已落地（Local 模式可用，Remote 模式不支持）
+- 流式语音生成（StreamingSpeech）全栈已落地：Local 模式下会话级长期进程、帧缓冲文件协议、`contextId` 多路分发、消息级音频回传和历史回放已就绪；Remote 模式仍不支持
+- 当前上下文重点是保持模型适配器、运行时环境、前端配置表单与后端 Pipeline 的契约一致，尤其是 `moss_tts_realtime` 的 streaming 会话链路与 trained speaker 回接
 
 ## 存储模式
 后端通过 `config::StorageMode`（`config/mod.rs`）区分两种存储后端，`init_service` 据此分发：

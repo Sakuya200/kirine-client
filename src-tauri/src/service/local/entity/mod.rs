@@ -1,8 +1,8 @@
 pub mod model_info;
 pub mod speaker;
+pub mod streaming_task;
 pub mod task_history;
 pub mod training_task;
 pub mod tts_task;
 pub mod voice_clone_task;
 pub mod voice_design_task;
-pub mod streaming_task;

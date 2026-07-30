@@ -1,8 +1,8 @@
 use std::io;
 
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, TransactionTrait,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, TransactionTrait,
 };
 
 use crate::{
@@ -17,8 +17,8 @@ use crate::{
         },
         models::{
             HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
-            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest, TaskStatus,
-            StreamingTaskDetail, TextToSpeechAudioAsset, TextToSpeechFormat,
+            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
+            StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
             TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
@@ -79,8 +79,8 @@ impl LocalService {
         let page = request.page.max(1);
         let page_size = request.page_size.max(1);
 
-        let mut query = task_history_entity::Entity::find()
-            .filter(task_history_entity::Column::Deleted.eq(0));
+        let mut query =
+            task_history_entity::Entity::find().filter(task_history_entity::Column::Deleted.eq(0));
 
         if let Some(filter) = &request.filter {
             if let Some(keyword) = filter
@@ -97,8 +97,7 @@ impl LocalService {
                 );
             }
             if let Some(task_type) = filter.task_type {
-                query =
-                    query.filter(task_history_entity::Column::TaskType.eq(task_type.as_str()));
+                query = query.filter(task_history_entity::Column::TaskType.eq(task_type.as_str()));
             }
             if let Some(status) = filter.status {
                 query = query.filter(task_history_entity::Column::Status.eq(status.as_str()));
@@ -594,10 +593,7 @@ impl LocalService {
         })?)
     }
 
-    pub(crate) async fn load_streaming_detail(
-        &self,
-        history_id: i64,
-    ) -> Result<serde_json::Value> {
+    pub(crate) async fn load_streaming_detail(&self, history_id: i64) -> Result<serde_json::Value> {
         let row = streaming_task_entity::Entity::find()
             .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
             .filter(streaming_task_entity::Column::Deleted.eq(0))

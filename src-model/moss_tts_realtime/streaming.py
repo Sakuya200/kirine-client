@@ -451,6 +451,8 @@ def run_session(params) -> None:
     frames_file = frames_path.open("ab")
     last_offset = 0
 
+    emit_frame(frames_file, {"type": "session_ready", "contextId": "__session__"})
+    frames_file.flush()
     print("[moss_tts_realtime] session ready, polling input.jsonl", file=sys.stderr, flush=True)
     try:
         while True:

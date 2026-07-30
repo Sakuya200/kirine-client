@@ -44,6 +44,8 @@ use crate::{
 /// 丢失或 runner 异常退出未发 done 信号时，强制收尾避免 `send_streaming_message` 永久挂起。
 /// 按真实合成耗时调整（建议单消息上限 5 分钟）。
 const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
+/// 新建流式会话时，等模型加载/voice prompt 编码完成、发出 `session_ready` 后才算建立成功。
+const STREAMING_SESSION_READY_TIMEOUT: Duration = Duration::from_secs(900);
 
 impl LocalService {
     pub(crate) async fn create_streaming_speech_task_impl(
@@ -81,7 +83,11 @@ impl LocalService {
         }
         for s in &payload.speakers {
             if s.category == "trained" {
-                if s.speaker_dir_name.as_deref().map(str::is_empty).unwrap_or(true) {
+                if s.speaker_dir_name
+                    .as_deref()
+                    .map(str::is_empty)
+                    .unwrap_or(true)
+                {
                     bail!("已训练说话人必须提供 speakerDirName");
                 }
             } else if s.ref_audio_path.trim().is_empty() {
@@ -158,9 +164,11 @@ impl LocalService {
         };
         std::fs::write(&context_json_path, serde_json::to_vec_pretty(&context)?)?;
 
-        let serialized_context = serialize_task_path(Path::new(self.data_dir()), &context_json_path);
+        let serialized_context =
+            serialize_task_path(Path::new(self.data_dir()), &context_json_path);
         let serialized_input = serialize_task_path(Path::new(self.data_dir()), &input_cache_path);
-        let serialized_audio_dir = serialize_task_path(Path::new(self.data_dir()), &output_audio_dir);
+        let serialized_audio_dir =
+            serialize_task_path(Path::new(self.data_dir()), &output_audio_dir);
 
         streaming_task_entity::ActiveModel {
             id: NotSet,
@@ -183,12 +191,12 @@ impl LocalService {
 
         txn.commit().await?;
 
-        // 注册会话附加态 + 拉起长期进程
+        // 注册会话附加态 + 拉起长期进程，阻塞等待真正就绪。
         self.register_streaming_session(task_id);
-        if let Err(err) = self.start_streaming_session(base_model.clone(), task_id) {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        if let Err(err) = self.start_streaming_session(base_model.clone(), task_id, Some(ready_tx))
+        {
             error!(error = %err, task_id, "failed to start streaming session");
-            // 启动失败：回滚运行句柄并把任务置 Failed，让前端 invoke 抛错并 notifyError，
-            // 避免任务卡在 Pending、前端误以为会话已建立。
             self.unregister_active_task_control(task_id);
             let _ = self
                 .update_task_status_impl(UpdateTaskStatusPayload {
@@ -200,12 +208,52 @@ impl LocalService {
             bail!("流式会话启动失败: {err}");
         }
 
+        match timeout(STREAMING_SESSION_READY_TIMEOUT, ready_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(msg))) => {
+                self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)?;
+                self.unregister_active_task_control(task_id);
+                let _ = self
+                    .update_task_status_impl(UpdateTaskStatusPayload {
+                        task_id,
+                        status: TaskStatus::Failed,
+                        duration_seconds: None,
+                    })
+                    .await;
+                bail!("流式会话启动失败: {msg}");
+            }
+            Ok(Err(_)) => {
+                self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)?;
+                self.unregister_active_task_control(task_id);
+                let _ = self
+                    .update_task_status_impl(UpdateTaskStatusPayload {
+                        task_id,
+                        status: TaskStatus::Failed,
+                        duration_seconds: None,
+                    })
+                    .await;
+                bail!("流式会话启动失败：runner 早退");
+            }
+            Err(_) => {
+                let _ = self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech);
+                self.unregister_active_task_control(task_id);
+                let _ = self
+                    .update_task_status_impl(UpdateTaskStatusPayload {
+                        task_id,
+                        status: TaskStatus::Failed,
+                        duration_seconds: None,
+                    })
+                    .await;
+                bail!("流式会话启动超时（模型加载未在 15 分钟内完成）");
+            }
+        }
+
         Ok(StreamingSpeechTaskResult {
             task_id,
             context_file_path: serialized_context,
             input_cache_file_path: serialized_input,
             output_audio_dir: serialized_audio_dir,
-            status: TaskStatus::Pending,
+            status: TaskStatus::Running,
             created_at: create_time,
         })
     }
@@ -378,7 +426,9 @@ impl LocalService {
             .active_task_controls
             .read()
             .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
-        Ok(controls.get(&task_id).and_then(|c| c.streaming_extra.clone()))
+        Ok(controls
+            .get(&task_id)
+            .and_then(|c| c.streaming_extra.clone()))
     }
 
     /// 从 DB + `context.json` 加载流式会话详情，供 `run_streaming_session` 使用。
@@ -393,10 +443,7 @@ impl LocalService {
             .await?
             .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {task_id}"))?;
 
-        let context_path = resolve_task_path(
-            Path::new(self.data_dir()),
-            &detail.context_file_path,
-        );
+        let context_path = resolve_task_path(Path::new(self.data_dir()), &detail.context_file_path);
         let ctx: crate::service::pipeline::streaming::StreamingContextJson =
             serde_json::from_str(&std::fs::read_to_string(context_path)?)?;
         let speakers: Vec<crate::service::models::StreamingSpeakerInput> = ctx
@@ -432,22 +479,22 @@ impl LocalService {
         &self,
         base_model: BaseModel,
         task_id: i64,
+        ready_tx: Option<oneshot::Sender<Result<(), String>>>,
     ) -> Result<()> {
         let service = self.clone();
         tauri::async_runtime::spawn(async move {
             let result = async {
                 let detail = service.load_streaming_task_detail(task_id).await?;
-                let extra = service
-                    .streaming_session_extra(task_id)?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("streaming session extra not registered for task {task_id}")
-                    })?;
+                let extra = service.streaming_session_extra(task_id)?.ok_or_else(|| {
+                    anyhow::anyhow!("streaming session extra not registered for task {task_id}")
+                })?;
                 crate::service::pipeline::streaming::run_streaming_session(
                     &service,
                     crate::service::pipeline::StreamingPipelineRequest { task_id },
                     &base_model,
                     detail,
                     extra,
+                    ready_tx,
                 )
                 .await
             }

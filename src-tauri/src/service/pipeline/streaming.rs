@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::BufRead,
+    io::{BufRead, Write},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::Duration,
@@ -10,7 +10,7 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::{
-    process::{Child, Command},
+    process::Child,
     sync::{oneshot, watch, Mutex},
 };
 use tracing::{error, info, warn};
@@ -33,13 +33,15 @@ use crate::{
                 PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
                 PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg,
             },
+            build_llm_task_script_args,
             script_paths::{
                 resolve_src_model_root, src_model_begin_llm_task_script_path,
                 src_model_model_python_script_path, ScriptPlatform,
             },
-            StreamingPipelineRequest, build_llm_task_script_args,
+            StreamingPipelineRequest,
         },
     },
+    utils::process::{append_task_log_text, spawn_logged_child_with_stderr},
     Result,
 };
 
@@ -53,6 +55,7 @@ pub struct StreamingFrame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamingFramePayload {
     Started,
+    SessionReady,
     Chunk { bytes: Vec<u8> },
     Finished,
     Error { message: String },
@@ -141,6 +144,7 @@ pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
     let raw: RawFrame = serde_json::from_str(trimmed).context("failed to parse streaming frame")?;
     let payload = match raw.kind.as_str() {
         "started" => StreamingFramePayload::Started,
+        "session_ready" => StreamingFramePayload::SessionReady,
         "chunk" => {
             let bytes = base64_decode(raw.bytes.as_deref().unwrap_or(""))?;
             StreamingFramePayload::Chunk { bytes }
@@ -151,22 +155,32 @@ pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
         },
         other => anyhow::bail!("unknown streaming frame type: {other}"),
     };
-    Ok(Some(StreamingFrame { context_id: raw.context_id, payload }))
+    Ok(Some(StreamingFrame {
+        context_id: raw.context_id,
+        payload,
+    }))
 }
 
 /// 将帧映射为下发前端的 `AudioStreamEvent`。
 pub fn frame_to_event(frame: &StreamingFrame) -> Option<AudioStreamEvent> {
     match &frame.payload {
         StreamingFramePayload::Started => Some(AudioStreamEvent::Started),
-        StreamingFramePayload::Chunk { bytes } => Some(AudioStreamEvent::Chunk { bytes: bytes.clone() }),
+        StreamingFramePayload::SessionReady => None,
+        StreamingFramePayload::Chunk { bytes } => Some(AudioStreamEvent::Chunk {
+            bytes: bytes.clone(),
+        }),
         StreamingFramePayload::Finished => Some(AudioStreamEvent::Finished),
-        StreamingFramePayload::Error { message } => Some(AudioStreamEvent::Error { message: message.clone() }),
+        StreamingFramePayload::Error { message } => Some(AudioStreamEvent::Error {
+            message: message.clone(),
+        }),
     }
 }
 
 fn base64_decode(value: &str) -> Result<Vec<u8>> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    STANDARD.decode(value).context("failed to base64-decode chunk bytes")
+    STANDARD
+        .decode(value)
+        .context("failed to base64-decode chunk bytes")
 }
 
 #[derive(Debug, Clone)]
@@ -283,8 +297,7 @@ impl MessageChannel {
 // 派生 `Debug` 的约束。
 impl std::fmt::Debug for MessageChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MessageChannel")
-            .finish_non_exhaustive()
+        f.debug_struct("MessageChannel").finish_non_exhaustive()
     }
 }
 
@@ -326,6 +339,7 @@ pub(crate) async fn run_streaming_session(
     base_model: &str,
     detail: LoadedStreamingDetail,
     extra: Arc<StreamingSessionExtra>,
+    ready_tx: Option<oneshot::Sender<Result<(), String>>>,
 ) -> Result<()> {
     let task_id = request.task_id;
     if detail.base_model.trim() != base_model {
@@ -335,7 +349,8 @@ pub(crate) async fn run_streaming_session(
             detail.base_model
         );
     }
-    let paths = resolve_streaming_paths(service, task_id, &detail.base_model, &detail.model_version)?;
+    let paths =
+        resolve_streaming_paths(service, task_id, &detail.base_model, &detail.model_version)?;
     let invocation = build_streaming_invocation(
         &paths,
         &detail.base_model,
@@ -363,7 +378,12 @@ pub(crate) async fn run_streaming_session(
 
     let platform = ScriptPlatform::current();
     let mut shell_args = platform.shell_base_args();
-    shell_args.push(paths.begin_llm_task_script_path.to_string_lossy().to_string());
+    shell_args.push(
+        paths
+            .begin_llm_task_script_path
+            .to_string_lossy()
+            .to_string(),
+    );
     shell_args.extend(build_llm_task_script_args(
         &paths.streaming_python_script_path,
         &paths.params_json_path,
@@ -375,19 +395,29 @@ pub(crate) async fn run_streaming_session(
     let _ = std::fs::remove_file(&paths.frames_path);
 
     // 帧走缓冲文件 frames.jsonl（Python append -> Rust tail），不再经 stdout。
-    // PS1 恢复非流式标行为（`& $cmd 2>&1 | Out-File $taskLog`）独占写 task log；
-    // 本 runner 不再持有 task log 句柄，从根上消除此前“正由另一进程使用”的写-写争用。
-    // 子进程 stdout/stderr 均 null：stdout 无帧；stderr 经 PS1 `2>&1` 落 task log。
-    let mut child = Command::new(platform.shell_program())
-        .args(&shell_args)
-        .current_dir(&paths.src_model_root)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .with_context(|| "failed to spawn streaming begin_llm_task")?;
+    // 这里统一通过 process.rs 的日志封装把 stderr 接管到任务日志，避免
+    // Python/PowerShell 错误只落在子进程管道而未进入统一的 task log。
+    let (mut child, stream_tasks) = spawn_logged_child_with_stderr(
+        Path::new(platform.shell_program()),
+        &shell_args,
+        &paths.src_model_root,
+        "streaming begin_llm_task",
+        &task_log_path,
+    )
+    .await
+    .with_context(|| "failed to spawn streaming begin_llm_task")?;
 
-    let outcome = drive_streaming_buffer(&mut child, &paths.frames_path, &extra, &mut cancel_rx).await;
+    let mut ready_tx = ready_tx;
+    let outcome = drive_streaming_buffer(
+        &mut child,
+        &paths.frames_path,
+        &extra,
+        &mut cancel_rx,
+        &mut ready_tx,
+        stream_tasks,
+        &task_log_path,
+    )
+    .await;
 
     // 退出前清理所有 pending 消息（cancel / 进程退出）
     drain_pending_channels(&extra, outcome.is_cancelled());
@@ -443,15 +473,20 @@ struct FrameFileTail {
 
 impl FrameFileTail {
     fn new(path: PathBuf) -> Self {
-        Self { reader: None, path, pending: Vec::new() }
+        Self {
+            reader: None,
+            path,
+            pending: Vec::new(),
+        }
     }
 
     /// 读出文件当前所有可用完整帧行并转发；文件尚未创建时静默返回。
-    fn poll_and_forward(&mut self, extra: &StreamingSessionExtra) {
+    fn poll_and_forward(&mut self) -> Vec<StreamingFrame> {
+        let mut frames = Vec::new();
         if self.reader.is_none() {
             let file = match std::fs::File::open(&self.path) {
                 Ok(f) => f,
-                Err(_) => return, // Python 尚未创建 frames.jsonl
+                Err(_) => return frames, // Python 尚未创建 frames.jsonl
             };
             self.reader = Some(std::io::BufReader::new(file));
         }
@@ -475,20 +510,14 @@ impl FrameFileTail {
                 continue;
             }
             match parse_streaming_frame(trimmed) {
-                Ok(Some(frame)) => {
-                    if let Some(event) = frame_to_event(&frame) {
-                        forward_event(extra, &frame.context_id, event);
-                    }
-                    if matches!(frame.payload, StreamingFramePayload::Error { .. }) {
-                        warn!(context_id = %frame.context_id, "streaming frame error");
-                    }
-                }
+                Ok(Some(frame)) => frames.push(frame),
                 Ok(None) => {}
                 Err(err) => {
                     warn!(error = %err, line = %trimmed, "ignoring unparseable streaming line");
                 }
             }
         }
+        frames
     }
 }
 
@@ -504,21 +533,54 @@ async fn drive_streaming_buffer(
     frames_path: &Path,
     extra: &StreamingSessionExtra,
     cancel_rx: &mut watch::Receiver<bool>,
+    ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
+    stream_tasks: Vec<tokio::task::JoinHandle<()>>,
+    task_log_path: &Path,
 ) -> StreamSessionOutcome {
     let mut tail = FrameFileTail::new(frames_path.to_path_buf());
     let mut failed = false;
     let mut cancelled = false;
     loop {
         // 1. 排空当前可用帧
-        tail.poll_and_forward(extra);
+        for frame in tail.poll_and_forward() {
+            match &frame.payload {
+                StreamingFramePayload::SessionReady => {
+                    if let Some(tx) = ready_tx.take() {
+                        let _ = tx.send(Ok(()));
+                    }
+                }
+                StreamingFramePayload::Error { message } => {
+                    warn!(context_id = %frame.context_id, "streaming frame error");
+                    if let Err(err) = append_task_log_text(
+                        &task_log_path,
+                        &format!(
+                            "[streaming][error] contextId={} {}",
+                            frame.context_id, message
+                        ),
+                    ) {
+                        warn!(error = %err, context_id = %frame.context_id, "failed to append streaming frame error to task log");
+                    }
+                }
+                _ => {}
+            }
+            if let Some(event) = frame_to_event(&frame) {
+                forward_event(extra, &frame.context_id, event);
+            }
+        }
 
         // 2. 非阻塞探活：进程退出则再 tail 一次（收尾帧，含 finished/error）后结束
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
                     failed = true;
+                    if let Err(err) = append_task_log_text(
+                        &task_log_path,
+                        &format!("[streaming] child exited with status {}", status),
+                    ) {
+                        warn!(error = %err, "failed to append child exit status to task log");
+                    }
                 }
-                tail.poll_and_forward(extra);
+                tail.poll_and_forward();
                 break;
             }
             Ok(None) => {}
@@ -549,7 +611,7 @@ async fn drive_streaming_buffer(
                         let _ = child.kill().await;
                     }
                     cancelled = true;
-                    tail.poll_and_forward(extra);
+                    tail.poll_and_forward();
                     break;
                 }
             }
@@ -557,8 +619,15 @@ async fn drive_streaming_buffer(
         }
     }
 
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(Err("streaming session terminated before ready".to_string()));
+    }
+
     // 始终 reap 子进程，避免僵尸进程（对齐既有 run_logged_shell_script_cancellable 的 wait 语义）。
     let _ = child.wait().await;
+    for task in stream_tasks {
+        let _ = task.await;
+    }
     if cancelled {
         StreamSessionOutcome::Cancelled
     } else if failed {
@@ -581,7 +650,10 @@ fn forward_event(extra: &StreamingSessionExtra, context_id: &str, event: AudioSt
         if let Some(mc) = guard.remove(context_id) {
             let errored = matches!(event, AudioStreamEvent::Error { .. });
             let _ = mc.on_event.send(event);
-            let _ = mc.done.send(StreamMessageOutcome { cancelled: false, errored });
+            let _ = mc.done.send(StreamMessageOutcome {
+                cancelled: false,
+                errored,
+            });
         }
     } else {
         let guard = match extra.message_channels.read() {
@@ -610,7 +682,9 @@ fn drain_pending_channels(extra: &StreamingSessionExtra, cancelled: bool) {
                 "流式会话已结束".to_string()
             },
         });
-        let _ = mc.done.send(StreamMessageOutcome { cancelled, errored: !cancelled });
+        let _ = mc.done.send(StreamMessageOutcome {
+            cancelled,
+            errored: !cancelled,
+        });
     }
 }
-

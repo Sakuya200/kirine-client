@@ -253,7 +253,10 @@ fn writes_training_params_file_with_expected_fields() {
 
     let json = write_and_read(&spec, "train");
     assert_eq!(json["kind"], "Training");
-    assert_eq!(json["args"]["Training"]["input_jsonl"], "/in/manifest.jsonl");
+    assert_eq!(
+        json["args"]["Training"]["input_jsonl"],
+        "/in/manifest.jsonl"
+    );
     assert_eq!(json["args"]["Training"]["batch_size"], 4);
     assert_eq!(json["args"]["Training"]["num_epochs"], 12);
     assert_eq!(json["args"]["Training"]["lr"], "2e-5");
@@ -286,9 +289,18 @@ fn writes_streaming_params_file_with_expected_fields() {
 
     let json = write_and_read(&spec, "streaming");
     assert_eq!(json["kind"], "StreamingSpeech");
-    assert_eq!(json["args"]["Streaming"]["context_file_path"], "/ctx/context.json");
-    assert_eq!(json["args"]["Streaming"]["input_cache_file_path"], "/ctx/input.jsonl");
-    assert_eq!(json["args"]["Streaming"]["frames_file_path"], "/ctx/frames.jsonl");
+    assert_eq!(
+        json["args"]["Streaming"]["context_file_path"],
+        "/ctx/context.json"
+    );
+    assert_eq!(
+        json["args"]["Streaming"]["input_cache_file_path"],
+        "/ctx/input.jsonl"
+    );
+    assert_eq!(
+        json["args"]["Streaming"]["frames_file_path"],
+        "/ctx/frames.jsonl"
+    );
     assert_eq!(json["args"]["Streaming"]["speakers"][0]["name"], "A");
     assert_eq!(json["args"]["Streaming"]["speakers"][0]["ref_text"], "参考");
 }

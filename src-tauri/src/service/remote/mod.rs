@@ -6,13 +6,14 @@ use crate::{
     service::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
-            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
-            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
-            ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
-            ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload, SpeakerFilter,
-            SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult, TextToSpeechAudioAsset,
-            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
+            CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord, HistoryRecordSummary,
+            HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
+            ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
+            SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
+            StreamingSpeechTaskResult, TextToSpeechAudioAsset, TextToSpeechTaskResult,
+            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -68,21 +69,14 @@ impl Service for RemoteService {
         self.client.delete_speaker_info(speaker_id).await
     }
 
-    async fn list_model_infos(
-        &self,
-        request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>> {
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
         self.client
             .list_model_infos(request.into())
             .await
             .map(Into::into)
     }
 
-    async fn get_device_type(
-        &self,
-        base_model: &str,
-        model_version: &str,
-    ) -> Result<HardwareType> {
+    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
         self.client.get_device_type(base_model, model_version).await
     }
 
@@ -137,7 +131,9 @@ impl Service for RemoteService {
         history_id: i64,
         task_type: HistoryTaskType,
     ) -> Result<bool> {
-        self.client.delete_history_record(history_id, task_type).await
+        self.client
+            .delete_history_record(history_id, task_type)
+            .await
     }
 
     async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {

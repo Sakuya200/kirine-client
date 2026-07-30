@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
+import { useUiStore } from '@/stores/ui';
 import type { StreamingSpeechTaskResult } from '@/types/domain';
 import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerCategory, StreamingSpeakerConfig } from '@/types/streaming';
 
@@ -29,12 +30,22 @@ export interface StreamingSpeakerInput {
   speakerDirName?: string;
 }
 
+interface AudioState {
+  isStreaming: boolean;
+  hasData: boolean;
+  streamComplete: boolean;
+  errorMessage: string | null;
+}
+
+type AudioStreamEvent = { type: 'started' } | { type: 'chunk'; bytes: number[] } | { type: 'finished' } | { type: 'error'; message: string };
+
 let speakerSeed = 0;
 let messageSeed = 0;
 const nextSpeakerId = () => `spk-${++speakerSeed}`;
 const nextMessageId = () => `msg-${++messageSeed}`;
 
 export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
+  const uiStore = useUiStore();
   const speakers = ref<StreamingSpeakerConfig[]>([]);
   const messages = ref<StreamingChatMessage[]>([]);
   const isDrawerOpen = ref(false);
@@ -47,6 +58,9 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     language: AppLanguage.Chinese,
     modelParams: {}
   });
+  const audioStates = reactive<Record<string, AudioState>>({});
+  const audioBuffers = new Map<string, number[]>();
+  const audioUrls = new Map<string, { url: string; length: number }>();
 
   const speakerOptions = computed(() =>
     speakers.value.map(speaker => ({
@@ -57,6 +71,52 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   );
 
   const getSpeaker = (id: string | null) => speakers.value.find(item => item.id === id) ?? null;
+
+  const ensureAudioState = (messageId: string): AudioState => {
+    if (!audioStates[messageId]) {
+      audioStates[messageId] = {
+        isStreaming: false,
+        hasData: false,
+        streamComplete: false,
+        errorMessage: null
+      };
+    }
+    return audioStates[messageId];
+  };
+
+  const revokeAudioUrl = (messageId: string) => {
+    const cached = audioUrls.get(messageId);
+    if (cached) {
+      URL.revokeObjectURL(cached.url);
+      audioUrls.delete(messageId);
+    }
+  };
+
+  const clearAudioForMessage = (messageId: string) => {
+    revokeAudioUrl(messageId);
+    audioBuffers.delete(messageId);
+    delete audioStates[messageId];
+  };
+
+  const getAudioUrl = (messageId: string): string | null => {
+    const state = audioStates[messageId];
+    if (!state?.hasData) {
+      return null;
+    }
+    const buffer = audioBuffers.get(messageId);
+    if (!buffer || buffer.length === 0) {
+      return null;
+    }
+    const cached = audioUrls.get(messageId);
+    if (cached && cached.length === buffer.length) {
+      return cached.url;
+    }
+    revokeAudioUrl(messageId);
+    const blob = new Blob([Uint8Array.from(buffer)], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    audioUrls.set(messageId, { url, length: buffer.length });
+    return url;
+  };
 
   const addSpeaker = (payload: StreamingSpeakerInput): StreamingSpeakerConfig => {
     const speaker: StreamingSpeakerConfig = {
@@ -106,60 +166,56 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     Object.assign(sessionConfig, patch);
   };
 
-  /**
-   * 发送一条聊天消息：首条消息时 invoke create_streaming_speech_task 拿 taskId 回填，
-   * 随后 push user 消息 + 占位 assistant 消息。
-   * 实际流式接收由渲染出的 StreamableAudioPlayer(mode='stream') 在 watch immediate 时
-   * 自动调 startStreaming(taskId, contextId, speakerName, synthText) 完成。
-   * 提交后端的 payload 不含时间字段，任务创建时间由后端执行前生成。
-   */
+  const startSession = async () => {
+    if (activeTaskId.value !== null) {
+      return;
+    }
+    if (speakers.value.length === 0) {
+      throw new Error('请先在配置抽屉中添加说话人。');
+    }
+    if (!sessionConfig.baseModel) {
+      throw new Error('请先选择模型。');
+    }
+    isStartingSession.value = true;
+    try {
+      const result = await invoke<StreamingSpeechTaskResult>('create_streaming_speech_task', {
+        payload: {
+          baseModel: sessionConfig.baseModel,
+          modelVersion: sessionConfig.modelVersion,
+          device: sessionConfig.device,
+          language: sessionConfig.language,
+          modelParams: sessionConfig.modelParams,
+          speakers: speakers.value.map(s => ({
+            name: s.name,
+            baseModel: s.baseModel,
+            modelVersion: s.modelVersion,
+            refAudioPath: s.refAudioPath,
+            refAudioName: s.refAudioName,
+            refText: s.refText,
+            description: s.description,
+            category: s.category,
+            speakerDirName: s.speakerDirName
+          }))
+        }
+      });
+      activeTaskId.value = result.taskId;
+    } finally {
+      isStartingSession.value = false;
+    }
+  };
+
   const sendMessage = async (text: string, speakerId: string | null) => {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       return;
     }
-    // 防重入：首条消息建会话期间（isStartingSession=true）忽略后续发送，
-    // 避免连点/回车连击触发多次 create_streaming_speech_task 产生僵尸会话。
     if (isStartingSession.value) {
       return;
     }
     const speaker = getSpeaker(speakerId);
-
-    // 首条消息：建会话拿 taskId
-    if (activeTaskId.value === null) {
-      if (speakers.value.length === 0) {
-        return;
-      }
-      isStartingSession.value = true;
-      try {
-        const result = await invoke<StreamingSpeechTaskResult>('create_streaming_speech_task', {
-          payload: {
-            baseModel: sessionConfig.baseModel,
-            modelVersion: sessionConfig.modelVersion,
-            device: sessionConfig.device,
-            language: sessionConfig.language,
-            modelParams: sessionConfig.modelParams,
-            speakers: speakers.value.map(s => ({
-              name: s.name,
-              baseModel: s.baseModel,
-              modelVersion: s.modelVersion,
-              refAudioPath: s.refAudioPath,
-              refAudioName: s.refAudioName,
-              refText: s.refText,
-              description: s.description,
-              category: s.category,
-              speakerDirName: s.speakerDirName
-            }))
-          }
-        });
-        activeTaskId.value = result.taskId;
-      } finally {
-        isStartingSession.value = false;
-      }
-    }
-
     const taskId = activeTaskId.value;
     if (taskId === null) {
+      uiStore.notifyWarning('请先开启会话');
       return;
     }
 
@@ -189,6 +245,58 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       status: 'streaming'
     };
     messages.value = [...messages.value, assistantMessage];
+
+    const state = ensureAudioState(assistantId);
+    state.isStreaming = true;
+    state.hasData = false;
+    state.streamComplete = false;
+    state.errorMessage = null;
+    audioBuffers.delete(assistantId);
+    revokeAudioUrl(assistantId);
+
+    const channel = new Channel<AudioStreamEvent>();
+    channel.onmessage = (message: AudioStreamEvent) => {
+      switch (message.type) {
+        case 'started':
+          state.isStreaming = true;
+          break;
+        case 'chunk': {
+          state.isStreaming = true;
+          state.hasData = true;
+          const bytes = message.bytes ?? [];
+          const nextBuffer = [...(audioBuffers.get(assistantId) ?? []), ...bytes];
+          audioBuffers.set(assistantId, nextBuffer);
+          break;
+        }
+        case 'finished': {
+          state.isStreaming = false;
+          state.streamComplete = true;
+          updateMessageStatus(assistantId, 'completed');
+          break;
+        }
+        case 'error': {
+          state.isStreaming = false;
+          state.streamComplete = false;
+          state.errorMessage = message.message;
+          updateMessageStatus(assistantId, 'error');
+          uiStore.notifyError(`音频流式接收失败：${message.message}`);
+          break;
+        }
+      }
+    };
+
+    try {
+      await invoke('send_streaming_message', {
+        payload: { taskId, contextId: assistantId, speakerName: speaker?.name ?? '', text: trimmed },
+        onEvent: channel
+      });
+    } catch (error) {
+      state.isStreaming = false;
+      state.streamComplete = false;
+      state.errorMessage = error instanceof Error ? error.message : String(error);
+      updateMessageStatus(assistantId, 'error');
+      uiStore.notifyError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const terminateSession = async () => {
@@ -201,19 +309,20 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     } finally {
       activeTaskId.value = null;
       messages.value = messages.value.map(m => (m.status === 'streaming' ? { ...m, status: 'error' } : m));
+      for (const message of messages.value) {
+        clearAudioForMessage(message.id);
+      }
     }
   };
 
-  /**
-   * 按 messageId 流转 assistant 消息状态：流式 finished -> completed、error/超时 -> error。
-   * 由 StreamableAudioPlayer 经 emit 回调驱动，补齐「初版不追踪流式结束」的缺口，
-   * 使已完成消息不被 terminateSession 误标为 error。
-   */
   const updateMessageStatus = (messageId: string, status: StreamingChatMessage['status']) => {
     messages.value = messages.value.map(m => (m.id === messageId ? { ...m, status } : m));
   };
 
   const clearMessages = () => {
+    for (const message of messages.value) {
+      clearAudioForMessage(message.id);
+    }
     messages.value = [];
     activeTaskId.value = null;
   };
@@ -225,6 +334,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     activeTaskId,
     isStartingSession,
     sessionConfig,
+    audioStates,
     speakerOptions,
     getSpeaker,
     addSpeaker,
@@ -234,9 +344,11 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     closeDrawer,
     toggleDrawer,
     setSessionConfig,
+    startSession,
     sendMessage,
     terminateSession,
     updateMessageStatus,
-    clearMessages
+    clearMessages,
+    getAudioUrl
   };
 });

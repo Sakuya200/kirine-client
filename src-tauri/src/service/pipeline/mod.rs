@@ -3,11 +3,11 @@ pub mod model_artifacts;
 pub mod model_paths;
 pub mod pipeline;
 pub mod script_paths;
+pub mod streaming;
 pub mod training;
 pub mod tts;
 pub mod voice_clone;
 pub mod voice_design;
-pub mod streaming;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
