@@ -162,6 +162,14 @@ impl Service for LocalService {
         self.read_voice_design_audio_impl(history_id).await
     }
 
+    async fn save_generated_audio_as(
+        &self,
+        source: crate::service::models::GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool> {
+        self.save_generated_audio_as_impl(source, &app).await
+    }
+
     async fn delete_history_record(
         &self,
         history_id: i64,

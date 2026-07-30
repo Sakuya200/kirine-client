@@ -28,6 +28,33 @@ def _int_param(params: ParamsEntity, key: str, default: int) -> int:
     return int(raw)
 
 
+def _str_param(params: ParamsEntity, key: str, default: str) -> str:
+    raw = params.model_param_str(key, default)
+    if raw is None:
+        return default
+    normalized = str(raw).strip()
+    return normalized if normalized else default
+
+
+def _optional_bool_param(params: ParamsEntity, key: str) -> bool | None:
+    raw = params.model_param(key, None)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"", "none", "null", "auto"}:
+            return None
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
 @dataclass(frozen=True)
 class MossRealtimeStreamingParams:
     context_file_path: str
@@ -42,6 +69,9 @@ class MossRealtimeStreamingParams:
     repetition_penalty: float
     repetition_window: int
     max_length: int
+    enable_torch_compile: bool | None
+    dtype: str
+    float32_matmul_precision: str
 
 
 def load_streaming_params(path: str | Path) -> MossRealtimeStreamingParams:
@@ -61,4 +91,7 @@ def load_streaming_params(path: str | Path) -> MossRealtimeStreamingParams:
         repetition_penalty=_float_param(params, "repetitionPenalty", 1.1),
         repetition_window=_int_param(params, "repetitionWindow", 50),
         max_length=_int_param(params, "maxLength", 32768),
+        enable_torch_compile=_optional_bool_param(params, "enableTorchCompile"),
+        dtype=_str_param(params, "dtype", "auto").lower(),
+        float32_matmul_precision=_str_param(params, "float32MatmulPrecision", "high").lower(),
     )

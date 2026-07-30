@@ -56,6 +56,56 @@
         "required": true,
         "defaultValue": 32768,
         "description": "单条消息最大生成 token 长度上限，默认 32768。"
+      },
+      {
+        "name": "enableTorchCompile",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "Torch Compile",
+          "options": [
+            { "label": "自动", "value": "auto" },
+            { "label": "启用", "value": "true" },
+            { "label": "禁用", "value": "false" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "auto",
+        "description": "是否启用 torch.compile。自动模式下非 Windows 默认启用，Windows 默认关闭。"
+      },
+      {
+        "name": "dtype",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "推理精度",
+          "options": [
+            { "label": "自动", "value": "auto" },
+            { "label": "BF16", "value": "bf16" },
+            { "label": "FP16", "value": "fp16" },
+            { "label": "FP32", "value": "fp32" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "auto",
+        "description": "模型推理主精度。auto 会按当前设备自动选择合适 dtype。"
+      },
+      {
+        "name": "float32MatmulPrecision",
+        "type": "string",
+        "componentType": "select",
+        "componentProps": {
+          "label": "FP32 Matmul 精度策略",
+          "options": [
+            { "label": "High（推荐）", "value": "high" },
+            { "label": "Highest", "value": "highest" },
+            { "label": "Medium", "value": "medium" },
+            { "label": "关闭设置", "value": "off" }
+          ]
+        },
+        "required": true,
+        "defaultValue": "high",
+        "description": "仅影响 FP32 matmul 的内核策略，不改变模型主权重 dtype。"
       }
     ]
   }

@@ -3,14 +3,14 @@ use tauri::{AppHandle, State};
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-        CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord, HistoryRecordSummary,
-        HistoryTaskType, ModelTrainingTaskResult, Page, PageRequest, TextToSpeechAudioAsset,
-        TextToSpeechTaskResult, VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
-        VoiceDesignTaskResult,
+        CreateVoiceDesignTaskPayload, GeneratedAudioSource, HistoryFilter, HistoryRecord,
+        HistoryRecordSummary, HistoryTaskType, ModelTrainingTaskResult, Page, PageRequest,
+        TextToSpeechAudioAsset, TextToSpeechTaskResult, VoiceCloneAudioAsset,
+        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
     },
     ServiceState,
 };
-use crate::utils::audio::{save_audio_bytes_as, save_bytes_as};
+use crate::utils::audio::save_bytes_as;
 
 const MODEL_TRAINING_TEMPLATE_JSONL_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -92,54 +92,18 @@ pub async fn get_voice_design_audio(
 }
 
 #[tauri::command]
-pub async fn save_text_to_speech_audio_as(
-    history_id: i64,
+pub async fn save_generated_audio_as(
+    source: GeneratedAudioSource,
     app: AppHandle,
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, String> {
-    let asset = state
+    state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .read_text_to_speech_audio(history_id)
+        .save_generated_audio_as(source, app)
         .await
-        .map_err(|err| err.to_string())?;
-
-    save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
-}
-
-#[tauri::command]
-pub async fn save_voice_clone_audio_as(
-    history_id: i64,
-    app: AppHandle,
-    state: State<'_, ServiceState>,
-) -> std::result::Result<bool, String> {
-    let asset = state
-        .0
-        .service()
-        .map_err(|err| err.to_string())?
-        .read_voice_clone_audio(history_id)
-        .await
-        .map_err(|err| err.to_string())?;
-
-    save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
-}
-
-#[tauri::command]
-pub async fn save_voice_design_audio_as(
-    history_id: i64,
-    app: AppHandle,
-    state: State<'_, ServiceState>,
-) -> std::result::Result<bool, String> {
-    let asset = state
-        .0
-        .service()
-        .map_err(|err| err.to_string())?
-        .read_voice_design_audio(history_id)
-        .await
-        .map_err(|err| err.to_string())?;
-
-    save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]

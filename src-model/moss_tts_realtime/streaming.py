@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import struct
 import sys
 import time
@@ -35,6 +36,79 @@ from params import load_streaming_params
 
 SAMPLE_RATE = 24000
 POLL_INTERVAL_SECONDS = 0.1
+
+
+def resolve_torch_compile_enabled(params) -> bool:
+    """是否允许 torch.compile。
+
+    优先级：模型参数 enableTorchCompile > 平台默认值（Windows=false，非 Windows=true）。
+
+    Windows + triton-windows 在部分 MSVC/驱动组合上会触发 inductor 的
+    本地 C/CUDA JIT 构建失败（如 alloca unresolved），所以平台默认禁用。
+    """
+    if params.enable_torch_compile is not None:
+        return params.enable_torch_compile
+    return os.name != "nt"
+
+
+def configure_torch_runtime(enable_torch_compile: bool) -> None:
+    """配置 torch 运行时，规避 Windows 上 inductor/triton JIT 不稳定路径。"""
+    if enable_torch_compile:
+        return
+
+    # 先于 import torch 生效：关闭 dynamo/compile，避免进入 inductor JIT。
+    os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+    # 额外关闭 max autotune，减少触发 triton 内部编译辅助模块的机会。
+    os.environ.setdefault("TORCHINDUCTOR_MAX_AUTOTUNE", "0")
+
+
+def patch_torch_compile(torch_module, enable_torch_compile: bool) -> None:
+    """在禁用策略下兜底 patch torch.compile，确保第三方代码调用时回退 eager。"""
+    if enable_torch_compile:
+        return
+    if not hasattr(torch_module, "compile"):
+        return
+
+    def _compile_noop(model, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        return model
+
+    torch_module.compile = _compile_noop
+
+
+def resolve_runtime_dtype(torch_module, device_str: str, requested: str):
+    """按当前设备解析推理精度策略（auto/bf16/fp16/fp32）。"""
+    normalized = (requested or "auto").strip().lower()
+    if normalized in {"auto", ""}:
+        if device_str.startswith("cuda"):
+            return torch_module.bfloat16 if torch_module.cuda.is_bf16_supported() else torch_module.float16
+        return torch_module.float32
+    if normalized in {"bfloat16", "bf16"}:
+        return torch_module.bfloat16
+    if normalized in {"float16", "fp16"}:
+        return torch_module.float16
+    if normalized in {"float32", "fp32"}:
+        return torch_module.float32
+    print(
+        f"[moss_tts_realtime] unsupported dtype={requested!r}, fallback to auto",
+        file=sys.stderr,
+        flush=True,
+    )
+    return resolve_runtime_dtype(torch_module, device_str, "auto")
+
+
+def apply_cuda_matmul_precision(torch_module, requested: str) -> None:
+    """按模型参数设置 float32 matmul precision。"""
+    normalized = (requested or "high").strip().lower()
+    if normalized in {"", "default", "none", "off"}:
+        return
+    if normalized not in {"highest", "high", "medium"}:
+        print(
+            f"[moss_tts_realtime] unsupported float32MatmulPrecision={requested!r}, fallback to 'high'",
+            file=sys.stderr,
+            flush=True,
+        )
+        normalized = "high"
+    torch_module.set_float32_matmul_precision(normalized)
 
 
 # --------------------------------------------------------------------------- #
@@ -87,15 +161,6 @@ def wav_header_sentinel(sample_rate: int = SAMPLE_RATE, channels: int = 1, bits:
         b"data",
         sentinel,
     )
-
-
-def float32_to_pcm16(samples: bytes) -> bytes:
-    """mono float32 little-endian -> int16 little-endian，clip 到 [-1, 1]。"""
-    import numpy as np
-
-    arr = np.frombuffer(samples, dtype="<f4")
-    arr = np.clip(arr, -1.0, 1.0)
-    return (arr * 32767).astype("<i2").tobytes()
 
 
 def _float32_np_to_pcm16(arr) -> bytes:
@@ -242,11 +307,12 @@ def load_model_and_codec(params, speakers: list[dict]):
                 "请在模型设置中将设备选为 cpu。"
             )
         torch_device = torch.device("cuda")
-        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        apply_cuda_matmul_precision(torch, params.float32_matmul_precision)
+        dtype = resolve_runtime_dtype(torch, device_str, params.dtype)
         attn_implementation = "sdpa"
     elif device_str == "cpu":
         torch_device = torch.device("cpu")
-        dtype = torch.float32
+        dtype = resolve_runtime_dtype(torch, device_str, params.dtype)
         attn_implementation = "eager"
     else:
         raise SystemExit(
@@ -443,7 +509,21 @@ def run_session(params) -> None:
     # 先注册 ffmpeg shared 库目录，确保后续 torch/torchaudio 能加载 avcodec 等共享库。
     ensure_ffmpeg_dlls()
 
+    # torch.compile 策略由模型参数决定（缺省按平台兜底）。
+    enable_torch_compile = resolve_torch_compile_enabled(params)
+    configure_torch_runtime(enable_torch_compile)
+
     import torch
+
+    patch_torch_compile(torch, enable_torch_compile)
+    print(
+        "[moss_tts_realtime] runtime config: "
+        f"enable_torch_compile={enable_torch_compile} "
+        f"dtype={params.dtype} "
+        f"float32_matmul_precision={params.float32_matmul_precision}",
+        file=sys.stderr,
+        flush=True,
+    )
 
     speakers = load_context_speakers(params.context_file_path)
     if not speakers:

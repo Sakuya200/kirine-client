@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, path::Path};
 
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
@@ -16,15 +16,18 @@ use crate::{
             voice_design_task as voice_design_task_entity,
         },
         models::{
-            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
-            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
+            GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary,
+            HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
             StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
             TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
         LocalService,
     },
-    utils::{audio::content_type_for_format, time::now_string},
+    utils::{
+        audio::{content_type_for_format, save_existing_audio_file_as},
+        time::now_string,
+    },
     Result,
 };
 
@@ -58,6 +61,195 @@ impl LocalService {
 }
 
 impl LocalService {
+    pub(crate) async fn save_generated_audio_as_impl(
+        &self,
+        source: GeneratedAudioSource,
+        app: &tauri::AppHandle,
+    ) -> Result<bool> {
+        let (file_name, source_path) = self.resolve_generated_audio_file(source).await?;
+        save_existing_audio_file_as(app, &file_name, &source_path)
+            .map_err(|err| anyhow::anyhow!(err))
+    }
+
+    async fn resolve_generated_audio_file(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<(String, std::path::PathBuf)> {
+        match source {
+            GeneratedAudioSource::TextToSpeech { history_id } => {
+                self.resolve_tts_audio_file(history_id).await
+            }
+            GeneratedAudioSource::VoiceClone { history_id } => {
+                self.resolve_voice_clone_audio_file(history_id).await
+            }
+            GeneratedAudioSource::VoiceDesign { history_id } => {
+                self.resolve_voice_design_audio_file(history_id).await
+            }
+            GeneratedAudioSource::StreamingSpeech {
+                history_id,
+                context_id,
+            } => {
+                self.resolve_streaming_audio_file(history_id, &context_id)
+                    .await
+            }
+        }
+    }
+
+    async fn ensure_history_task_ready(
+        &self,
+        history_id: i64,
+        expected_type: HistoryTaskType,
+    ) -> Result<()> {
+        let history = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::TaskType.eq(expected_type.as_str()))
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+
+        self.ensure_completed_audio_task(&history.status)
+    }
+
+    async fn resolve_tts_audio_file(
+        &self,
+        history_id: i64,
+    ) -> Result<(String, std::path::PathBuf)> {
+        self.ensure_history_task_ready(history_id, HistoryTaskType::TextToSpeech)
+            .await?;
+
+        let row = tts_task_entity::Entity::find()
+            .filter(tts_task_entity::Column::HistoryId.eq(history_id))
+            .filter(tts_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到 TTS 任务文件"))?;
+
+        let output_file_path = row.output_file_path.unwrap_or_default();
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
+        Ok((row.file_name, resolved_output_file_path))
+    }
+
+    async fn resolve_voice_clone_audio_file(
+        &self,
+        history_id: i64,
+    ) -> Result<(String, std::path::PathBuf)> {
+        self.ensure_history_task_ready(history_id, HistoryTaskType::VoiceClone)
+            .await?;
+
+        let row = voice_clone_task_entity::Entity::find()
+            .filter(voice_clone_task_entity::Column::HistoryId.eq(history_id))
+            .filter(voice_clone_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到声音克隆任务文件"))?;
+
+        let output_file_path = row.output_file_path.unwrap_or_default();
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
+        Ok((row.file_name, resolved_output_file_path))
+    }
+
+    async fn resolve_voice_design_audio_file(
+        &self,
+        history_id: i64,
+    ) -> Result<(String, std::path::PathBuf)> {
+        self.ensure_history_task_ready(history_id, HistoryTaskType::VoiceDesign)
+            .await?;
+
+        let row = voice_design_task_entity::Entity::find()
+            .filter(voice_design_task_entity::Column::HistoryId.eq(history_id))
+            .filter(voice_design_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到音色设计任务文件"))?;
+
+        let output_file_path = row.output_file_path.unwrap_or_default();
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
+        Ok((row.file_name, resolved_output_file_path))
+    }
+
+    async fn resolve_streaming_audio_file(
+        &self,
+        history_id: i64,
+        context_id: &str,
+    ) -> Result<(String, std::path::PathBuf)> {
+        let history = task_history_entity::Entity::find_by_id(history_id)
+            .filter(
+                task_history_entity::Column::TaskType.eq(HistoryTaskType::StreamingSpeech.as_str()),
+            )
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到流式语音任务"))?;
+
+        let status = parse_task_status(&history.status)?;
+        if status != TaskStatus::Running && status != TaskStatus::Completed {
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidInput, "当前流式会话不可下载音频").into(),
+            );
+        }
+
+        let row = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到流式会话详情"))?;
+
+        let output_audio_dir = row.output_audio_dir.trim();
+        if output_audio_dir.is_empty() {
+            return Err(
+                io::Error::new(io::ErrorKind::NotFound, "当前流式会话没有音频输出目录").into(),
+            );
+        }
+
+        let audio_dir = resolve_task_path(Path::new(self.data_dir()), output_audio_dir);
+        let sanitized_context_id = super::sanitize_path_segment(context_id);
+        let audio_path = crate::common::task_paths::streaming_message_audio_path(
+            &audio_dir,
+            &sanitized_context_id,
+        );
+        if !audio_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "当前消息音频文件不存在或尚未生成完成",
+            )
+            .into());
+        }
+
+        let file_name = audio_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{sanitized_context_id}.wav"));
+        Ok((file_name, audio_path))
+    }
+
+    fn ensure_completed_audio_task(&self, status: &str) -> Result<()> {
+        let status = parse_task_status(status)?;
+        if status != TaskStatus::Completed {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "当前任务尚未完成，无法读取音频",
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn resolve_generated_output_path(&self, output_file_path: &str) -> Result<std::path::PathBuf> {
+        let normalized_output_file_path = output_file_path.trim();
+        if normalized_output_file_path.is_empty() {
+            return Err(
+                io::Error::new(io::ErrorKind::NotFound, "当前任务没有可读取的音频文件").into(),
+            );
+        }
+
+        Ok(resolve_task_path(
+            Path::new(self.data_dir()),
+            normalized_output_file_path,
+        ))
+    }
+
     async fn load_history_detail(
         &self,
         history_id: i64,
@@ -290,15 +482,7 @@ impl LocalService {
             .await?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
 
-        let status = parse_task_status(&history.status)?;
-
-        if status != TaskStatus::Completed {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "当前任务尚未完成，无法读取音频",
-            )
-            .into());
-        }
+        self.ensure_completed_audio_task(&history.status)?;
 
         let row = tts_task_entity::Entity::find()
             .filter(tts_task_entity::Column::HistoryId.eq(history_id))
@@ -312,18 +496,7 @@ impl LocalService {
             .parse::<TextToSpeechFormat>()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let output_file_path = row.output_file_path.unwrap_or_default();
-        let normalized_output_file_path = output_file_path.trim();
-
-        if normalized_output_file_path.is_empty() {
-            return Err(
-                io::Error::new(io::ErrorKind::NotFound, "当前任务没有可读取的音频文件").into(),
-            );
-        }
-
-        let resolved_output_file_path = resolve_task_path(
-            std::path::Path::new(self.data_dir()),
-            normalized_output_file_path,
-        );
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
 
         let bytes = tokio::fs::read(&resolved_output_file_path)
             .await
@@ -353,15 +526,7 @@ impl LocalService {
             .await?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
 
-        let status = parse_task_status(&history.status)?;
-
-        if status != TaskStatus::Completed {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "当前任务尚未完成，无法读取音频",
-            )
-            .into());
-        }
+        self.ensure_completed_audio_task(&history.status)?;
 
         let row = voice_clone_task_entity::Entity::find()
             .filter(voice_clone_task_entity::Column::HistoryId.eq(history_id))
@@ -371,22 +536,11 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到声音克隆任务文件"))?;
 
         let output_file_path = row.output_file_path.unwrap_or_default();
-        let normalized_output_file_path = output_file_path.trim();
         let format = row
             .format
             .parse::<TextToSpeechFormat>()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-
-        if normalized_output_file_path.is_empty() {
-            return Err(
-                io::Error::new(io::ErrorKind::NotFound, "当前任务没有可读取的音频文件").into(),
-            );
-        }
-
-        let resolved_output_file_path = resolve_task_path(
-            std::path::Path::new(self.data_dir()),
-            normalized_output_file_path,
-        );
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
 
         let bytes = tokio::fs::read(&resolved_output_file_path)
             .await
@@ -416,15 +570,7 @@ impl LocalService {
             .await?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
 
-        let status = parse_task_status(&history.status)?;
-
-        if status != TaskStatus::Completed {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "当前任务尚未完成，无法读取音频",
-            )
-            .into());
-        }
+        self.ensure_completed_audio_task(&history.status)?;
 
         let row = voice_design_task_entity::Entity::find()
             .filter(voice_design_task_entity::Column::HistoryId.eq(history_id))
@@ -434,22 +580,11 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到音色设计任务文件"))?;
 
         let output_file_path = row.output_file_path.unwrap_or_default();
-        let normalized_output_file_path = output_file_path.trim();
         let format = row
             .format
             .parse::<TextToSpeechFormat>()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-
-        if normalized_output_file_path.is_empty() {
-            return Err(
-                io::Error::new(io::ErrorKind::NotFound, "当前任务没有可读取的音频文件").into(),
-            );
-        }
-
-        let resolved_output_file_path = resolve_task_path(
-            std::path::Path::new(self.data_dir()),
-            normalized_output_file_path,
-        );
+        let resolved_output_file_path = self.resolve_generated_output_path(&output_file_path)?;
 
         let bytes = tokio::fs::read(&resolved_output_file_path)
             .await

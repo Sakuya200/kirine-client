@@ -6,7 +6,7 @@ use crate::{
     service::models::{
         CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
         CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
-        HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+        GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
         ImportModelAsSpeakerPayload, ModelFilter, ModelInfo, ModelMutationResult,
         ModelTrainingTaskResult, Page, PageRequest, SendStreamingMessagePayload, SpeakerFilter,
         SpeakerInfo, SpeakerPageResult, StreamingSpeechTaskResult, TextToSpeechAudioAsset,
@@ -80,6 +80,11 @@ pub trait Service: Send + Sync {
     async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset>;
     async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset>;
     async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset>;
+    async fn save_generated_audio_as(
+        &self,
+        source: GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool>;
     async fn delete_history_record(
         &self,
         history_id: i64,

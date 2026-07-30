@@ -18,12 +18,7 @@ import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage, APP_LANGUAGE_LABELS } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
-import {
-  TEXT_TO_SPEECH_FORMATS,
-  TextToSpeechFormat,
-  type TextToSpeechOption,
-  type TextToSpeechSpeakerOption
-} from '@/enums/textToSpeech';
+import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption, type TextToSpeechSpeakerOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { usePollingResume } from '@/hooks/usePollingResume';
@@ -33,6 +28,7 @@ import { useSpeakerStore } from '@/stores/speakers';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
+import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
@@ -751,10 +747,7 @@ const loadResultAudioAsset = (taskId: number) =>
     historyId: taskId
   });
 
-const saveResultAudio = (taskId: number) =>
-  invoke<boolean>('save_text_to_speech_audio_as', {
-    historyId: taskId
-  });
+const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'text-to-speech', historyId: taskId });
 
 onBeforeUnmount(() => {
   stopActiveTaskStatusRefresh();
@@ -790,12 +783,7 @@ onMounted(async () => {
             :options="speakerOptions"
             placeholder="可选，不指定时自动选择"
           />
-          <BaseListbox
-            v-model="form.language"
-            v-model:selected-option="selectedLanguageOption"
-            label="输出语言"
-            :options="languageOptions"
-          />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox

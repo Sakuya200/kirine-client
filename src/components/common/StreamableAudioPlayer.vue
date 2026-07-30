@@ -6,6 +6,7 @@ import BaseButton from '@/components/common/BaseButton.vue';
 import { useStreamableAudioPlayer } from '@/hooks/useStreamableAudioPlayer';
 import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiStore } from '@/stores/ui';
+import { saveGeneratedAudio } from '@/utils/audioDownload';
 
 interface Props {
   mode: 'stream' | 'path';
@@ -47,24 +48,28 @@ const actionLabel = computed(() => {
 const showDownload = computed(() => props.mode === 'stream' && hasData.value && streamComplete.value);
 
 const downloadAudio = async () => {
-  if (!sourceUrl.value || isDownloading.value) {
+  if (!props.messageId || isDownloading.value) {
     return;
   }
   isDownloading.value = true;
   try {
-    const response = await fetch(sourceUrl.value);
-    const blob = await response.blob();
-    const link = document.createElement('a');
-    const downloadUrl = URL.createObjectURL(blob);
-    const speakerSegment = (props.speakerName || 'stream').trim().replace(/\s+/g, '-');
-    const messageSegment = props.messageId || 'message';
-    link.href = downloadUrl;
-    link.download = `${speakerSegment}-${messageSegment}.wav`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(downloadUrl);
-    uiStore.notifySuccess('音频下载已开始。', 2200);
+    const historyId = store.activeTaskId;
+    if (historyId === null) {
+      uiStore.notifyWarning('当前流式会话不存在可下载任务。');
+      return;
+    }
+
+    const saved = await saveGeneratedAudio({
+      kind: 'streaming-speech',
+      historyId,
+      contextId: props.messageId
+    });
+    if (!saved) {
+      uiStore.notifyInfo('已取消下载。', 2200);
+      return;
+    }
+
+    uiStore.notifySuccess('音频已保存。', 2200);
   } catch (error) {
     uiStore.notifyError(error instanceof Error ? error.message : String(error));
   } finally {

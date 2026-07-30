@@ -28,6 +28,7 @@ import { useModelStore } from '@/stores/models';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
+import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
@@ -712,10 +713,7 @@ const loadResultAudioAsset = (taskId: number) =>
     historyId: taskId
   });
 
-const saveResultAudio = (taskId: number) =>
-  invoke<boolean>('save_voice_clone_audio_as', {
-    historyId: taskId
-  });
+const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'voice-clone', historyId: taskId });
 
 const resetForm = () => {
   form.baseModel = modelOptions.value[0]?.value ?? '';

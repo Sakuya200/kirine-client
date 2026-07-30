@@ -716,6 +716,15 @@ pub struct SendStreamingMessagePayload {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum GeneratedAudioSource {
+    TextToSpeech { history_id: i64 },
+    VoiceClone { history_id: i64 },
+    VoiceDesign { history_id: i64 },
+    StreamingSpeech { history_id: i64, context_id: String },
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamingSpeechTaskResult {
