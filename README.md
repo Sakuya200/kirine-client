@@ -1,6 +1,6 @@
 # Kirine Client 用户手册
 
-Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持本地文本转语音、声音克隆、模型训练、说话人管理和历史任务管理。
+Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持本地文本转语音、声音克隆、音色设计、模型训练、流式语音会话、说话人管理和历史任务管理。
 
 本项目的目标是实现一个通用的音频合成模型UI以及调度层实现，提供开箱即用的多模型音频合成功能，未来将引入更多的音频合成相关功能，b站功能介绍视频地址：https://www.bilibili.com/video/BV1MwLy6yEzU
 
@@ -22,28 +22,32 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 2. 首次安装模型、首次推理或首次训练通常会较慢，这是正常现象。
 3. 每项任务可以单独选择使用 CPU 或 CUDA（GPU）运行；若所选设备与当前模型运行环境不一致，提交前会出现确认弹窗，确认后应用会自动切换，但本次任务启动时间会明显增加。
 4. 模型训练建议使用 GPU；CPU 可以运行，但速度会明显下降。
+5. 当前默认可用的是 **Local 模式**（本地 SQLite + 本地 Python Runtime）；Remote 模式仍在开发中，尚未接入真实 HTTP 调用。
 
 ## 3. 当前模型支持
 
-| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 音色设计 | 设备支持 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Irodori-TTS-V3 | 500M | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
-| Dots.TTS | 2B | ✓ | ✓ | ✓ | — | CPU / CUDA |
-| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
-| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
-| VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | CPU / CUDA |
-| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | CPU / CUDA |
-| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | CPU |
-| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | — | CPU |
+| 基础模型 | 版本 | 文本转语音 | 声音克隆 | 模型训练 | 音色设计 | 流式语音 | 设备支持 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Irodori-TTS-V3 | 500M | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| Dots.TTS | 2B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
+| Qwen3-TTS | 1.7B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| Qwen3-TTS | 0.6B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
+| MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
+| MOSS-TTS Realtime | 1.7B | — | — | — | — | ✓ | CPU / CUDA |
+| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | — | CPU |
+| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | — | — | CPU |
 
 ## 4. 快速上手
 
 1. 启动后先打开**设置**页，确认数据、日志、模型目录是否符合当前机器的目录规划。
-2. 打开**模型管理**页，安装要使用的模型。
+2. 打开**模型管理**页，先为模型选择当前设备（单设备模型会自动回填），再安装要使用的模型。
 3. **文本转语音**：选择模型、说话人、语言，输入文本后提交。
 4. **声音克隆**：上传参考音频，填写目标台词后提交；参考音频支持 `wav`、`mp3`、`flac`、`ogg`。
-5. **模型训练**：先导入样本（支持单样本和批量数据集两种方式），再填写说话人名称和参数后启动训练。
-6. 所有任务的状态、结果和导出操作可以在**历史任务**页统一管理，也可以从历史记录直接回填参数重新提交。
+5. **音色设计**：输入音色 prompt 与目标台词，生成目标风格语音。
+6. **模型训练**：先导入样本（支持单样本和批量数据集两种方式），再填写说话人名称和参数后启动训练。
+7. **流式语音**：进入流式语音页，创建会话后以聊天方式连续发送消息，实时接收音频 chunk 回放。
+8. 所有任务的状态、结果和导出操作可以在**历史任务**页统一管理，也可以从历史记录直接回填参数重新提交。
 
 ## 5. 功能页面说明
 
@@ -67,11 +71,15 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 
 ### 5.5 说话人管理
 
-查看、搜索、编辑和删除本地说话人，支持按语言和状态筛选。
+查看、搜索、编辑和删除本地说话人，支持按状态筛选，并可从本地模型目录导入说话人。
 
 ### 5.6 历史任务
 
-统一查看所有任务的状态、详情和结果，支持试听、导出音频，以及从历史记录回填参数重新发起任务。
+统一查看所有任务（含流式语音会话）的状态、详情和结果，支持试听、导出音频，以及从历史记录回填参数重新发起任务。
+
+### 5.7 流式语音
+
+流式语音采用会话级长期进程：一条会话可连续发送多条消息，按 `contextId` 分发音频流。页面支持本地语音克隆说话人与 trained 说话人（从 Ready 说话人选择）两类输入。
 
 ## 6. GPT-SoVITS-CPUFast 特别说明
 
@@ -117,7 +125,10 @@ if is_g2pw:
    - 模型仓库（Hugging Face）：https://huggingface.co/openbmb/VoxCPM2
 5. MOSS-TTS Local
    - 模型仓库（Hugging Face）：https://huggingface.co/OpenMOSS-Team
-6. GPT-SoVITS-CPUFast
+6. MOSS-TTS Realtime
+   - 项目入口（GitHub）：https://github.com/OpenMOSS/MOSS-TTS
+   - 模型仓库（Hugging Face）：https://huggingface.co/OpenMOSS-Team
+7. GPT-SoVITS-CPUFast
    - 项目仓库（GitHub）：https://github.com/baicai-1145/GPT-SoVITS-CPUFast
 
 ## 8. 常见问题
@@ -127,6 +138,8 @@ if is_g2pw:
 **任务长时间无进展**：检查页面通知栏是否有错误提示，或查看配置中 `log_dir` 下对应任务的日志文件。若为首次安装、首次推理或切换了设备类型，启动耗时增加是正常的。
 
 **flash-attn 相关报错**：Windows 环境下通常缺少稳定官方支持，建议保持默认的 `sdpa`。
+
+**切到 Remote 模式后报错**：当前版本 Remote 模式尚未接通真实 API 调用，建议继续使用 Local 模式。
 
 ## 9. 国内网络环境配置建议
 
@@ -314,7 +327,7 @@ attn_implementation = "sdpa"
 
 - **Rust 后端日志**：写入 `log_dir` 下的日志文件，任务执行日志按任务 ID 单独存放。
 - **前端 / Tauri 日志**：开发模式下直接输出到终端；生产模式下同样写入 `log_dir`。
-- **Python 脚本日志**：每次任务执行时，脚本的标准输出会被重定向到任务专属日志文件，路径格式为 `log_dir/<task_id>/`。
+- **Python 脚本日志**：每次任务执行时，脚本输出会重定向到 `log_dir/task/` 下按任务类型前缀命名的日志文件（如 `tts-<id>.log`、`voice-clone-<id>.log`、`voice-design-<id>.log`、`training-<id>.log`、`streaming-<id>.log`）。
 - **模型运行时查找**：Rust 启动时会依次尝试 `<workspace>/src-model`、`<app_dir>/src-model`、`<app_dir>/lib/src-model`，本地开发通常命中第一个路径（仓库目录下的 `src-model/`）。
 
 ### D9. 模型适配器开发
