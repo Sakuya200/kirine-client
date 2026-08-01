@@ -521,6 +521,30 @@ pub struct StreamingTaskDetail {
     pub message_count: i64,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingReplayMessage {
+    pub history_id: i64,
+    pub message_id: String,
+    pub context_id: String,
+    pub speaker_name: String,
+    pub text: String,
+    pub audio_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingReplaySnapshot {
+    pub task_id: i64,
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub device: HardwareType,
+    pub model_params: Value,
+    pub speakers: Vec<StreamingSpeakerInput>,
+    pub messages: Vec<StreamingReplayMessage>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
@@ -588,6 +612,14 @@ pub struct TextToSpeechTaskResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GeneratedAudioAsset {
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextToSpeechAudioAsset {
     pub task_id: i64,
     pub file_name: String,
@@ -608,6 +640,16 @@ pub struct VoiceCloneAudioAsset {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceDesignAudioAsset {
     pub task_id: i64,
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeechAudioAsset {
+    pub history_id: i64,
+    pub message_id: String,
     pub file_name: String,
     pub content_type: String,
     pub bytes: Vec<u8>,
@@ -676,7 +718,7 @@ pub struct CreateVoiceDesignTaskPayload {
     pub model_params: Value,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamingSpeakerInput {
     pub name: String,
@@ -734,8 +776,8 @@ pub enum GeneratedAudioSource {
     StreamingSpeech {
         #[serde(rename = "historyId")]
         history_id: i64,
-        #[serde(rename = "contextId")]
-        context_id: String,
+        #[serde(rename = "messageId", alias = "contextId")]
+        message_id: String,
     },
 }
 

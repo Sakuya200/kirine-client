@@ -5,6 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
 use tokio::sync::watch;
+use tracing::warn;
 
 use crate::{
     common::{
@@ -34,6 +35,12 @@ impl LocalService {
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before voice-design task");
+        }
         let device = payload.device;
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)

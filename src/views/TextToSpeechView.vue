@@ -743,8 +743,8 @@ const copyTaskId = async () => {
 };
 
 const loadResultAudioAsset = (taskId: number) =>
-  invoke<TextToSpeechAudioAssetPayload>('get_text_to_speech_audio', {
-    historyId: taskId
+  invoke<TextToSpeechAudioAssetPayload>('get_generated_audio', {
+    source: { kind: 'text-to-speech', historyId: taskId }
   });
 
 const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'text-to-speech', historyId: taskId });

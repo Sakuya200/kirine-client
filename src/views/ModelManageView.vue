@@ -75,6 +75,16 @@ const deviceSelectDisabled = (item: ModelInfo) => isMutating.value || deviceUpda
 const deviceOptions = (item: ModelInfo) =>
   item.supportedDevices.map(device => ({ label: HARDWARE_TYPE_TEXT[device] ?? device.toUpperCase(), value: device }));
 
+const effectiveInstallDevice = (item: ModelInfo): HardwareType | null => {
+  if (item.currentDevice !== null) {
+    return item.currentDevice;
+  }
+  if (item.supportedDevices.length === 1) {
+    return item.supportedDevices[0] ?? null;
+  }
+  return null;
+};
+
 const handleDeviceChange = async (item: ModelInfo, device: HardwareType) => {
   if (item.currentDevice === device) return;
   deviceUpdatingId.value = item.id;
@@ -87,11 +97,11 @@ const handleDeviceChange = async (item: ModelInfo, device: HardwareType) => {
 
 const handleInstall = async (modelId: number) => {
   const target = modelStore.items.find(item => item.id === modelId);
+  const device = target ? effectiveInstallDevice(target) : null;
   // 多设备模型未选设备时按钮已禁用；此处兜底，避免空设备进入安装。
-  if (!target || target.currentDevice === null) {
+  if (!target || device === null) {
     return;
   }
-  const device = target.currentDevice;
   isMutating.value = true;
   mutatingModelId.value = modelId;
   mutatingAction.value = target.downloaded ? 'reinstall' : 'install';
@@ -237,8 +247,8 @@ onMounted(async () => {
                     tone="ghost"
                     size="sm"
                     :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
-                    :disabled="isMutating || item.currentDevice === null"
-                    :title="item.currentDevice === null ? '请先选择当前设备' : ''"
+                    :disabled="isMutating || effectiveInstallDevice(item) === null"
+                    :title="effectiveInstallDevice(item) === null ? '请先选择当前设备' : ''"
                     @click="handleInstall(item.id)"
                   >
                     <ArrowDownTrayIcon

@@ -1,4 +1,5 @@
 import type { AppLanguage } from '@/enums/language';
+import type { HardwareType } from '@/enums/settings';
 
 /**
  * 流式语音说话人来源类别。
@@ -44,6 +45,7 @@ export interface StreamingChatMessage {
   speakerName?: string;
   taskId: number;
   contextId: string;
+  audioPath?: string;
   status: StreamingMessageStatus;
   taskCreateTime?: string;
 }
@@ -55,7 +57,7 @@ export interface StreamingChatMessage {
 export interface StreamingSessionConfig {
   baseModel: string;
   modelVersion: string;
-  device: string;
+  device: HardwareType;
   language: AppLanguage;
   modelParams: Record<string, unknown>;
 }

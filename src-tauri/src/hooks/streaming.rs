@@ -2,7 +2,8 @@ use tauri::State;
 
 use crate::service::{
     models::{
-        CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingSpeechTaskResult,
+        CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload,
+        StreamingReplaySnapshot, StreamingSpeechTaskResult,
     },
     ServiceState,
 };
@@ -56,6 +57,20 @@ pub async fn cancel_streaming_task(
         .service()
         .map_err(|err| err.to_string())?
         .cancel_streaming_task(task_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_streaming_replay_snapshot(
+    history_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<StreamingReplaySnapshot, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .get_streaming_replay_snapshot(history_id)
         .await
         .map_err(|err| err.to_string())
 }

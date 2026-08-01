@@ -35,13 +35,13 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
             CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-            CreateVoiceDesignTaskPayload, HistoryFilter, HistoryRecord, HistoryRecordSummary,
-            HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
-            ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
-            SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-            StreamingSpeechTaskResult, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
+            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
+            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
+            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeechTaskResult,
+            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -150,16 +150,11 @@ impl Service for LocalService {
         self.get_history_record_impl(history_id).await
     }
 
-    async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset> {
-        self.read_text_to_speech_audio_impl(history_id).await
-    }
-
-    async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset> {
-        self.read_voice_clone_audio_impl(history_id).await
-    }
-
-    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset> {
-        self.read_voice_design_audio_impl(history_id).await
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        self.read_generated_audio_impl(source).await
     }
 
     async fn save_generated_audio_as(
@@ -231,6 +226,13 @@ impl Service for LocalService {
 
     async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool> {
         self.cancel_streaming_task_impl(task_id).await
+    }
+
+    async fn get_streaming_replay_snapshot(
+        &self,
+        history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        self.get_streaming_replay_snapshot_impl(history_id).await
     }
 }
 

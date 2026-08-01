@@ -257,8 +257,8 @@ where
     if let Some(row) = existing {
         let downloaded = row.downloaded;
         let create_time = row.create_time.clone();
-        // current_device 跨 sync 保留用户选择：仅当原值失效（不再属于 supported_devices）
-        // 时才纠偏；单设备模型在原值缺失时回填唯一设备。
+        // current_device 跨 sync 保留用户选择：仅当原值仍属于 supported_devices 时保留。
+        // 不在表同步阶段写入默认设备，保持可空；空值由任务执行前设备探测流程回填。
         let current_device = resolve_current_device_value(
             row.current_device.as_deref(),
             &definition.supported_devices,
@@ -280,7 +280,7 @@ where
         active_model.deleted = Set(0);
         active_model.update(connection).await?;
     } else {
-        // 新插入行：单设备模型自动回填 current_device，多设备留空待用户选择。
+        // 新插入行不写默认设备，保持 current_device 可空。
         let current_device = resolve_current_device_value(None, &definition.supported_devices);
         model_info_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
@@ -308,8 +308,7 @@ where
 
 /// 计算 model_info.current_device 应写入的值：
 /// - 已有值仍属于 supported_devices -> 保留（跨会话持久化用户选择）
-/// - 已有值缺失/失效且 supported_devices 仅 1 项 -> 回填该唯一设备（单设备自动选中）
-/// - 其余（多设备且无有效选择）-> None（要求用户先选）
+/// - 其余情况 -> None（保持可空，交由任务执行前探测回填）
 fn resolve_current_device_value(
     existing: Option<&str>,
     supported_devices: &[String],
@@ -330,10 +329,6 @@ fn resolve_current_device_value(
                 return Some(existing_device.as_str().to_string());
             }
         }
-    }
-
-    if parsed.len() == 1 {
-        return Some(parsed[0].as_str().to_string());
     }
 
     None

@@ -106,6 +106,38 @@ export interface VoiceDesignTaskDetail {
   outputFilePath: string;
 }
 
+export interface StreamingTaskDetail {
+  baseModel: BaseModel;
+  modelVersion: string;
+  language: AppLanguage;
+  device: HardwareType;
+  modelParams: Record<string, unknown>;
+  contextFilePath: string;
+  inputCacheFilePath: string;
+  outputAudioDir: string;
+  messageCount: number;
+}
+
+export interface StreamingReplayMessage {
+  historyId: number;
+  messageId: string;
+  contextId: string;
+  speakerName: string;
+  text: string;
+  audioPath: string;
+}
+
+export interface StreamingReplaySnapshot {
+  taskId: number;
+  baseModel: BaseModel;
+  modelVersion: string;
+  language: AppLanguage;
+  device: HardwareType;
+  modelParams: Record<string, unknown>;
+  speakers: StreamingSpeakerPayload[];
+  messages: StreamingReplayMessage[];
+}
+
 export interface StreamingSpeakerPayload {
   name: string;
   baseModel: BaseModel;
@@ -114,6 +146,8 @@ export interface StreamingSpeakerPayload {
   refAudioName: string;
   refText: string;
   description?: string;
+  category?: 'voice-clone' | 'preset' | 'trained';
+  speakerDirName?: string;
 }
 
 export interface CreateStreamingSpeechTaskPayload {
@@ -183,7 +217,17 @@ export interface VoiceDesignHistoryRecord extends HistoryRecordBase {
   detail: VoiceDesignTaskDetail;
 }
 
-export type HistoryRecord = ModelTrainingHistoryRecord | TextToSpeechHistoryRecord | VoiceCloneHistoryRecord | VoiceDesignHistoryRecord;
+export interface StreamingSpeechHistoryRecord extends HistoryRecordBase {
+  taskType: HistoryTaskType.StreamingSpeech;
+  detail: StreamingTaskDetail;
+}
+
+export type HistoryRecord =
+  | ModelTrainingHistoryRecord
+  | TextToSpeechHistoryRecord
+  | VoiceCloneHistoryRecord
+  | VoiceDesignHistoryRecord
+  | StreamingSpeechHistoryRecord;
 
 /** 历史任务列表摘要（不含 detail/taskLog，用于分页列表查询） */
 export type HistoryRecordSummary = HistoryRecordBase;

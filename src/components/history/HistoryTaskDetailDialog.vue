@@ -10,6 +10,7 @@ import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import ModelTrainingTaskDetailForm from '@/components/form/ModelTrainingTaskDetailForm.vue';
+import StreamingTaskDetailForm from '@/components/form/StreamingTaskDetailForm.vue';
 import TextToSpeechTaskDetailForm from '@/components/form/TextToSpeechTaskDetailForm.vue';
 import VoiceCloneTaskDetailForm from '@/components/form/VoiceCloneTaskDetailForm.vue';
 import VoiceDesignTaskDetailForm from '@/components/form/VoiceDesignTaskDetailForm.vue';
@@ -148,6 +149,7 @@ const requestCancel = (record: HistoryRecord | null) => {
           <ModelTrainingTaskDetailForm v-if="record.taskType === HistoryTaskType.ModelTraining" :record="record" />
           <VoiceCloneTaskDetailForm v-else-if="record.taskType === HistoryTaskType.VoiceClone" :record="record" />
           <VoiceDesignTaskDetailForm v-else-if="record.taskType === HistoryTaskType.VoiceDesign" :record="record" />
+          <StreamingTaskDetailForm v-else-if="record.taskType === HistoryTaskType.StreamingSpeech" :record="record" />
           <TextToSpeechTaskDetailForm v-else :record="record" />
         </div>
       </section>

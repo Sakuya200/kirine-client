@@ -620,8 +620,8 @@ const cancelActiveTask = async () => {
 };
 
 const loadResultAudioAsset = (taskId: number) =>
-  invoke<VoiceDesignAudioAssetPayload>('get_voice_design_audio', {
-    historyId: taskId
+  invoke<VoiceDesignAudioAssetPayload>('get_generated_audio', {
+    source: { kind: 'voice-design', historyId: taskId }
   });
 
 const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'voice-design', historyId: taskId });

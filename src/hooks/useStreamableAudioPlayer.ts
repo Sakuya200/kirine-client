@@ -12,7 +12,8 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   const isPlaying = ref(false);
   const playbackProgress = ref(0);
   const audioCurrentTime = ref(0);
-  const hasData = options.hasData ?? ref(false);
+  const localHasData = ref(false);
+  const hasData = options.hasData ?? localHasData;
 
   const currentPlaybackSeconds = computed(() => Math.round(audioCurrentTime.value));
   const currentSourceUrl = computed(() => options.sourceUrl?.() ?? pathUrl);
@@ -145,7 +146,7 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   const setAudioPath = (filePath: string) => {
     destroyAudioElement();
     pathUrl = filePath ? convertFileSrc(filePath) : null;
-    hasData.value = !!pathUrl;
+    localHasData.value = !!pathUrl;
   };
 
   watch(currentSourceUrl, (nextSource, previousSource) => {

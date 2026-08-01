@@ -35,6 +35,45 @@ use crate::{
 };
 
 impl LocalService {
+    pub(crate) async fn ensure_model_current_device_resolved_impl(
+        &self,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<Option<HardwareType>> {
+        let Some(row) = self
+            .find_model_info_row(base_model.trim(), model_version.trim())
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let supported_devices: Vec<HardwareType> = serde_json::from_str(&row.supported_devices)?;
+        if let Some(current_device) = row
+            .current_device
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .and_then(|value| value.parse::<HardwareType>().ok())
+            .filter(|device| supported_devices.contains(device))
+        {
+            return Ok(Some(current_device));
+        }
+
+        let detected = self
+            .get_device_type_impl(base_model.trim(), model_version.trim())
+            .await?;
+        if !supported_devices.contains(&detected) {
+            return Ok(None);
+        }
+
+        let mut active_model: model_info_entity::ActiveModel = row.into();
+        active_model.current_device = Set(Some(detected.as_str().to_string()));
+        active_model.modify_time = Set(now_string()?);
+        active_model.update(self.orm()).await?;
+
+        Ok(Some(detected))
+    }
+
     pub(crate) async fn list_model_infos_impl(
         &self,
         request: PageRequest<ModelFilter>,

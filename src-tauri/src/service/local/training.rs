@@ -115,6 +115,12 @@ impl LocalService {
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before model-training task");
+        }
         let selected_training_device = payload.device;
         let mut model_params = payload.model_params.clone();
         let selected_model_info = self

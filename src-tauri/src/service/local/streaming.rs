@@ -1,6 +1,6 @@
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{io, path::Path};
 
 use anyhow::bail;
 use sea_orm::{
@@ -28,7 +28,8 @@ use crate::{
         },
         models::{
             CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
-            StreamingSpeechTaskResult, TaskStatus, UpdateTaskStatusPayload,
+            StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeechTaskResult, TaskStatus,
+            UpdateTaskStatusPayload,
         },
         pipeline::streaming::{
             serialize_input_entry, MessageChannel, StreamingContextBasic, StreamingContextJson,
@@ -48,6 +49,82 @@ const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
 const STREAMING_SESSION_READY_TIMEOUT: Duration = Duration::from_secs(900);
 
 impl LocalService {
+    pub(crate) async fn get_streaming_replay_snapshot_impl(
+        &self,
+        history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        let history = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到历史任务: {history_id}"))?;
+        if history.task_type != HistoryTaskType::StreamingSpeech.as_str() {
+            bail!("任务 {history_id} 不是流式语音会话");
+        }
+
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {history_id}"))?;
+
+        let data_dir = Path::new(self.data_dir());
+        let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
+        let context: StreamingContextJson =
+            serde_json::from_str(&std::fs::read_to_string(context_json_path)?)?;
+
+        let messages = context
+            .messages
+            .into_iter()
+            .map(|message| StreamingReplayMessage {
+                history_id: history_id,
+                message_id: message.context_id.clone(),
+                context_id: message.context_id,
+                speaker_name: message.speaker_name,
+                text: message.text,
+                audio_path: resolve_task_path(data_dir, &message.audio_path)
+                    .to_string_lossy()
+                    .to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let speakers = context
+            .basic
+            .speakers
+            .into_iter()
+            .map(|speaker| crate::service::models::StreamingSpeakerInput {
+                name: speaker.name,
+                base_model: speaker.base_model,
+                model_version: speaker.model_version,
+                ref_audio_path: speaker.ref_audio_path,
+                ref_audio_name: speaker.ref_audio_name,
+                ref_text: speaker.ref_text,
+                description: speaker.description,
+                speaker_dir_name: speaker.speaker_dir_name,
+                category: speaker.category,
+            })
+            .collect::<Vec<_>>();
+
+        Ok(StreamingReplaySnapshot {
+            task_id: history_id,
+            base_model: detail.base_model,
+            model_version: detail.model_version,
+            language: detail
+                .language
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            device: detail
+                .device
+                .parse()
+                .map_err(|err: String| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            model_params: serde_json::from_str(&detail.model_params_json)
+                .unwrap_or(serde_json::Value::Null),
+            speakers,
+            messages,
+        })
+    }
+
     pub(crate) async fn create_streaming_speech_task_impl(
         &self,
         payload: CreateStreamingSpeechTaskPayload,
@@ -55,6 +132,12 @@ impl LocalService {
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before streaming task");
+        }
         let device = payload.device;
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)

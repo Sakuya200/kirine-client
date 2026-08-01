@@ -1,25 +1,44 @@
 <script setup lang="ts">
 import { Cog6ToothIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
+import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import StreamableAudioPlayer from '@/components/common/StreamableAudioPlayer.vue';
 import StreamingConfigDrawer from '@/components/streaming/StreamingConfigDrawer.vue';
+import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
+import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY } from '@/enums/task';
+import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
+import type { StreamingReplaySnapshot } from '@/types/domain';
 
 const store = useStreamingSpeechStore();
 const modelStore = useModelStore();
 const uiConfigStore = useUiConfigStore();
 const uiStore = useUiStore();
+const route = useRoute();
+const router = useRouter();
+const {
+  dialogOpen: showDeviceMismatchDialog,
+  dialogTitle: deviceMismatchDialogTitle,
+  dialogMessage: deviceMismatchDialogMessage,
+  dialogDetailLines: deviceMismatchDialogDetails,
+  ensureMatchedOrConfirmed,
+  confirmDialog: confirmDeviceMismatchDialog,
+  closeDialog: closeDeviceMismatchDialog
+} = useTaskDeviceTypeGuard();
 
 const selectedSpeakerId = ref<string | null>(null);
 const inputText = ref('');
 const messagesContainerRef = ref<HTMLElement | null>(null);
+const isStartSessionRequested = ref(false);
 
 const canSend = computed(
   () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && store.activeTaskId !== null && !store.isStartingSession
@@ -70,10 +89,28 @@ const send = async () => {
 };
 
 const startSession = async () => {
+  if (isStartSessionRequested.value || store.activeTaskId !== null || store.isStartingSession) {
+    return;
+  }
+  isStartSessionRequested.value = true;
   try {
+    if (!store.sessionConfig.baseModel || !store.sessionConfig.modelVersion) {
+      await store.startSession();
+      return;
+    }
+    const accepted = await ensureMatchedOrConfirmed({
+      baseModel: store.sessionConfig.baseModel,
+      modelVersion: store.sessionConfig.modelVersion,
+      selectedDevice: store.sessionConfig.device
+    });
+    if (!accepted) {
+      return;
+    }
     await store.startSession();
   } catch (err) {
     uiStore.notifyError(err instanceof Error ? err.message : String(err));
+  } finally {
+    isStartSessionRequested.value = false;
   }
 };
 
@@ -93,8 +130,40 @@ const clearMessages = () => {
   uiStore.notifyInfo('已清空对话。', 2000);
 };
 
+const clearReplayTaskId = async () => {
+  if (!(HISTORY_TASK_REPLAY_QUERY_KEY in route.query)) {
+    return;
+  }
+  const nextQuery = { ...route.query };
+  delete nextQuery[HISTORY_TASK_REPLAY_QUERY_KEY];
+  await router.replace({ path: route.path, query: nextQuery });
+};
+
+const hydrateReplayTaskFromRoute = async () => {
+  const historyId = getHistoryTaskReplayId(route.query[HISTORY_TASK_REPLAY_QUERY_KEY]);
+
+  if (historyId === null) {
+    await clearReplayTaskId();
+    return;
+  }
+
+  try {
+    const snapshot = await invoke<StreamingReplaySnapshot>('get_streaming_replay_snapshot', {
+      historyId
+    });
+    store.restoreFromReplaySnapshot(snapshot);
+
+    uiStore.notifySuccess('已恢复流式会话配置、历史消息与音频片段。', 2600);
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('载入流式语音历史会话失败，请检查任务记录是否仍然存在', error));
+  } finally {
+    await clearReplayTaskId();
+  }
+};
+
 onMounted(async () => {
   await Promise.all([uiConfigStore.ensureLoaded(), modelStore.ensureLoaded()]);
+  await hydrateReplayTaskFromRoute();
 });
 </script>
 
@@ -108,9 +177,14 @@ onMounted(async () => {
         · 回车发送，Shift+Enter 换行
       </p>
       <div class="flex gap-2">
-        <BaseButton tone="ghost" size="sm" :disabled="store.activeTaskId !== null || store.isStartingSession" @click="startSession">
+        <BaseButton
+          tone="ghost"
+          size="sm"
+          :disabled="store.activeTaskId !== null || store.isStartingSession || isStartSessionRequested"
+          @click="startSession"
+        >
           <PlayCircleIcon class="h-4 w-4" aria-hidden="true" />
-          <span>{{ store.isStartingSession ? '加载模型中…' : '开启会话' }}</span>
+          <span>{{ store.isStartingSession || isStartSessionRequested ? '加载模型中…' : '开启会话' }}</span>
         </BaseButton>
         <BaseButton tone="ghost" size="sm" :disabled="store.activeTaskId === null" @click="store.terminateSession">
           <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
@@ -165,7 +239,7 @@ onMounted(async () => {
 
               <div class="mt-2 flex justify-end self-end">
                 <div class="max-w-[28rem]">
-                  <StreamableAudioPlayer mode="stream" :message-id="message.id" :speaker-name="message.speakerName" />
+                  <StreamableAudioPlayer mode="stream" :message-id="message.id" :audio-path="message.audioPath" :speaker-name="message.speakerName" />
                 </div>
               </div>
             </div>
@@ -203,5 +277,17 @@ onMounted(async () => {
     </div>
 
     <StreamingConfigDrawer :open="store.isDrawerOpen" @close="store.closeDrawer" />
+
+    <WarningConfirmDialog
+      :open="showDeviceMismatchDialog"
+      :title="deviceMismatchDialogTitle"
+      :message="deviceMismatchDialogMessage"
+      :details="deviceMismatchDialogDetails"
+      confirm-text="继续执行"
+      cancel-text="取消"
+      @confirm="confirmDeviceMismatchDialog"
+      @cancel="closeDeviceMismatchDialog"
+      @close="closeDeviceMismatchDialog"
+    />
   </div>
 </template>

@@ -7,13 +7,13 @@ use crate::{
         models::{
             CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
             CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-            CreateVoiceDesignTaskPayload, GeneratedAudioSource, HistoryFilter, HistoryRecord,
-            HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter,
-            ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
-            SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-            StreamingSpeechTaskResult, TextToSpeechAudioAsset, TextToSpeechTaskResult,
-            UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
+            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
+            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
+            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeechTaskResult,
+            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -114,16 +114,39 @@ impl Service for RemoteService {
         self.client.get_history_record(history_id).await
     }
 
-    async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset> {
-        self.client.read_text_to_speech_audio(history_id).await
-    }
-
-    async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset> {
-        self.client.read_voice_clone_audio(history_id).await
-    }
-
-    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset> {
-        self.client.read_voice_design_audio(history_id).await
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        match source {
+            GeneratedAudioSource::TextToSpeech { history_id } => {
+                let asset = self.client.read_text_to_speech_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceClone { history_id } => {
+                let asset = self.client.read_voice_clone_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceDesign { history_id } => {
+                let asset = self.client.read_voice_design_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::StreamingSpeech { .. } => {
+                anyhow::bail!("远程存储模式暂不支持流式语音音频播放")
+            }
+        }
     }
 
     async fn save_generated_audio_as(
@@ -216,5 +239,12 @@ impl Service for RemoteService {
 
     async fn cancel_streaming_task(&self, _task_id: i64) -> Result<bool> {
         anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn get_streaming_replay_snapshot(
+        &self,
+        _history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        anyhow::bail!("远程存储模式暂不支持流式语音历史重放")
     }
 }

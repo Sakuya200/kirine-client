@@ -61,6 +61,51 @@ impl LocalService {
 }
 
 impl LocalService {
+    pub(crate) async fn read_generated_audio_impl(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<crate::service::models::GeneratedAudioAsset> {
+        match source {
+            GeneratedAudioSource::TextToSpeech { history_id } => {
+                let asset = self.read_text_to_speech_audio_impl(history_id).await?;
+                Ok(crate::service::models::GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceClone { history_id } => {
+                let asset = self.read_voice_clone_audio_impl(history_id).await?;
+                Ok(crate::service::models::GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceDesign { history_id } => {
+                let asset = self.read_voice_design_audio_impl(history_id).await?;
+                Ok(crate::service::models::GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::StreamingSpeech {
+                history_id,
+                message_id,
+            } => {
+                let asset = self
+                    .read_streaming_speech_audio_impl(history_id, &message_id)
+                    .await?;
+                Ok(crate::service::models::GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+        }
+    }
+
     pub(crate) async fn save_generated_audio_as_impl(
         &self,
         source: GeneratedAudioSource,
@@ -87,9 +132,9 @@ impl LocalService {
             }
             GeneratedAudioSource::StreamingSpeech {
                 history_id,
-                context_id,
+                message_id,
             } => {
-                self.resolve_streaming_audio_file(history_id, &context_id)
+                self.resolve_streaming_audio_file(history_id, &message_id)
                     .await
             }
         }
@@ -170,24 +215,8 @@ impl LocalService {
     async fn resolve_streaming_audio_file(
         &self,
         history_id: i64,
-        context_id: &str,
+        message_id: &str,
     ) -> Result<(String, std::path::PathBuf)> {
-        let history = task_history_entity::Entity::find_by_id(history_id)
-            .filter(
-                task_history_entity::Column::TaskType.eq(HistoryTaskType::StreamingSpeech.as_str()),
-            )
-            .filter(task_history_entity::Column::Deleted.eq(0))
-            .one(self.orm())
-            .await?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到流式语音任务"))?;
-
-        let status = parse_task_status(&history.status)?;
-        if status != TaskStatus::Running && status != TaskStatus::Completed {
-            return Err(
-                io::Error::new(io::ErrorKind::InvalidInput, "当前流式会话不可下载音频").into(),
-            );
-        }
-
         let row = streaming_task_entity::Entity::find()
             .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
             .filter(streaming_task_entity::Column::Deleted.eq(0))
@@ -203,10 +232,10 @@ impl LocalService {
         }
 
         let audio_dir = resolve_task_path(Path::new(self.data_dir()), output_audio_dir);
-        let sanitized_context_id = super::sanitize_path_segment(context_id);
+        let sanitized_message_id = super::sanitize_path_segment(message_id);
         let audio_path = crate::common::task_paths::streaming_message_audio_path(
             &audio_dir,
-            &sanitized_context_id,
+            &sanitized_message_id,
         );
         if !audio_path.exists() {
             return Err(io::Error::new(
@@ -220,7 +249,7 @@ impl LocalService {
             .file_name()
             .and_then(|value| value.to_str())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{sanitized_context_id}.wav"));
+            .unwrap_or_else(|| format!("{sanitized_message_id}.wav"));
         Ok((file_name, audio_path))
     }
 
@@ -599,6 +628,28 @@ impl LocalService {
             task_id: history_id,
             file_name: row.file_name,
             content_type: content_type_for_format(format).to_string(),
+            bytes,
+        })
+    }
+
+    pub(crate) async fn read_streaming_speech_audio_impl(
+        &self,
+        history_id: i64,
+        message_id: &str,
+    ) -> Result<crate::service::models::StreamingSpeechAudioAsset> {
+        let (file_name, audio_path) = self.resolve_streaming_audio_file(history_id, message_id).await?;
+        let bytes = tokio::fs::read(&audio_path).await.map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("读取流式消息音频失败: {}", audio_path.display()),
+            )
+        })?;
+
+        Ok(crate::service::models::StreamingSpeechAudioAsset {
+            history_id,
+            message_id: message_id.to_string(),
+            file_name,
+            content_type: "audio/wav".to_string(),
             bytes,
         })
     }

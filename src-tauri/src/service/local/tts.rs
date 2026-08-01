@@ -6,6 +6,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use tokio::sync::watch;
+use tracing::warn;
 
 use crate::{
     common::{
@@ -38,6 +39,12 @@ impl LocalService {
         let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before tts task");
+        }
         let device = payload.device;
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)

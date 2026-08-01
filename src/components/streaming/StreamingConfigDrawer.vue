@@ -96,7 +96,7 @@ watch(
       return;
     }
     const matched = options.find(option => option.value === store.sessionConfig.device) ?? options[0];
-    store.setSessionConfig({ device: (matched?.value ?? HardwareType.Cpu) as string });
+    store.setSessionConfig({ device: (matched?.value ?? HardwareType.Cpu) as HardwareType });
   },
   { immediate: true }
 );
@@ -125,7 +125,7 @@ watch(
 // 选项变更 handler（避免在模板里写类型断言）
 const onBaseModelChange = (value: unknown) => store.setSessionConfig({ baseModel: String(value) });
 const onModelVersionChange = (value: unknown) => store.setSessionConfig({ modelVersion: String(value) });
-const onDeviceChange = (value: unknown) => store.setSessionConfig({ device: String(value) });
+const onDeviceChange = (value: unknown) => store.setSessionConfig({ device: value as HardwareType });
 const onLanguageChange = (value: unknown) => store.setSessionConfig({ language: value as AppLanguage });
 const onModelParamsChange = (value: Record<string, unknown>) => store.setSessionConfig({ modelParams: value });
 

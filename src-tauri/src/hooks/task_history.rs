@@ -5,8 +5,8 @@ use crate::service::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
         CreateVoiceDesignTaskPayload, GeneratedAudioSource, HistoryFilter, HistoryRecord,
         HistoryRecordSummary, HistoryTaskType, ModelTrainingTaskResult, Page, PageRequest,
-        TextToSpeechAudioAsset, TextToSpeechTaskResult, VoiceCloneAudioAsset,
-        VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+        GeneratedAudioAsset, TextToSpeechTaskResult, VoiceCloneTaskResult,
+        VoiceDesignTaskResult,
     },
     ServiceState,
 };
@@ -50,43 +50,15 @@ pub async fn get_history_record(
 }
 
 #[tauri::command]
-pub async fn get_text_to_speech_audio(
-    history_id: i64,
+pub async fn get_generated_audio(
+    source: GeneratedAudioSource,
     state: State<'_, ServiceState>,
-) -> std::result::Result<TextToSpeechAudioAsset, String> {
+) -> std::result::Result<GeneratedAudioAsset, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .read_text_to_speech_audio(history_id)
-        .await
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub async fn get_voice_clone_audio(
-    history_id: i64,
-    state: State<'_, ServiceState>,
-) -> std::result::Result<VoiceCloneAudioAsset, String> {
-    state
-        .0
-        .service()
-        .map_err(|err| err.to_string())?
-        .read_voice_clone_audio(history_id)
-        .await
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub async fn get_voice_design_audio(
-    history_id: i64,
-    state: State<'_, ServiceState>,
-) -> std::result::Result<VoiceDesignAudioAsset, String> {
-    state
-        .0
-        .service()
-        .map_err(|err| err.to_string())?
-        .read_voice_design_audio(history_id)
+        .read_generated_audio(source)
         .await
         .map_err(|err| err.to_string())
 }

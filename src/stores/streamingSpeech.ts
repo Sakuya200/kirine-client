@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
 import { useUiStore } from '@/stores/ui';
-import type { StreamingSpeechTaskResult } from '@/types/domain';
+import type { StreamingReplaySnapshot, StreamingSpeechTaskResult } from '@/types/domain';
 import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerCategory, StreamingSpeakerConfig } from '@/types/streaming';
 
 /**
@@ -71,6 +71,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   );
 
   const getSpeaker = (id: string | null) => speakers.value.find(item => item.id === id) ?? null;
+  const getMessage = (id: string | null) => messages.value.find(item => item.id === id) ?? null;
 
   const ensureAudioState = (messageId: string): AudioState => {
     if (!audioStates[messageId]) {
@@ -87,7 +88,9 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const revokeAudioUrl = (messageId: string) => {
     const cached = audioUrls.value.get(messageId);
     if (cached) {
-      URL.revokeObjectURL(cached.url);
+      if (cached.length !== -1) {
+        URL.revokeObjectURL(cached.url);
+      }
       audioUrls.value.delete(messageId);
     }
   };
@@ -103,11 +106,14 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     if (!state?.hasData) {
       return null;
     }
+    const cached = audioUrls.value.get(messageId);
+    if (cached && cached.length === -1) {
+      return cached.url;
+    }
     const buffer = audioBuffers.value.get(messageId);
     if (!buffer || buffer.length === 0) {
-      return null;
+      return cached?.length === -1 ? cached.url : null;
     }
-    const cached = audioUrls.value.get(messageId);
     if (cached && cached.length === buffer.length) {
       return cached.url;
     }
@@ -116,6 +122,26 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     const url = URL.createObjectURL(blob);
     audioUrls.value.set(messageId, { url, length: buffer.length });
     return url;
+  };
+
+  const setAudioPathForMessage = (messageId: string, audioPath: string | null) => {
+    revokeAudioUrl(messageId);
+    audioBuffers.value.delete(messageId);
+
+    const state = ensureAudioState(messageId);
+    if (!audioPath) {
+      state.isStreaming = false;
+      state.hasData = false;
+      state.streamComplete = false;
+      state.errorMessage = null;
+      return;
+    }
+
+    state.isStreaming = false;
+    state.hasData = true;
+    state.streamComplete = true;
+    state.errorMessage = null;
+    audioUrls.value.set(messageId, { url: convertFileSrc(audioPath), length: -1 });
   };
 
   const addSpeaker = (payload: StreamingSpeakerInput): StreamingSpeakerConfig => {
@@ -309,9 +335,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     } finally {
       activeTaskId.value = null;
       messages.value = messages.value.map(m => (m.status === 'streaming' ? { ...m, status: 'error' } : m));
-      for (const message of messages.value) {
-        clearAudioForMessage(message.id);
-      }
     }
   };
 
@@ -327,6 +350,66 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     activeTaskId.value = null;
   };
 
+  const restoreFromReplaySnapshot = (snapshot: StreamingReplaySnapshot) => {
+    for (const message of messages.value) {
+      clearAudioForMessage(message.id);
+    }
+
+    speakers.value = snapshot.speakers.map(speaker => ({
+      id: nextSpeakerId(),
+      category: speaker.category ?? 'voice-clone',
+      speakerDirName: speaker.speakerDirName,
+      name: speaker.name,
+      baseModel: speaker.baseModel,
+      modelVersion: speaker.modelVersion,
+      refAudioPath: speaker.refAudioPath,
+      refAudioName: speaker.refAudioName,
+      refText: speaker.refText,
+      description: speaker.description
+    }));
+
+    setSessionConfig({
+      baseModel: snapshot.baseModel,
+      modelVersion: snapshot.modelVersion,
+      device: snapshot.device,
+      language: snapshot.language,
+      modelParams: snapshot.modelParams ?? {}
+    });
+
+    messages.value = [];
+    for (const entry of snapshot.messages) {
+      const assistantMessageId = entry.messageId ?? entry.contextId;
+      const matchedSpeaker = speakers.value.find(speaker => speaker.name === entry.speakerName) ?? null;
+
+      const userMessage: StreamingChatMessage = {
+        id: nextMessageId(),
+        role: 'user',
+        text: entry.text,
+        synthText: entry.text,
+        speakerId: matchedSpeaker?.id ?? null,
+        speakerName: entry.speakerName,
+        taskId: snapshot.taskId,
+        contextId: `${assistantMessageId}-user`,
+        status: 'completed'
+      };
+      const assistantMessage: StreamingChatMessage = {
+        id: assistantMessageId,
+        role: 'assistant',
+        text: '',
+        synthText: entry.text,
+        speakerId: matchedSpeaker?.id ?? null,
+        speakerName: entry.speakerName,
+        taskId: snapshot.taskId,
+        contextId: assistantMessageId,
+        audioPath: entry.audioPath,
+        status: 'completed'
+      };
+
+      messages.value.push(userMessage, assistantMessage);
+      setAudioPathForMessage(assistantMessageId, entry.audioPath ?? null);
+    }
+  };
+
   return {
     speakers,
     messages,
@@ -337,6 +420,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     audioStates,
     speakerOptions,
     getSpeaker,
+    getMessage,
     addSpeaker,
     updateSpeaker,
     removeSpeaker,
@@ -344,11 +428,13 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     closeDrawer,
     toggleDrawer,
     setSessionConfig,
+    restoreFromReplaySnapshot,
     startSession,
     sendMessage,
     terminateSession,
     updateMessageStatus,
     clearMessages,
-    getAudioUrl
+    getAudioUrl,
+    setAudioPathForMessage
   };
 });
