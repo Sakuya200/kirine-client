@@ -41,6 +41,7 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
+import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -129,8 +130,14 @@ const router = useRouter();
 let importedSampleIdSeed = Date.now();
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
+// 单次刷新开始时间 + 代际令牌：用于检测被系统睡眠冻结的 invoke 并防止其晚到的
+// finally 错误清掉新一次刷新的占用标志。见 refreshActiveTaskStatus。
+let activeTaskRefreshStartedAt = 0;
+let activeTaskRefreshGeneration = 0;
 let isHistoryRefreshInFlight = false;
 let skipHistoryTaskSelectionReload = false;
+// 单次状态刷新被允许挂起的最长时间：超过即视为被系统睡眠冻结，重置占用标志恢复轮询。
+const ACTIVE_TASK_REFRESH_STALE_MS = 15_000;
 
 const trainingChecklist = [
   '准备最少 1 条音频样本与对应文本稿，作为微调数据输入，建议 24kHz 以上质量。',
@@ -660,10 +667,19 @@ const refreshActiveTaskStatus = async () => {
   }
 
   if (isActiveTaskRefreshInFlight) {
-    return;
+    // 系统睡眠 / 锁屏会使正在 await 的 invoke 被冻结，占用标志长期为 true，
+    // 唤醒后所有 tick 都被这里拦截 → 状态不再更新。超过阈值视为被冻结卡死，
+    // 重置占用标志以恢复轮询（代际令牌保证旧 invoke 晚到时不会错误复位）。
+    if (activeTaskRefreshStartedAt && Date.now() - activeTaskRefreshStartedAt > ACTIVE_TASK_REFRESH_STALE_MS) {
+      isActiveTaskRefreshInFlight = false;
+    } else {
+      return;
+    }
   }
 
   isActiveTaskRefreshInFlight = true;
+  activeTaskRefreshStartedAt = Date.now();
+  const generation = ++activeTaskRefreshGeneration;
   const currentTaskId = activeTrainingTask.value.taskId;
   const previousStatus = activeTrainingTask.value.status;
 
@@ -694,7 +710,10 @@ const refreshActiveTaskStatus = async () => {
   } catch (error) {
     console.log(formatErrorMessage('刷新模型微调任务状态失败，请检查 Rust 后端日志', error));
   } finally {
-    isActiveTaskRefreshInFlight = false;
+    if (generation === activeTaskRefreshGeneration) {
+      isActiveTaskRefreshInFlight = false;
+      activeTaskRefreshStartedAt = 0;
+    }
   }
 };
 
@@ -820,6 +839,11 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopActiveTaskStatusRefresh();
+});
+
+// 解除锁屏 / 唤醒后立即补一次刷新，避免 setInterval 被节流期间状态停滞。
+usePollingResume(() => {
+  void refreshActiveTaskStatus();
 });
 </script>
 

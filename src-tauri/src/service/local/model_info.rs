@@ -35,6 +35,45 @@ use crate::{
 };
 
 impl LocalService {
+    pub(crate) async fn ensure_model_current_device_resolved_impl(
+        &self,
+        base_model: &str,
+        model_version: &str,
+    ) -> Result<Option<HardwareType>> {
+        let Some(row) = self
+            .find_model_info_row(base_model.trim(), model_version.trim())
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let supported_devices: Vec<HardwareType> = serde_json::from_str(&row.supported_devices)?;
+        if let Some(current_device) = row
+            .current_device
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .and_then(|value| value.parse::<HardwareType>().ok())
+            .filter(|device| supported_devices.contains(device))
+        {
+            return Ok(Some(current_device));
+        }
+
+        let detected = self
+            .get_device_type_impl(base_model.trim(), model_version.trim())
+            .await?;
+        if !supported_devices.contains(&detected) {
+            return Ok(None);
+        }
+
+        let mut active_model: model_info_entity::ActiveModel = row.into();
+        active_model.current_device = Set(Some(detected.as_str().to_string()));
+        active_model.modify_time = Set(now_string()?);
+        active_model.update(self.orm()).await?;
+
+        Ok(Some(detected))
+    }
+
     pub(crate) async fn list_model_infos_impl(
         &self,
         request: PageRequest<ModelFilter>,
@@ -42,8 +81,8 @@ impl LocalService {
         let page = request.page.max(1);
         let page_size = request.page_size.max(1);
 
-        let mut query = model_info_entity::Entity::find()
-            .filter(model_info_entity::Column::Deleted.eq(0));
+        let mut query =
+            model_info_entity::Entity::find().filter(model_info_entity::Column::Deleted.eq(0));
 
         if let Some(filter) = &request.filter {
             if let Some(keyword) = filter
@@ -66,9 +105,8 @@ impl LocalService {
             if let Some(feature) = filter.feature {
                 // supported_feature_list_json 存储 JSON 数组，按功能标识子串匹配
                 let pattern = format!("%\"{}\"%", feature.as_str());
-                query = query.filter(
-                    model_info_entity::Column::SupportedFeatureListJson.like(&pattern),
-                );
+                query = query
+                    .filter(model_info_entity::Column::SupportedFeatureListJson.like(&pattern));
             }
         }
 
@@ -236,6 +274,31 @@ impl LocalService {
             removed_paths: Vec::new(),
             preserved_paths: Vec::new(),
         })
+    }
+
+    pub(crate) async fn set_model_current_device_impl(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        let row = self.find_model_info_row_by_id(model_id).await?;
+        let model_info = map_model_info(row.clone())?;
+        if !model_info.supported_devices.contains(&device) {
+            bail!(
+                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                model_info.model_name,
+                model_info.model_version,
+                device,
+                model_info.supported_devices
+            );
+        }
+
+        let mut active_model: model_info_entity::ActiveModel = row.into();
+        active_model.current_device = Set(Some(device.as_str().to_string()));
+        active_model.modify_time = Set(now_string()?);
+        active_model.update(self.orm()).await?;
+
+        self.get_model_info_impl(model_id).await
     }
 
     pub(crate) async fn get_device_type_impl(
@@ -420,6 +483,7 @@ fn map_model_info(row: model_info_entity::Model) -> Result<ModelInfo> {
         required_model_repo_id_list: parse_json_field(&row.required_model_repo_id_list_json)?,
         supported_feature_list: parse_json_field::<Vec<String>>(&row.supported_feature_list_json)?,
         supported_devices: parse_json_field::<Vec<HardwareType>>(&row.supported_devices)?,
+        current_device: parse_current_device(row.current_device.as_deref()),
         supported_languages: parse_json_field::<Vec<AppLanguage>>(&row.supported_languages)?,
         downloaded: row.downloaded,
         create_time: row.create_time,
@@ -435,6 +499,15 @@ where
         let normalized = value.replace(r#"\""#, r#"""#);
         serde_json::from_str(&normalized).map_err(|_| first_err.into())
     })
+}
+
+/// 解析 model_info.current_device：None / 空串 / 非法值统一归一为 None，
+/// 合法 "cpu" / "cuda" / "cuda:0" 解析为对应 HardwareType。
+fn parse_current_device(value: Option<&str>) -> Option<HardwareType> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<HardwareType>().ok())
 }
 
 fn parse_detected_device_type(output: &str) -> Option<HardwareType> {

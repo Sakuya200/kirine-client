@@ -8,9 +8,7 @@ use std::{
 use tracing::{error, info};
 
 use crate::{
-    config::{
-        resolve_base_log_dir, AttentionImplementation, StorageMode, ROOT_RELATIVE_PATHS,
-    },
+    config::{resolve_base_log_dir, AttentionImplementation, StorageMode, ROOT_RELATIVE_PATHS},
     Result,
 };
 

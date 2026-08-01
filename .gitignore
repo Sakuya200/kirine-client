@@ -27,5 +27,10 @@ data
 models
 resources
 
+**/ffmpeg-8.1.2
+
 # Conda environments
 **/conda_env
+
+# Claude superpowers (local-only plans/specs)
+docs/superpowers/

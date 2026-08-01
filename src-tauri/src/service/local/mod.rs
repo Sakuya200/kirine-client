@@ -3,6 +3,7 @@ pub(crate) mod entity;
 mod history;
 mod model_info;
 mod speaker;
+mod streaming;
 mod supported_models;
 mod training;
 mod tts;
@@ -26,24 +27,21 @@ use tracing::{info, warn};
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
-        load_ui_configs, resolve_storage_dir, BaseModel, EnvConfig, HardwareType, UiComponentType,
+        load_ui_configs, resolve_storage_dir, EnvConfig, HardwareType, UiComponentType,
         UiConfigCatalog,
     },
     migration,
     service::{
         models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
+            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
+            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
             HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
             ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
+            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeechTaskResult,
             TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
-            VoiceDesignTaskResult,
-        },
-        pipeline::{
-            resolve_model_task_pipeline, TrainingPipelineRequest, TtsPipelineRequest,
-            VoiceClonePipelineRequest, VoiceDesignPipelineRequest,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -55,6 +53,7 @@ struct ActiveTaskControl {
     task_type: HistoryTaskType,
     cancel_tx: watch::Sender<bool>,
     _cancel_rx_guard: watch::Receiver<bool>,
+    streaming_extra: Option<Arc<crate::service::pipeline::streaming::StreamingSessionExtra>>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,10 +111,7 @@ impl Service for LocalService {
         self.delete_speaker_info_impl(speaker_id).await
     }
 
-    async fn list_model_infos(
-        &self,
-        request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>> {
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
         self.list_model_infos_impl(request).await
     }
 
@@ -135,6 +131,14 @@ impl Service for LocalService {
         self.uninstall_model_impl(model_id).await
     }
 
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        self.set_model_current_device_impl(model_id, device).await
+    }
+
     async fn list_history_records(
         &self,
         request: PageRequest<HistoryFilter>,
@@ -146,16 +150,19 @@ impl Service for LocalService {
         self.get_history_record_impl(history_id).await
     }
 
-    async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset> {
-        self.read_text_to_speech_audio_impl(history_id).await
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        self.read_generated_audio_impl(source).await
     }
 
-    async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset> {
-        self.read_voice_clone_audio_impl(history_id).await
-    }
-
-    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset> {
-        self.read_voice_design_audio_impl(history_id).await
+    async fn save_generated_audio_as(
+        &self,
+        source: crate::service::models::GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool> {
+        self.save_generated_audio_as_impl(source, &app).await
     }
 
     async fn delete_history_record(
@@ -200,6 +207,32 @@ impl Service for LocalService {
         payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult> {
         self.create_voice_design_task_impl(payload).await
+    }
+
+    async fn create_streaming_speech_task(
+        &self,
+        payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult> {
+        self.create_streaming_speech_task_impl(payload).await
+    }
+
+    async fn send_streaming_message(
+        &self,
+        payload: SendStreamingMessagePayload,
+        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()> {
+        self.send_streaming_message_impl(payload, on_event).await
+    }
+
+    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool> {
+        self.cancel_streaming_task_impl(task_id).await
+    }
+
+    async fn get_streaming_replay_snapshot(
+        &self,
+        history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        self.get_streaming_replay_snapshot_impl(history_id).await
     }
 }
 
@@ -251,141 +284,6 @@ impl LocalService {
         Ok(service)
     }
 
-    pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::TextToSpeech,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_tts_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    TtsPipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local tts pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_voice_clone_inference(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::VoiceClone,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_voice_clone_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    VoiceClonePipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local voice clone pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_training(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-        speaker_id: i64,
-        speaker_name: &str,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let speaker_name = speaker_name.to_string();
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::ModelTraining,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_training_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    TrainingPipelineRequest {
-                        task_id,
-                        speaker_id,
-                        speaker_name,
-                    },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local training pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn start_voice_design_inference(
-        &self,
-        base_model: BaseModel,
-        task_id: i64,
-    ) -> Result<()> {
-        let service = self.clone();
-        let pipeline = resolve_model_task_pipeline(&base_model)?;
-        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
-        self.register_active_task_control(
-            task_id,
-            HistoryTaskType::VoiceDesign,
-            cancel_tx,
-            cancel_rx_guard,
-        );
-
-        tauri::async_runtime::spawn(async move {
-            let result = pipeline
-                .run_voice_design_pipeline(
-                    base_model.to_string(),
-                    &service,
-                    VoiceDesignPipelineRequest { task_id },
-                )
-                .await;
-            service.unregister_active_task_control(task_id);
-
-            if let Err(err) = result {
-                tracing::error!(error = %err, "local voice design pipeline failed");
-            }
-        });
-
-        Ok(())
-    }
-
     pub(crate) fn app_dir(&self) -> &Path {
         &self.app_dir
     }
@@ -432,6 +330,7 @@ impl LocalService {
                     task_type,
                     cancel_tx,
                     _cancel_rx_guard: cancel_rx_guard,
+                    streaming_extra: None,
                 },
             );
         }
@@ -510,6 +409,11 @@ impl LocalService {
                     e
                 )
             })?;
+
+        // 清扫上次应用退出后残留的流式会话 Running 行（长生命周期任务，进程随应用退出而终止）
+        if let Err(err) = streaming::sweep_stale_streaming_sessions_on_orm(orm).await {
+            tracing::warn!(error = %err, "failed to sweep stale streaming sessions during init");
+        }
 
         Ok(())
     }

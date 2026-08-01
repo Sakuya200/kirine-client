@@ -5,12 +5,15 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
     TransactionTrait,
 };
+use tokio::sync::watch;
+use tracing::warn;
 
 use crate::{
     common::{
         local_paths::{ensure_child_dir, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::BaseModel,
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -20,6 +23,7 @@ use crate::{
             CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
             TextToSpeechTaskResult,
         },
+        pipeline::{resolve_model_task_pipeline, TtsPipelineRequest},
         LocalService,
     },
     utils::time::now_string,
@@ -35,6 +39,12 @@ impl LocalService {
         let base_model = payload.base_model.trim().to_string();
         let speaker_id = payload.speaker_id;
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before tts task");
+        }
         let device = payload.device;
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
@@ -62,7 +72,7 @@ impl LocalService {
                     "未找到与当前基础模型匹配的可用说话人",
                 )
             })?;
-            speaker.name.clone()
+            speaker.speaker_name.clone()
         } else {
             "自动选择".to_string()
         };
@@ -153,5 +163,34 @@ impl LocalService {
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,
         })
+    }
+
+    pub(crate) fn start_tts_inference(&self, base_model: BaseModel, task_id: i64) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::TextToSpeech,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_tts_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    TtsPipelineRequest { task_id },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local tts pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

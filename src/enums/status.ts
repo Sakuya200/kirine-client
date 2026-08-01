@@ -28,6 +28,12 @@ export const STATUS_STYLES: Record<TaskStatus, string> = {
   [TaskStatus.Failed]: 'border-rose-300 bg-rose-50 text-rose-700'
 };
 
+export enum ModelInstallStatus {
+  Installed = 'installed',
+  NotInstalled = 'not-installed',
+  Failed = 'failed'
+}
+
 export const SPEAKER_STATUS_TEXT: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Ready]: '可用',
   [SpeakerStatus.Training]: '训练中',
@@ -38,4 +44,16 @@ export const SPEAKER_STATUS_STYLES: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Ready]: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   [SpeakerStatus.Training]: 'border-amber-200 bg-amber-50 text-amber-700',
   [SpeakerStatus.Disabled]: 'border-slate-200 bg-slate-100 text-slate-600'
+};
+
+export const MODEL_INSTALL_STATUS_TEXT: Record<ModelInstallStatus, string> = {
+  [ModelInstallStatus.Installed]: '已安装',
+  [ModelInstallStatus.NotInstalled]: '未安装',
+  [ModelInstallStatus.Failed]: '安装失败'
+};
+
+export const MODEL_INSTALL_STATUS_STYLES: Record<ModelInstallStatus, string> = {
+  [ModelInstallStatus.Installed]: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  [ModelInstallStatus.NotInstalled]: 'border-stone-200 bg-stone-100 text-stone-600',
+  [ModelInstallStatus.Failed]: 'border-rose-300 bg-rose-50 text-rose-700'
 };

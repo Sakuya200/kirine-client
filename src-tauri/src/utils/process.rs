@@ -2,11 +2,12 @@ use std::{fs::OpenOptions, io::Write, path::Path, process::Stdio};
 
 use anyhow::{bail, Context};
 use tokio::{
-    process::Command,
+    io::AsyncReadExt,
+    process::{Child, Command},
     sync::watch,
     time::{timeout, Duration},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::utils::file_ops::ensure_parent_dir;
 use crate::Result;
@@ -27,6 +28,24 @@ pub enum LoggedCommandResult {
 }
 
 fn prepare_command(program: &Path, args: &[String], current_dir: &Path) -> Command {
+    prepare_command_with_stdio(
+        program,
+        args,
+        current_dir,
+        Stdio::null(),
+        Stdio::piped(),
+        Stdio::piped(),
+    )
+}
+
+fn prepare_command_with_stdio(
+    program: &Path,
+    args: &[String],
+    current_dir: &Path,
+    stdin: Stdio,
+    stdout: Stdio,
+    stderr: Stdio,
+) -> Command {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -36,9 +55,9 @@ fn prepare_command(program: &Path, args: &[String], current_dir: &Path) -> Comma
         .env("PYTHONLEGACYWINDOWSSTDIO", "0")
         .env("PYTHONFAULTHANDLER", "1")
         .env("PYTHONUNBUFFERED", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(stderr);
 
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -157,10 +176,16 @@ fn initialize_task_log(task_log_path: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-fn append_process_output(task_log_path: &Path, stdout: &[u8], stderr: &[u8]) -> crate::Result<()> {
+pub fn append_process_output(
+    task_log_path: &Path,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> crate::Result<()> {
     if stdout.is_empty() && stderr.is_empty() {
         return Ok(());
     }
+
+    ensure_parent_dir(task_log_path, "task log")?;
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -174,24 +199,140 @@ fn append_process_output(task_log_path: &Path, stdout: &[u8], stderr: &[u8]) -> 
         })?;
 
     if !stdout.is_empty() {
+        file.write_all(b"[stdout]\n")?;
         file.write_all(stdout).with_context(|| {
             format!(
                 "failed to write subprocess stdout into task log file: {}",
                 task_log_path.display()
             )
         })?;
+        if !stdout.ends_with(b"\n") {
+            file.write_all(b"\n")?;
+        }
     }
 
     if !stderr.is_empty() {
+        file.write_all(b"[stderr]\n")?;
         file.write_all(stderr).with_context(|| {
             format!(
                 "failed to write subprocess stderr into task log file: {}",
                 task_log_path.display()
             )
         })?;
+        if !stderr.ends_with(b"\n") {
+            file.write_all(b"\n")?;
+        }
     }
 
     Ok(())
+}
+
+pub fn append_task_log_text(task_log_path: &Path, text: &str) -> crate::Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    ensure_parent_dir(task_log_path, "task log")?;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(task_log_path)
+        .with_context(|| {
+            format!(
+                "failed to append task log text into file: {}",
+                task_log_path.display()
+            )
+        })?;
+
+    file.write_all(text.as_bytes())?;
+    if !text.ends_with('\n') {
+        file.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+async fn append_stream_to_task_log<R>(mut stream: R, task_log_path: &Path) -> crate::Result<()>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut buffer).await?;
+        if n == 0 {
+            break;
+        }
+        append_process_output(task_log_path, &[], &buffer[..n])?;
+    }
+    Ok(())
+}
+
+async fn append_stream_to_task_log_stdout<R>(
+    mut stream: R,
+    task_log_path: &Path,
+) -> crate::Result<()>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut buffer).await?;
+        if n == 0 {
+            break;
+        }
+        append_process_output(task_log_path, &buffer[..n], &[])?;
+    }
+    Ok(())
+}
+
+pub async fn spawn_logged_child_with_stderr(
+    program: &Path,
+    args: &[String],
+    current_dir: &Path,
+    label: &str,
+    task_log_path: &Path,
+) -> crate::Result<(Child, Vec<tokio::task::JoinHandle<()>>)> {
+    initialize_task_log(task_log_path)?;
+
+    let mut child = prepare_command_with_stdio(
+        program,
+        args,
+        current_dir,
+        Stdio::null(),
+        Stdio::piped(),
+        Stdio::piped(),
+    )
+    .spawn()
+    .with_context(|| {
+        format!(
+            "failed to spawn `{}` with program {} in {}",
+            label,
+            program.display(),
+            current_dir.display()
+        )
+    })?;
+
+    let mut stream_tasks = Vec::new();
+
+    if let Some(stdout) = child.stdout.take() {
+        let log_path = task_log_path.to_path_buf();
+        stream_tasks.push(tokio::spawn(async move {
+            if let Err(err) = append_stream_to_task_log_stdout(stdout, &log_path).await {
+                warn!(error = %err, log_path = %log_path.display(), "failed to capture child stdout into task log");
+            }
+        }));
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let log_path = task_log_path.to_path_buf();
+        stream_tasks.push(tokio::spawn(async move {
+            if let Err(err) = append_stream_to_task_log(stderr, &log_path).await {
+                warn!(error = %err, log_path = %log_path.display(), "failed to capture child stderr into task log");
+            }
+        }));
+    }
+
+    Ok((child, stream_tasks))
 }
 
 #[cfg(unix)]
@@ -250,7 +391,7 @@ fn request_process_termination(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     let status = std::process::Command::new("kill")
         .args(["-KILL", &process_id.to_string()])
         .status()?;
@@ -265,7 +406,7 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     let _ = process_id;
     Err(std::io::Error::other(
         "forceful process termination is not implemented on this platform",
@@ -273,7 +414,7 @@ fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
+pub(crate) fn force_terminate_process(process_id: u32) -> std::io::Result<()> {
     if terminate_process_tree_windows(process_id, true).is_ok() {
         return Ok(());
     }

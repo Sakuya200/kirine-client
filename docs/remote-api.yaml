@@ -1,0 +1,890 @@
+openapi: 3.0.3
+info:
+  title: Kirine Client 远端 API
+  version: 0.12.0
+  description: |
+    Kirine Client 远端存储模式（`RemoteService`）经由 `client::ApiClient` 调用的 HTTP 接口契约。
+    与 `Service` trait 的 21 个业务方法一一对应；字段命名遵循 `camelCase`
+    （Rust 层 `#[serde(rename_all = "camelCase")]`），与前端 `src/types/domain.ts` 对齐。
+
+    统一响应信封 `CommonResponse<T>`：`{ code, data, message }`，`code=200` 表示成功。
+    分页请求统一 `PageRequest`（GET 作为 query 参数），分页响应统一 `PageResponse<T>`
+    （说话人列表使用带统计字段的 `SpeakerPageResponse`）。
+
+    鉴权：`Authorization: Bearer <api_token>`（`api_token` 取自 `config.toml [remote].api_token`，为空时不携带）。
+servers:
+  - url: https://api.example.com
+    description: 远端服务地址，对应 config.toml [remote].api_url（接口路径已含 /api 前缀）
+security:
+  - BearerAuth: []
+tags:
+  - name: Speaker
+    description: 说话人管理
+  - name: Model
+    description: 模型管理
+  - name: History
+    description: 历史任务
+
+paths:
+  # ================================ Speaker ================================
+  /api/speakers:
+    post:
+      tags: [Speaker]
+      operationId: createSpeakerInfo
+      summary: 创建说话人
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSpeakerPayload' }
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SpeakerInfo', nullable: true }
+    get:
+      tags: [Speaker]
+      operationId: listSpeakerInfos
+      summary: 分页查询说话人
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema: { type: string }
+          description: 名称关键词
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/SpeakerStatus' }
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SpeakerPageResponse', nullable: true }
+
+  /api/speakers/import:
+    post:
+      tags: [Speaker]
+      operationId: importModelAsSpeaker
+      summary: 导入模型为说话人
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportModelAsSpeakerPayload' }
+      responses:
+        '200':
+          description: 导入成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SpeakerInfo', nullable: true }
+
+  /api/speakers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    put:
+      tags: [Speaker]
+      operationId: updateSpeakerInfo
+      summary: 更新说话人
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSpeakerPayload' }
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SpeakerInfo', nullable: true }
+    delete:
+      tags: [Speaker]
+      operationId: deleteSpeakerInfo
+      summary: 删除说话人
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { type: boolean, nullable: true }
+
+  # ================================= Model =================================
+  /api/models:
+    get:
+      tags: [Model]
+      operationId: listModelInfos
+      summary: 分页查询模型
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: downloaded
+          in: query
+          schema: { type: boolean }
+          description: 是否已下载
+        - name: feature
+          in: query
+          schema: { $ref: '#/components/schemas/HistoryTaskType' }
+          description: 支持的特性（任务类型）筛选
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelInfoPageResponse', nullable: true }
+
+  /api/models/device-type:
+    get:
+      tags: [Model]
+      operationId: getDeviceType
+      summary: 查询设备类型
+      parameters:
+        - name: baseModel
+          in: query
+          required: true
+          schema: { type: string }
+        - name: modelVersion
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 设备类型
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HardwareType', nullable: true }
+
+  /api/models/{id}/install:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags: [Model]
+      operationId: installModel
+      summary: 安装模型
+      parameters:
+        - name: device
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/HardwareType' }
+      responses:
+        '200':
+          description: 安装结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelMutationResult', nullable: true }
+
+  /api/models/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    delete:
+      tags: [Model]
+      operationId: uninstallModel
+      summary: 卸载模型
+      responses:
+        '200':
+          description: 卸载结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelMutationResult', nullable: true }
+
+  # ================================ History ================================
+  /api/history:
+    get:
+      tags: [History]
+      operationId: listHistoryRecords
+      summary: 分页查询历史记录
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: taskType
+          in: query
+          schema: { $ref: '#/components/schemas/HistoryTaskType' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HistoryRecordSummaryPageResponse', nullable: true }
+
+  /api/history/text-to-speech:
+    post:
+      tags: [History]
+      operationId: createTextToSpeechTask
+      summary: 创建文本转语音任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTextToSpeechTaskPayload' }
+      responses:
+        '200':
+          description: 任务创建结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TextToSpeechTaskResult', nullable: true }
+
+  /api/history/model-training:
+    post:
+      tags: [History]
+      operationId: createModelTrainingTask
+      summary: 创建模型训练任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateModelTrainingTaskPayload' }
+      responses:
+        '200':
+          description: 任务创建结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelTrainingTaskResult', nullable: true }
+
+  /api/history/voice-clone:
+    post:
+      tags: [History]
+      operationId: createVoiceCloneTask
+      summary: 创建声音克隆任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVoiceCloneTaskPayload' }
+      responses:
+        '200':
+          description: 任务创建结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VoiceCloneTaskResult', nullable: true }
+
+  /api/history/voice-design:
+    post:
+      tags: [History]
+      operationId: createVoiceDesignTask
+      summary: 创建声音设计任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVoiceDesignTaskPayload' }
+      responses:
+        '200':
+          description: 任务创建结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VoiceDesignTaskResult', nullable: true }
+
+  /api/history/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    get:
+      tags: [History]
+      operationId: getHistoryRecord
+      summary: 查询历史记录详情
+      responses:
+        '200':
+          description: 历史记录详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HistoryRecord', nullable: true }
+    delete:
+      tags: [History]
+      operationId: deleteHistoryRecord
+      summary: 删除历史记录
+      parameters:
+        - name: taskType
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/HistoryTaskType' }
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { type: boolean, nullable: true }
+
+  /api/history/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    put:
+      tags: [History]
+      operationId: updateTaskStatus
+      summary: 更新任务状态（服务端契约接口，非前端钩子触发）
+      description: 由任务执行回写状态使用；路径 `id` 即 `taskId`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTaskStatusPayload' }
+      responses:
+        '200':
+          description: 更新后的历史记录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HistoryRecord', nullable: true }
+
+  /api/history/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags: [History]
+      operationId: cancelHistoryTask
+      summary: 取消历史任务
+      responses:
+        '200':
+          description: 取消结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { type: boolean, nullable: true }
+
+  /api/history/{id}/audio/text-to-speech:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    get:
+      tags: [History]
+      operationId: readTextToSpeechAudio
+      summary: 读取 TTS 音频
+      responses:
+        '200':
+          description: TTS 音频资源
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TextToSpeechAudioAsset', nullable: true }
+
+  /api/history/{id}/audio/voice-clone:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    get:
+      tags: [History]
+      operationId: readVoiceCloneAudio
+      summary: 读取声音克隆音频
+      responses:
+        '200':
+          description: 声音克隆音频资源
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VoiceCloneAudioAsset', nullable: true }
+
+  /api/history/{id}/audio/voice-design:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    get:
+      tags: [History]
+      operationId: readVoiceDesignAudio
+      summary: 读取声音设计音频
+      responses:
+        '200':
+          description: 声音设计音频资源
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/VoiceDesignAudioAsset', nullable: true }
+
+components:
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSizeParam:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, default: 10 }
+    IdParam:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Authorization: Bearer <api_token>'
+
+  schemas:
+    # ---------------- 公共 ----------------
+    CommonResponse:
+      type: object
+      description: 统一响应信封（data 由各接口具体定义）
+      properties:
+        code:
+          type: integer
+          description: 状态码，200 表示成功
+        message:
+          type: string
+          nullable: true
+      required: [code]
+
+    # ---------------- 枚举 ----------------
+    AppLanguage:
+      type: string
+      enum: [chinese, english, japanese, korean]
+      description: 语言（前端别名 zh-CN/en-US/ja-JP/ko-KR）
+    TextToSpeechFormat:
+      type: string
+      enum: [wav, mp3, flac]
+    HistoryTaskType:
+      type: string
+      enum: [model-training, text-to-speech, voice-clone, voice-design]
+    TaskStatus:
+      type: string
+      enum: [pending, running, completed, cancelled, failed]
+    SpeakerStatus:
+      type: string
+      enum: [ready, training, disabled]
+    SpeakerSource:
+      type: string
+      enum: [local, preset, remote]
+    ModelDownloadType:
+      type: string
+      enum: [HF-Like, Custom]
+    ModelTrainingSampleType:
+      type: string
+      enum: [single, dataset]
+    ModelTrainingFileKind:
+      type: string
+      enum: [audio, archive, annotation]
+    HardwareType:
+      type: string
+      enum: [cpu, cuda]
+    BaseModel:
+      type: string
+      description: 基础模型标识（如 qwen3_tts、irodori_tts_v3）
+
+    # ---------------- 分页响应 ----------------
+    ModelInfoPageResponse:
+      type: object
+      description: 通用分页响应（PageResponse<ModelInfo>）
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ModelInfo' } }
+        total: { type: integer, format: int64 }
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalPages: { type: integer }
+      required: [items, total, page, pageSize, totalPages]
+    HistoryRecordSummaryPageResponse:
+      type: object
+      description: 通用分页响应（PageResponse<HistoryRecordSummary>）
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/HistoryRecordSummary' } }
+        total: { type: integer, format: int64 }
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalPages: { type: integer }
+      required: [items, total, page, pageSize, totalPages]
+    SpeakerPageResponse:
+      type: object
+      description: 说话人分页响应（附带统计）
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SpeakerInfo' } }
+        total: { type: integer, format: int64 }
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalPages: { type: integer }
+        readyCount: { type: integer, format: int64 }
+        trainingCount: { type: integer, format: int64 }
+        disabledCount: { type: integer, format: int64 }
+        totalSamples: { type: integer, format: int64 }
+      required: [items, total, page, pageSize, totalPages, readyCount, trainingCount, disabledCount, totalSamples]
+
+    # ---------------- Speaker ----------------
+    SpeakerInfo:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        speakerName: { type: string }
+        samples: { type: integer }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        createTime: { type: string }
+        modifyTime: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/SpeakerStatus' }
+        source: { $ref: '#/components/schemas/SpeakerSource' }
+      required: [id, speakerName, samples, baseModel, createTime, modifyTime, description, status, source]
+    CreateSpeakerPayload:
+      type: object
+      properties:
+        speakerName: { type: string }
+        samples: { type: integer }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/SpeakerStatus' }
+        source: { $ref: '#/components/schemas/SpeakerSource' }
+      required: [speakerName, samples, baseModel, description, status, source]
+    UpdateSpeakerPayload:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        speakerName: { type: string }
+        description: { type: string }
+      required: [id, speakerName, description]
+    ImportModelAsSpeakerPayload:
+      type: object
+      properties:
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        sourceModelDirPath: { type: string }
+        speakerName: { type: string }
+        description: { type: string }
+      required: [baseModel, modelVersion, sourceModelDirPath, speakerName, description]
+
+    # ---------------- Model ----------------
+    ModelInfo:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelName: { type: string }
+        modelVersion: { type: string }
+        downloadType: { $ref: '#/components/schemas/ModelDownloadType' }
+        requiredModelNameList: { type: array, items: { type: string } }
+        requiredModelRepoIdList: { type: array, items: { type: string } }
+        supportedFeatureList: { type: array, items: { type: string } }
+        supportedDevices: { type: array, items: { $ref: '#/components/schemas/HardwareType' } }
+        supportedLanguages: { type: array, items: { $ref: '#/components/schemas/AppLanguage' } }
+        downloaded: { type: boolean }
+        createTime: { type: string }
+        modifyTime: { type: string }
+      required: [id, baseModel, modelName, modelVersion, downloadType, requiredModelNameList, requiredModelRepoIdList, supportedFeatureList, supportedDevices, supportedLanguages, downloaded, createTime, modifyTime]
+    ModelMutationResult:
+      type: object
+      properties:
+        model: { $ref: '#/components/schemas/ModelInfo' }
+        removedPaths: { type: array, items: { type: string } }
+        preservedPaths: { type: array, items: { type: string } }
+      required: [model, removedPaths, preservedPaths]
+
+    # ---------------- 训练样本 ----------------
+    ModelTrainingFileInput:
+      type: object
+      properties:
+        fileName: { type: string }
+        fileKind: { $ref: '#/components/schemas/ModelTrainingFileKind' }
+        filePath: { type: string }
+      required: [fileName, fileKind, filePath]
+    ModelTrainingSampleInput:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        sampleType: { $ref: '#/components/schemas/ModelTrainingSampleType' }
+        title: { type: string }
+        detail: { type: string }
+        transcriptPreview: { type: string, nullable: true }
+        primaryFile: { $ref: '#/components/schemas/ModelTrainingFileInput' }
+        secondaryFile: { $ref: '#/components/schemas/ModelTrainingFileInput', nullable: true }
+      required: [id, sampleType, title, detail, primaryFile]
+
+    # ---------------- History ----------------
+    HistoryRecordSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        taskType: { $ref: '#/components/schemas/HistoryTaskType' }
+        title: { type: string }
+        speaker: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        durationSeconds: { type: integer, format: int64 }
+        device: { $ref: '#/components/schemas/HardwareType' }
+        createTime: { type: string }
+        modifyTime: { type: string }
+      required: [id, taskType, title, speaker, status, durationSeconds, device, createTime, modifyTime]
+    HistoryRecord:
+      type: object
+      description: 历史记录详情（HistoryRecordSummary 全部字段 + taskLog + detail）
+      allOf:
+        - $ref: '#/components/schemas/HistoryRecordSummary'
+        - type: object
+          properties:
+            taskLog: { type: string, nullable: true }
+            detail:
+              type: object
+              nullable: true
+              additionalProperties: true
+              description: 任务详情，结构依 taskType 而定（ModelTraining/TextToSpeech/VoiceClone/VoiceDesign TaskDetail）
+    UpdateTaskStatusPayload:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        durationSeconds: { type: integer, format: int64, nullable: true }
+      required: [taskId, status]
+
+    # ---------------- 任务创建 Payload ----------------
+    CreateTextToSpeechTaskPayload:
+      type: object
+      properties:
+        speakerId: { type: integer, format: int64, nullable: true }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        device: { $ref: '#/components/schemas/HardwareType' }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+      required: [baseModel, modelVersion, language, format, exportAudioName, device, text, modelParams]
+    CreateModelTrainingTaskPayload:
+      type: object
+      properties:
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        speakerName: { type: string }
+        description: { type: string }
+        device: { $ref: '#/components/schemas/HardwareType' }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+        samples: { type: array, items: { $ref: '#/components/schemas/ModelTrainingSampleInput' } }
+      required: [language, baseModel, modelVersion, speakerName, description, device, modelParams, samples]
+    CreateVoiceCloneTaskPayload:
+      type: object
+      properties:
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        device: { $ref: '#/components/schemas/HardwareType' }
+        refAudioName: { type: string }
+        refAudioPath: { type: string }
+        refText: { type: string }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+      required: [baseModel, modelVersion, language, format, exportAudioName, device, refAudioName, refAudioPath, refText, text, modelParams]
+    CreateVoiceDesignTaskPayload:
+      type: object
+      properties:
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        device: { $ref: '#/components/schemas/HardwareType' }
+        prompt: { type: string }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+      required: [baseModel, modelVersion, language, format, exportAudioName, device, prompt, text, modelParams]
+
+    # ---------------- 任务结果 ----------------
+    TextToSpeechTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        speakerId: { type: integer, format: int64, nullable: true }
+        speakerLabel: { type: string }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        durationSeconds: { type: integer, format: int64 }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+        createdAt: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        outputFilePath: { type: string }
+      required: [taskId, fileName, speakerLabel, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, text, modelParams, createdAt, status, outputFilePath]
+    ModelTrainingTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        speakerName: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+        sampleCount: { type: integer, format: int64 }
+        createTime: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+      required: [taskId, baseModel, modelVersion, speakerName, modelParams, sampleCount, createTime, status]
+    VoiceCloneTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        refAudioName: { type: string }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        durationSeconds: { type: integer, format: int64 }
+        refText: { type: string }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+        createdAt: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        outputFilePath: { type: string }
+      required: [taskId, fileName, refAudioName, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, refText, text, modelParams, createdAt, status, outputFilePath]
+    VoiceDesignTaskResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        baseModel: { $ref: '#/components/schemas/BaseModel' }
+        modelVersion: { type: string }
+        language: { $ref: '#/components/schemas/AppLanguage' }
+        format: { $ref: '#/components/schemas/TextToSpeechFormat' }
+        exportAudioName: { type: string }
+        durationSeconds: { type: integer, format: int64 }
+        prompt: { type: string }
+        text: { type: string }
+        modelParams: { $ref: '#/components/schemas/ModelParams' }
+        createdAt: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        outputFilePath: { type: string }
+      required: [taskId, fileName, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, prompt, text, modelParams, createdAt, status, outputFilePath]
+
+    # ---------------- 音频资源 ----------------
+    TextToSpeechAudioAsset:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        bytes:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 255 }
+          description: 音频字节（serde Vec<u8> 默认序列化为整数数组，非 base64）
+      required: [taskId, fileName, contentType, bytes]
+    VoiceCloneAudioAsset:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        bytes:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 255 }
+      required: [taskId, fileName, contentType, bytes]
+    VoiceDesignAudioAsset:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        bytes:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 255 }
+      required: [taskId, fileName, contentType, bytes]
+
+    # ---------------- 公共子结构 ----------------
+    ModelParams:
+      type: object
+      additionalProperties: true
+      description: 动态模型参数键值对（serde_json::Value）

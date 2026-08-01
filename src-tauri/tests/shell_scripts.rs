@@ -57,7 +57,12 @@ mod windows_scripts {
         let log = temp_log_path("begin-no-base");
         let code = run_ps1(
             &script,
-            &["--script-path", &script.to_string_lossy(), "--task-log-file", &log],
+            &[
+                "--script-path",
+                &script.to_string_lossy(),
+                "--task-log-file",
+                &log,
+            ],
         )
         .await;
         assert_rejected(code);
@@ -67,7 +72,11 @@ mod windows_scripts {
     async fn begin_llm_task_rejects_when_script_path_missing() {
         let script = ps1("begin_llm_task.ps1");
         let log = temp_log_path("begin-no-script");
-        let code = run_ps1(&script, &["--base-model", "qwen3_tts", "--task-log-file", &log]).await;
+        let code = run_ps1(
+            &script,
+            &["--base-model", "qwen3_tts", "--task-log-file", &log],
+        )
+        .await;
         assert_rejected(code);
     }
 
@@ -113,10 +122,8 @@ mod windows_scripts {
         // 使用不存在的 base_model，使脚本在 python 探测阶段即以非零退出（不调用真实 python），
         // 但父目录应已存在。
         let script = ps1("begin_llm_task.ps1");
-        let nested = std::env::temp_dir().join(format!(
-            "kirine-shell-begin-mkdir-{}",
-            std::process::id()
-        ));
+        let nested =
+            std::env::temp_dir().join(format!("kirine-shell-begin-mkdir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&nested);
         let log = nested.join("deep/sub/task.log");
 
@@ -144,7 +151,14 @@ mod windows_scripts {
         // 缺 --format
         let code = run_ps1(
             &script,
-            &["--input-path", "x", "--output-path", "y", "--task-log-file", &log],
+            &[
+                "--input-path",
+                "x",
+                "--output-path",
+                "y",
+                "--task-log-file",
+                &log,
+            ],
         )
         .await;
         assert_rejected(code);
@@ -367,10 +381,7 @@ mod unix_scripts {
 
 fn temp_log_path(label: &str) -> String {
     std::env::temp_dir()
-        .join(format!(
-            "kirine-shell-{label}-{}.log",
-            std::process::id()
-        ))
+        .join(format!("kirine-shell-{label}-{}.log", std::process::id()))
         .to_string_lossy()
         .to_string()
 }

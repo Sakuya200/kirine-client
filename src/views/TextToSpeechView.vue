@@ -18,20 +18,17 @@ import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage, APP_LANGUAGE_LABELS } from '@/enums/language';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
-import {
-  TEXT_TO_SPEECH_FORMATS,
-  TextToSpeechFormat,
-  type TextToSpeechOption,
-  type TextToSpeechSpeakerOption
-} from '@/enums/textToSpeech';
+import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption, type TextToSpeechSpeakerOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
+import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
+import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
 
@@ -83,6 +80,8 @@ interface TextToSpeechAudioAssetPayload {
 }
 
 const DYNAMIC_REFERENCE_BASE_MODELS = new Set(['gpt_sovits_cpufast']);
+// 单次状态刷新被允许挂起的最长时间：超过即视为被系统睡眠冻结，重置占用标志恢复轮询。
+const ACTIVE_TASK_REFRESH_STALE_MS = 15_000;
 const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();
@@ -138,6 +137,10 @@ const trimmedText = computed(() => form.text.trim());
 let isHistoryRefreshInFlight = false;
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
+// 单次刷新开始时间 + 代际令牌：用于检测被系统睡眠冻结的 invoke 并防止其晚到的
+// finally 错误清掉新一次刷新的占用标志。见 refreshActiveTaskStatus。
+let activeTaskRefreshStartedAt = 0;
+let activeTaskRefreshGeneration = 0;
 let skipHistoryTaskSelectionReload = false;
 
 const isDynamicReferenceModel = computed(() => DYNAMIC_REFERENCE_BASE_MODELS.has(form.baseModel));
@@ -174,7 +177,7 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
     .map(speaker => ({
       value: speaker.id,
-      label: speaker.name,
+      label: speaker.speakerName,
       description: speaker.description || '该说话人暂无备注。'
     }))
 ]);
@@ -575,10 +578,19 @@ const refreshActiveTaskStatus = async () => {
   }
 
   if (isActiveTaskRefreshInFlight) {
-    return;
+    // 系统睡眠 / 锁屏会使正在 await 的 invoke 被冻结，占用标志长期为 true，
+    // 唤醒后所有 tick 都被这里拦截 → 状态不再更新。超过阈值视为被冻结卡死，
+    // 重置占用标志以恢复轮询（代际令牌保证旧 invoke 晚到时不会错误复位）。
+    if (activeTaskRefreshStartedAt && Date.now() - activeTaskRefreshStartedAt > ACTIVE_TASK_REFRESH_STALE_MS) {
+      isActiveTaskRefreshInFlight = false;
+    } else {
+      return;
+    }
   }
 
   isActiveTaskRefreshInFlight = true;
+  activeTaskRefreshStartedAt = Date.now();
+  const generation = ++activeTaskRefreshGeneration;
   const currentTaskId = activeResult.value.taskId;
 
   try {
@@ -599,7 +611,10 @@ const refreshActiveTaskStatus = async () => {
   } catch (error) {
     console.log(formatErrorMessage('刷新当前任务状态失败，请检查 Rust 后端日志', error));
   } finally {
-    isActiveTaskRefreshInFlight = false;
+    if (generation === activeTaskRefreshGeneration) {
+      isActiveTaskRefreshInFlight = false;
+      activeTaskRefreshStartedAt = 0;
+    }
   }
 };
 
@@ -728,17 +743,19 @@ const copyTaskId = async () => {
 };
 
 const loadResultAudioAsset = (taskId: number) =>
-  invoke<TextToSpeechAudioAssetPayload>('get_text_to_speech_audio', {
-    historyId: taskId
+  invoke<TextToSpeechAudioAssetPayload>('get_generated_audio', {
+    source: { kind: 'text-to-speech', historyId: taskId }
   });
 
-const saveResultAudio = (taskId: number) =>
-  invoke<boolean>('save_text_to_speech_audio_as', {
-    historyId: taskId
-  });
+const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'text-to-speech', historyId: taskId });
 
 onBeforeUnmount(() => {
   stopActiveTaskStatusRefresh();
+});
+
+// 解除锁屏 / 唤醒后立即补一次刷新，避免 setInterval 被节流期间状态停滞。
+usePollingResume(() => {
+  void refreshActiveTaskStatus();
 });
 
 onMounted(async () => {
@@ -766,12 +783,7 @@ onMounted(async () => {
             :options="speakerOptions"
             placeholder="可选，不指定时自动选择"
           />
-          <BaseListbox
-            v-model="form.language"
-            v-model:selected-option="selectedLanguageOption"
-            label="输出语言"
-            :options="languageOptions"
-          />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
           <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
           <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox

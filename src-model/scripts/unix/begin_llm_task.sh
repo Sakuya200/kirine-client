@@ -110,10 +110,10 @@ append_log "[begin-llm-task] executing script: $SCRIPT_PATH"
 
 # NOTE: --log-path / --task-log-file are intentionally NOT forwarded to the target Python script.
 # They are consumed by this wrapper for its own task-log output (append_log / run_checked above).
-# The params-file entry scripts (voice_clone/tts/training/voice_design across all models) only
-# accept --params-file and would fail with argparse "unrecognized arguments" if these were passed
-# through. Scripts that genuinely need them (e.g. download.py) receive them via the forwarded args
-# after `--`.
+# The params-file entry scripts (voice_clone/tts/training/voice_design across all models)
+# only accept --params-file and would fail with argparse "unrecognized arguments" if these were
+# passed through.  Scripts that genuinely need them (e.g. download.py) receive them via the
+# forwarded args after `--`.
 #
 # Build the Python argument list on the positional parameters so paths containing spaces survive
 # intact (mirrors the array-based assembly in begin_llm_task.ps1).

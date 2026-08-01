@@ -90,12 +90,60 @@ pub fn save_audio_bytes_as(
     )
 }
 
+pub fn save_existing_audio_file_as(
+    app: &AppHandle,
+    file_name: &str,
+    source_path: &Path,
+) -> std::result::Result<bool, String> {
+    save_existing_file_as(
+        app,
+        file_name,
+        source_path,
+        Some(audio_filter_name_from_file_name(file_name)),
+    )
+}
+
 pub fn save_bytes_as(
     app: &AppHandle,
     file_name: &str,
     bytes: &[u8],
     filter_name: Option<&'static str>,
 ) -> std::result::Result<bool, String> {
+    let Some(output_path) = select_save_output_path(app, file_name, filter_name)? else {
+        return Ok(false);
+    };
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    fs::write(&output_path, bytes).map_err(|err| err.to_string())?;
+    Ok(true)
+}
+
+pub fn save_existing_file_as(
+    app: &AppHandle,
+    file_name: &str,
+    source_path: &Path,
+    filter_name: Option<&'static str>,
+) -> std::result::Result<bool, String> {
+    let Some(output_path) = select_save_output_path(app, file_name, filter_name)? else {
+        return Ok(false);
+    };
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    fs::copy(source_path, &output_path).map_err(|err| err.to_string())?;
+    Ok(true)
+}
+
+fn select_save_output_path(
+    app: &AppHandle,
+    file_name: &str,
+    filter_name: Option<&'static str>,
+) -> std::result::Result<Option<PathBuf>, String> {
     let extension = file_name
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
@@ -110,17 +158,10 @@ pub fn save_bytes_as(
     let selected_path = dialog.blocking_save_file();
 
     let Some(selected_path) = selected_path else {
-        return Ok(false);
+        return Ok(None);
     };
 
-    let output_path = resolve_save_path(selected_path)?;
-
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-
-    fs::write(&output_path, bytes).map_err(|err| err.to_string())?;
-    Ok(true)
+    resolve_save_path(selected_path).map(Some)
 }
 
 fn resolve_save_path(file_path: FilePath) -> std::result::Result<PathBuf, String> {

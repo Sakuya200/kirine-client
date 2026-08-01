@@ -4,17 +4,21 @@ use anyhow::{bail, Context};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
+use tokio::sync::watch;
+use tracing::warn;
 
 use crate::{
     common::{
         local_paths::{ensure_child_dir, resolve_task_path, serialize_task_path},
         task_paths::ensure_task_sample_dir,
     },
+    config::BaseModel,
     service::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
         models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
+        pipeline::{resolve_model_task_pipeline, VoiceClonePipelineRequest},
         LocalService,
     },
     utils::time::now_string,
@@ -29,6 +33,12 @@ impl LocalService {
         let create_time = now_string()?;
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before voice-clone task");
+        }
         let device = payload.device;
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
@@ -164,5 +174,38 @@ impl LocalService {
             status: TaskStatus::Pending,
             output_file_path: serialized_output_path,
         })
+    }
+
+    pub(crate) fn start_voice_clone_inference(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+    ) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::VoiceClone,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_voice_clone_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    VoiceClonePipelineRequest { task_id },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local voice clone pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

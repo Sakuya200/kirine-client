@@ -39,14 +39,14 @@ const isImportingSpeaker = ref(false);
 const isDeletingSpeaker = ref(false);
 const editForm = reactive({
   id: null as number | null,
-  name: '',
+  speakerName: '',
   description: ''
 });
 const importForm = reactive({
   baseModel: '',
   modelVersion: '',
   sourceModelDirPath: '',
-  name: '',
+  speakerName: '',
   description: ''
 });
 
@@ -60,13 +60,13 @@ const importModelVersionOptions = computed(() => modelStore.getModelVersionOptio
 
 const selectedSpeaker = computed(() => speakerStore.speakers.find(speaker => speaker.id === selectedSpeakerId.value) ?? null);
 const deleteTarget = computed(() => speakerStore.speakers.find(speaker => speaker.id === deleteTargetId.value) ?? null);
-const canSaveSpeaker = computed(() => editForm.name.trim().length > 0 && editForm.description.trim().length > 0);
+const canSaveSpeaker = computed(() => editForm.speakerName.trim().length > 0 && editForm.description.trim().length > 0);
 const canImportSpeaker = computed(
   () =>
     importForm.baseModel.trim().length > 0 &&
     importForm.modelVersion.trim().length > 0 &&
     importForm.sourceModelDirPath.trim().length > 0 &&
-    importForm.name.trim().length > 0 &&
+    importForm.speakerName.trim().length > 0 &&
     importForm.description.trim().length > 0
 );
 
@@ -102,7 +102,7 @@ const closeDetail = () => {
 
 const openEdit = (speaker: SpeakerProfile) => {
   editForm.id = speaker.id;
-  editForm.name = speaker.name;
+  editForm.speakerName = speaker.speakerName;
   editForm.description = speaker.description;
   isEditDialogOpen.value = true;
 };
@@ -115,7 +115,7 @@ const resetImportForm = () => {
   importForm.baseModel = String(importableModelOptions.value[0]?.value ?? '');
   importForm.modelVersion = String(importModelVersionOptions.value[0]?.value ?? '');
   importForm.sourceModelDirPath = '';
-  importForm.name = '';
+  importForm.speakerName = '';
   importForm.description = '';
 };
 
@@ -150,7 +150,7 @@ const submitImportSpeaker = async () => {
     baseModel: importForm.baseModel,
     modelVersion: importForm.modelVersion,
     sourceModelDirPath: importForm.sourceModelDirPath.trim(),
-    name: importForm.name.trim(),
+    speakerName: importForm.speakerName.trim(),
     description: importForm.description.trim()
   });
   isImportingSpeaker.value = false;
@@ -172,7 +172,7 @@ const saveSpeaker = async () => {
   isSavingSpeaker.value = true;
   const updated = await speakerStore.updateSpeaker({
     id: editForm.id,
-    name: editForm.name,
+    speakerName: editForm.speakerName,
     description: editForm.description
   });
   isSavingSpeaker.value = false;
@@ -301,7 +301,7 @@ onMounted(async () => {
         <article v-for="speaker in speakerStore.speakers" :key="speaker.id" class="rounded-2xl border border-brand-200 bg-white/90 p-4">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.name }}</h3>
+              <h3 class="truncate text-base font-semibold text-slate-900">{{ speaker.speakerName }}</h3>
             </div>
             <div class="flex shrink-0 flex-wrap justify-end gap-2">
               <span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">
@@ -352,7 +352,7 @@ onMounted(async () => {
 
     <BaseDialog :open="selectedSpeaker !== null" title="说话人详情" @close="closeDetail">
       <div v-if="selectedSpeaker" class="space-y-2 text-sm text-slate-600">
-        <p><span class="font-semibold text-slate-800">名称：</span>{{ selectedSpeaker.name }}</p>
+        <p><span class="font-semibold text-slate-800">名称：</span>{{ selectedSpeaker.speakerName }}</p>
         <p><span class="font-semibold text-slate-800">模型：</span>{{ getSpeakerModelLabel(selectedSpeaker) }}</p>
         <p><span class="font-semibold text-slate-800">样本数：</span>{{ selectedSpeaker.samples }}</p>
         <p><span class="font-semibold text-slate-800">状态：</span>{{ statusLabelMap[selectedSpeaker.status] }}</p>
@@ -380,7 +380,7 @@ onMounted(async () => {
       <div class="space-y-4">
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">名称</span>
-          <input v-model="editForm.name" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入说话人名称" />
+          <input v-model="editForm.speakerName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入说话人名称" />
         </label>
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">备注</span>
@@ -431,7 +431,7 @@ onMounted(async () => {
         </label>
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
-          <input v-model="importForm.name" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入说话人名称" />
+          <input v-model="importForm.speakerName" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入说话人名称" />
         </label>
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">说话人描述</span>
@@ -457,7 +457,7 @@ onMounted(async () => {
 
     <BaseDialog :open="isDeleteDialogOpen" title="删除说话人" @close="closeDeleteDialog">
       <p class="text-sm text-slate-600">
-        <template v-if="deleteTarget"> 将删除说话人“{{ deleteTarget.name }}”。该操作会执行逻辑删除，并从数据库查询结果中移除。 </template>
+        <template v-if="deleteTarget"> 将删除说话人“{{ deleteTarget.speakerName }}”。该操作会执行逻辑删除，并从数据库查询结果中移除。 </template>
         <template v-else> 未找到要删除的说话人。 </template>
       </p>
       <template #footer>

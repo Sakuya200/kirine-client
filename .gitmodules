@@ -16,3 +16,6 @@
 [submodule "src-model/irodori_tts_v3"]
 	path = src-model/irodori_tts_v3
 	url = https://github.com/Sakuya200/kirine-client-irodori-tts-v3-adapter.git
+[submodule "src-model/moss_tts_realtime"]
+	path = src-model/moss_tts_realtime
+	url = https://github.com/Sakuya200/kirine-client-moss-realtime-adapter.git

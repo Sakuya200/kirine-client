@@ -7,6 +7,7 @@ import ModelTrainingView from '@/views/ModelTrainingView.vue';
 import NotFoundView from '@/views/NotFoundView.vue';
 import SettingsView from '@/views/SettingsView.vue';
 import SpeakersView from '@/views/SpeakersView.vue';
+import StreamingSpeechView from '@/views/StreamingSpeechView.vue';
 import TextToSpeechView from '@/views/TextToSpeechView.vue';
 import VoiceDesignView from '@/views/VoiceDesignView.vue';
 import VoiceCloneView from '@/views/VoiceCloneView.vue';
@@ -35,6 +36,12 @@ export const appRoutes = [
     name: HistoryTaskType.VoiceDesign,
     meta: { title: '音色设计' },
     component: VoiceDesignView
+  },
+  {
+    path: '/streaming-speech',
+    name: 'streaming-speech',
+    meta: { title: '流式语音' },
+    component: StreamingSpeechView
   },
   {
     path: '/models',

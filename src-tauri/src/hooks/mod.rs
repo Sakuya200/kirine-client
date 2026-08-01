@@ -3,6 +3,7 @@ use tauri::Wry;
 mod model_info;
 mod settings;
 mod speaker_info;
+pub(crate) mod streaming;
 mod task_history;
 
 pub use settings::{EnvConfigState, UiConfigState};
@@ -18,14 +19,11 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         model_info::get_device_type,
         model_info::install_model,
         model_info::uninstall_model,
+        model_info::set_model_current_device,
         task_history::list_history_records,
         task_history::get_history_record,
-        task_history::get_text_to_speech_audio,
-        task_history::get_voice_clone_audio,
-        task_history::get_voice_design_audio,
-        task_history::save_text_to_speech_audio_as,
-        task_history::save_voice_clone_audio_as,
-        task_history::save_voice_design_audio_as,
+        task_history::get_generated_audio,
+        task_history::save_generated_audio_as,
         task_history::save_model_training_template_as,
         task_history::delete_history_record,
         task_history::create_text_to_speech_task,
@@ -33,6 +31,10 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::cancel_history_task,
         task_history::create_voice_clone_task,
         task_history::create_voice_design_task,
+        streaming::create_streaming_speech_task,
+        streaming::send_streaming_message,
+        streaming::cancel_streaming_task,
+        streaming::get_streaming_replay_snapshot,
         settings::get_settings_config,
         settings::get_ui_config,
         settings::save_settings_config

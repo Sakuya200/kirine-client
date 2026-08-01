@@ -147,6 +147,49 @@ function Get-BootstrapPythonCommand {
     return $null
 }
 
+function Get-VisualStudioDeveloperCommandPrompt {
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
+        $programFilesX86 = $env:ProgramFiles
+    }
+
+    $vswherePath = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path -LiteralPath $vswherePath) {
+        $installationPaths = & $vswherePath -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($LASTEXITCODE -eq 0 -and $null -ne $installationPaths) {
+            foreach ($installationPath in @($installationPaths)) {
+                if ([string]::IsNullOrWhiteSpace($installationPath)) {
+                    continue
+                }
+
+                $candidate = Join-Path $installationPath 'Common7\Tools\VsDevCmd.bat'
+                if (Test-Path -LiteralPath $candidate) {
+                    return $candidate
+                }
+            }
+        }
+    }
+
+    $searchRoots = @(
+        (Join-Path $programFilesX86 'Microsoft Visual Studio'),
+        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Microsoft Visual Studio')
+    )
+
+    foreach ($root in $searchRoots) {
+        if (-not (Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        $match = Get-ChildItem -LiteralPath $root -Filter 'VsDevCmd.bat' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+        if (-not [string]::IsNullOrWhiteSpace($match) -and (Test-Path -LiteralPath $match)) {
+            return $match
+        }
+    }
+
+    return $null
+}
+
 function Get-CondaExecutable {
     # Only probe the conda CLI on PATH. We deliberately do NOT search common
     # install locations under $env:USERPROFILE / $env:ProgramData: doing so

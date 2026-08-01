@@ -65,3 +65,18 @@ pub async fn uninstall_model(
         .await
         .map_err(|err| err.to_string())
 }
+
+#[tauri::command]
+pub async fn set_model_current_device(
+    model_id: i64,
+    device: HardwareType,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<ModelInfo, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .set_model_current_device(model_id, device)
+        .await
+        .map_err(|err| err.to_string())
+}

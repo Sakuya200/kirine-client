@@ -80,8 +80,11 @@ impl MigrationTrait for Migration {
 
         match migration_result {
             Ok(()) => {
-                db.execute(Statement::from_string(DbBackend::Sqlite, "COMMIT".to_string()))
-                    .await?;
+                db.execute(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "COMMIT".to_string(),
+                ))
+                .await?;
                 db.execute(Statement::from_string(
                     DbBackend::Sqlite,
                     "PRAGMA foreign_keys = ON".to_string(),
@@ -91,7 +94,10 @@ impl MigrationTrait for Migration {
             }
             Err(err) => {
                 let _ = db
-                    .execute(Statement::from_string(DbBackend::Sqlite, "ROLLBACK".to_string()))
+                    .execute(Statement::from_string(
+                        DbBackend::Sqlite,
+                        "ROLLBACK".to_string(),
+                    ))
                     .await;
                 let _ = db
                     .execute(Statement::from_string(

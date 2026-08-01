@@ -4,13 +4,14 @@ mod remote;
 use crate::{
     config::{EnvConfig, HardwareType, StorageMode},
     service::models::{
-        CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-        CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
-        HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-        ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
-        SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
-        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-        VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset, VoiceDesignTaskResult,
+        CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+        CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
+        GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter, HistoryRecord,
+        HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
+        ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
+        SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
+        StreamingReplaySnapshot, StreamingSpeechTaskResult, TextToSpeechTaskResult,
+        UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneTaskResult, VoiceDesignTaskResult,
     },
     Result,
 };
@@ -58,10 +59,7 @@ pub trait Service: Send + Sync {
     ) -> Result<SpeakerPageResult>;
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
-    async fn list_model_infos(
-        &self,
-        request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>>;
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>>;
     async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType>;
     async fn install_model(
         &self,
@@ -69,14 +67,25 @@ pub trait Service: Send + Sync {
         device: HardwareType,
     ) -> Result<ModelMutationResult>;
     async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult>;
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo>;
     async fn list_history_records(
         &self,
         request: PageRequest<HistoryFilter>,
     ) -> Result<Page<HistoryRecordSummary>>;
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;
-    async fn read_text_to_speech_audio(&self, history_id: i64) -> Result<TextToSpeechAudioAsset>;
-    async fn read_voice_clone_audio(&self, history_id: i64) -> Result<VoiceCloneAudioAsset>;
-    async fn read_voice_design_audio(&self, history_id: i64) -> Result<VoiceDesignAudioAsset>;
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset>;
+    async fn save_generated_audio_as(
+        &self,
+        source: GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool>;
     async fn delete_history_record(
         &self,
         history_id: i64,
@@ -100,6 +109,20 @@ pub trait Service: Send + Sync {
         &self,
         payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult>;
+    async fn create_streaming_speech_task(
+        &self,
+        payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult>;
+    async fn send_streaming_message(
+        &self,
+        payload: SendStreamingMessagePayload,
+        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()>;
+    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool>;
+    async fn get_streaming_replay_snapshot(
+        &self,
+        history_id: i64,
+    ) -> Result<StreamingReplaySnapshot>;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {

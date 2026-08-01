@@ -2,8 +2,8 @@ use tauri::State;
 
 use crate::service::{
     models::{
-        CreateSpeakerPayload, ImportModelAsSpeakerPayload, PageRequest, SpeakerFilter,
-        SpeakerInfo, SpeakerPageResult, UpdateSpeakerPayload,
+        CreateSpeakerPayload, ImportModelAsSpeakerPayload, PageRequest, SpeakerFilter, SpeakerInfo,
+        SpeakerPageResult, UpdateSpeakerPayload,
     },
     ServiceState,
 };

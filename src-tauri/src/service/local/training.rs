@@ -12,6 +12,7 @@ use sea_orm::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::watch;
 use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -24,7 +25,7 @@ use crate::{
             training_reference_audio_path, training_temp_extract_dir,
         },
     },
-    config::HardwareType,
+    config::{BaseModel, HardwareType},
     service::{
         local::entity::{
             speaker as speaker_entity, task_history as task_history_entity,
@@ -35,6 +36,7 @@ use crate::{
             ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
             ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
+        pipeline::{resolve_model_task_pipeline, TrainingPipelineRequest},
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -113,12 +115,21 @@ impl LocalService {
         let speaker_description = payload.description.trim().to_string();
         let base_model = payload.base_model.trim().to_string();
         let model_version = payload.model_version.trim().to_string();
+        if let Err(err) = self
+            .ensure_model_current_device_resolved_impl(&base_model, &model_version)
+            .await
+        {
+            warn!(error = %err, base_model, model_version, "failed to resolve model current_device before model-training task");
+        }
         let selected_training_device = payload.device;
         let mut model_params = payload.model_params.clone();
         let selected_model_info = self
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
-        if !selected_model_info.supported_devices.contains(&selected_training_device) {
+        if !selected_model_info
+            .supported_devices
+            .contains(&selected_training_device)
+        {
             bail!(
                 "模型 {} {} 不支持设备 {}，请切换为 {:?}",
                 selected_model_info.model_name,
@@ -134,14 +145,13 @@ impl LocalService {
         };
         let selected_training_mode_text = format!(
             "{} / {}",
-            selected_model_info.model_name,
-            selected_training_mode_label,
+            selected_model_info.model_name, selected_training_mode_label,
         );
 
         let txn = self.orm().begin().await?;
         let speaker = speaker_entity::ActiveModel {
             id: NotSet,
-            name: Set(speaker_name.clone()),
+            speaker_name: Set(speaker_name.clone()),
             samples: Set(0),
             base_model: Set(base_model.clone()),
             description: Set(speaker_description),
@@ -941,5 +951,45 @@ impl LocalService {
                 .as_deref(),
             Some("wav") | Some("mp3") | Some("flac") | Some("ogg") | Some("m4a")
         )
+    }
+
+    pub(crate) fn start_training(
+        &self,
+        base_model: BaseModel,
+        task_id: i64,
+        speaker_id: i64,
+        speaker_name: &str,
+    ) -> Result<()> {
+        let service = self.clone();
+        let pipeline = resolve_model_task_pipeline(&base_model)?;
+        let speaker_name = speaker_name.to_string();
+        let (cancel_tx, cancel_rx_guard) = watch::channel(false);
+        self.register_active_task_control(
+            task_id,
+            HistoryTaskType::ModelTraining,
+            cancel_tx,
+            cancel_rx_guard,
+        );
+
+        tauri::async_runtime::spawn(async move {
+            let result = pipeline
+                .run_training_pipeline(
+                    base_model.to_string(),
+                    &service,
+                    TrainingPipelineRequest {
+                        task_id,
+                        speaker_id,
+                        speaker_name,
+                    },
+                )
+                .await;
+            service.unregister_active_task_control(task_id);
+
+            if let Err(err) = result {
+                tracing::error!(error = %err, "local training pipeline failed");
+            }
+        });
+
+        Ok(())
     }
 }

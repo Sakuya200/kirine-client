@@ -30,10 +30,20 @@ async fn list_history_records_pagination_and_filter() -> Result<()> {
     let harness = LocalServiceHarness::new("history-list").await?;
 
     harness
-        .seed_history(1, HistoryTaskType::TextToSpeech, "tts-one", TaskStatus::Completed)
+        .seed_history(
+            1,
+            HistoryTaskType::TextToSpeech,
+            "tts-one",
+            TaskStatus::Completed,
+        )
         .await?;
     harness
-        .seed_history(2, HistoryTaskType::TextToSpeech, "tts-two", TaskStatus::Pending)
+        .seed_history(
+            2,
+            HistoryTaskType::TextToSpeech,
+            "tts-two",
+            TaskStatus::Pending,
+        )
         .await?;
     harness
         .seed_history(3, HistoryTaskType::VoiceClone, "vc-one", TaskStatus::Failed)
@@ -71,7 +81,10 @@ async fn list_history_records_pagination_and_filter() -> Result<()> {
             }),
         })
         .await?;
-    assert!(tts_only.items.iter().all(|h| h.task_type == HistoryTaskType::TextToSpeech));
+    assert!(tts_only
+        .items
+        .iter()
+        .all(|h| h.task_type == HistoryTaskType::TextToSpeech));
     assert!(tts_only.total >= 2);
 
     // 筛选：status
@@ -87,7 +100,10 @@ async fn list_history_records_pagination_and_filter() -> Result<()> {
             }),
         })
         .await?;
-    assert!(completed.items.iter().all(|h| h.status == TaskStatus::Completed));
+    assert!(completed
+        .items
+        .iter()
+        .all(|h| h.status == TaskStatus::Completed));
 
     // 筛选：keyword
     let kw = harness
@@ -112,7 +128,12 @@ async fn get_history_record_returns_full_detail() -> Result<()> {
     let harness = LocalServiceHarness::new("history-get").await?;
 
     harness
-        .seed_history(10, HistoryTaskType::TextToSpeech, "detail-tts", TaskStatus::Completed)
+        .seed_history(
+            10,
+            HistoryTaskType::TextToSpeech,
+            "detail-tts",
+            TaskStatus::Completed,
+        )
         .await?;
     harness.seed_tts_detail(10, BASE, VERSION, None).await?;
 
@@ -121,7 +142,10 @@ async fn get_history_record_returns_full_detail() -> Result<()> {
     assert_eq!(record.task_type, HistoryTaskType::TextToSpeech);
     assert_eq!(record.status, TaskStatus::Completed);
     // detail 为非空 JSON 对象
-    let detail = record.detail.as_object().expect("detail should be an object");
+    let detail = record
+        .detail
+        .as_object()
+        .expect("detail should be an object");
     assert!(!detail.is_empty());
     assert_eq!(detail.get("baseModel").and_then(|v| v.as_str()), Some(BASE));
 
@@ -134,7 +158,12 @@ async fn read_text_to_speech_audio_returns_bytes() -> Result<()> {
     let audio = write_temp_audio(&harness, "tts-out.wav");
 
     harness
-        .seed_history(20, HistoryTaskType::TextToSpeech, "read-tts", TaskStatus::Completed)
+        .seed_history(
+            20,
+            HistoryTaskType::TextToSpeech,
+            "read-tts",
+            TaskStatus::Completed,
+        )
         .await?;
     harness
         .seed_tts_detail(20, BASE, VERSION, Some(&audio.to_string_lossy()))
@@ -154,7 +183,12 @@ async fn read_voice_clone_audio_returns_bytes() -> Result<()> {
     let audio = write_temp_audio(&harness, "vc-out.wav");
 
     harness
-        .seed_history(21, HistoryTaskType::VoiceClone, "read-vc", TaskStatus::Completed)
+        .seed_history(
+            21,
+            HistoryTaskType::VoiceClone,
+            "read-vc",
+            TaskStatus::Completed,
+        )
         .await?;
     harness
         .seed_voice_clone_detail(21, BASE, VERSION, Some(&audio.to_string_lossy()))
@@ -173,7 +207,12 @@ async fn read_voice_design_audio_returns_bytes() -> Result<()> {
     let audio = write_temp_audio(&harness, "vd-out.wav");
 
     harness
-        .seed_history(22, HistoryTaskType::VoiceDesign, "read-vd", TaskStatus::Completed)
+        .seed_history(
+            22,
+            HistoryTaskType::VoiceDesign,
+            "read-vd",
+            TaskStatus::Completed,
+        )
         .await?;
     harness
         .seed_voice_design_detail(22, BASE, VERSION, Some(&audio.to_string_lossy()))
@@ -192,14 +231,22 @@ async fn read_audio_errors_when_task_not_completed() -> Result<()> {
     let audio = write_temp_audio(&harness, "pending-out.wav");
 
     harness
-        .seed_history(23, HistoryTaskType::TextToSpeech, "pending-tts", TaskStatus::Pending)
+        .seed_history(
+            23,
+            HistoryTaskType::TextToSpeech,
+            "pending-tts",
+            TaskStatus::Pending,
+        )
         .await?;
     harness
         .seed_tts_detail(23, BASE, VERSION, Some(&audio.to_string_lossy()))
         .await?;
 
     let err = harness.service().read_text_to_speech_audio(23).await;
-    assert!(err.is_err(), "reading audio of a non-completed task should error");
+    assert!(
+        err.is_err(),
+        "reading audio of a non-completed task should error"
+    );
 
     harness.shutdown().await
 }
@@ -209,10 +256,18 @@ async fn delete_history_record_soft_deletes_row_and_detail() -> Result<()> {
     let harness = LocalServiceHarness::new("history-delete").await?;
 
     harness
-        .seed_history(30, HistoryTaskType::TextToSpeech, "del-tts", TaskStatus::Completed)
+        .seed_history(
+            30,
+            HistoryTaskType::TextToSpeech,
+            "del-tts",
+            TaskStatus::Completed,
+        )
         .await?;
     harness.seed_tts_detail(30, BASE, VERSION, None).await?;
-    assert!(harness.task_detail_id_for_history("tts_tasks", 30).await?.is_some());
+    assert!(harness
+        .task_detail_id_for_history("tts_tasks", 30)
+        .await?
+        .is_some());
 
     let deleted = harness
         .service()
@@ -243,7 +298,12 @@ async fn update_task_status_persists_transition() -> Result<()> {
     let harness = LocalServiceHarness::new("history-update-status").await?;
 
     harness
-        .seed_history(40, HistoryTaskType::TextToSpeech, "status-tts", TaskStatus::Pending)
+        .seed_history(
+            40,
+            HistoryTaskType::TextToSpeech,
+            "status-tts",
+            TaskStatus::Pending,
+        )
         .await?;
     harness.seed_tts_detail(40, BASE, VERSION, None).await?;
 
@@ -269,7 +329,12 @@ async fn update_task_status_persists_transition() -> Result<()> {
 async fn cancel_history_task_rejects_finished_task() -> Result<()> {
     let harness = LocalServiceHarness::new("history-cancel-finished").await?;
     harness
-        .seed_history(50, HistoryTaskType::TextToSpeech, "finished", TaskStatus::Completed)
+        .seed_history(
+            50,
+            HistoryTaskType::TextToSpeech,
+            "finished",
+            TaskStatus::Completed,
+        )
         .await?;
 
     let err = harness.service().cancel_history_task(50).await;
@@ -284,11 +349,19 @@ async fn cancel_history_task_errors_without_active_control() -> Result<()> {
     // cancel 应返回 Err（无可用终止句柄），不真正执行任务。
     let harness = LocalServiceHarness::new("history-cancel-no-control").await?;
     harness
-        .seed_history(51, HistoryTaskType::TextToSpeech, "pending-no-ctrl", TaskStatus::Pending)
+        .seed_history(
+            51,
+            HistoryTaskType::TextToSpeech,
+            "pending-no-ctrl",
+            TaskStatus::Pending,
+        )
         .await?;
 
     let err = harness.service().cancel_history_task(51).await;
-    assert!(err.is_err(), "cancelling a task without active control should error");
+    assert!(
+        err.is_err(),
+        "cancelling a task without active control should error"
+    );
 
     harness.shutdown().await
 }

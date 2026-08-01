@@ -1,164 +1,250 @@
-mod biz;
-
-use std::io;
-
-use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::{
+    client::ApiClient,
     config::{EnvConfig, HardwareType},
     service::{
         models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateTextToSpeechTaskPayload,
-            CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload, HistoryFilter,
+            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
+            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
+            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
             HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
             ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, TextToSpeechAudioAsset,
+            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
+            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeechTaskResult,
             TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-            VoiceCloneAudioAsset, VoiceCloneTaskResult, VoiceDesignAudioAsset,
-            VoiceDesignTaskResult,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
     Result,
 };
-use tracing::error;
+use anyhow::Context;
 
 #[derive(Debug, Clone)]
 pub struct RemoteService {
-    api_url: String,
+    client: ApiClient,
 }
 
 #[async_trait]
 impl Service for RemoteService {
     async fn new(config: &EnvConfig) -> Result<RemoteService> {
-        if let Some(api_url) = config.api_url() {
-            Ok(RemoteService {
-                api_url: api_url.to_string(),
-            })
-        } else {
-            // 报错缺少 API URL 配置
-            error!("缺少 API URL 配置");
-            Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "缺少 API URL 配置",
-            ))
-            .context("remote storage requires remote.api_url in config.toml")
-        }
+        let api_url = config.api_url().unwrap_or("").to_string();
+        let api_token = config.api_token().map(str::to_string);
+        let client = ApiClient::new(api_url, api_token)
+            .context("remote storage requires remote.api_url in config.toml")?;
+        Ok(RemoteService { client })
     }
+
     async fn close(&self) -> Result<()> {
         Ok(())
     }
 
-    async fn create_speaker_info(&self, _payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
-        biz::unsupported("create_speaker_info")
+    async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
+        self.client.create_speaker_info(payload).await
     }
 
     async fn import_model_as_speaker(
         &self,
-        _payload: ImportModelAsSpeakerPayload,
+        payload: ImportModelAsSpeakerPayload,
     ) -> Result<SpeakerInfo> {
-        biz::unsupported("import_model_as_speaker")
+        self.client.import_model_as_speaker(payload).await
     }
 
     async fn list_speaker_infos(
         &self,
-        _request: PageRequest<SpeakerFilter>,
+        request: PageRequest<SpeakerFilter>,
     ) -> Result<SpeakerPageResult> {
-        biz::unsupported("list_speaker_infos")
+        self.client
+            .list_speaker_infos(request.into())
+            .await
+            .map(Into::into)
     }
 
-    async fn update_speaker_info(&self, _payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
-        biz::unsupported("update_speaker_info")
+    async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
+        self.client.update_speaker_info(payload).await
     }
 
-    async fn delete_speaker_info(&self, _speaker_id: i64) -> Result<bool> {
-        biz::unsupported("delete_speaker_info")
+    async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
+        self.client.delete_speaker_info(speaker_id).await
     }
 
-    async fn list_model_infos(
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
+        self.client
+            .list_model_infos(request.into())
+            .await
+            .map(Into::into)
+    }
+
+    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
+        self.client.get_device_type(base_model, model_version).await
+    }
+
+    async fn install_model(
         &self,
-        _request: PageRequest<ModelFilter>,
-    ) -> Result<Page<ModelInfo>> {
-        biz::unsupported("list_model_infos")
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelMutationResult> {
+        self.client.install_model(model_id, device).await
     }
 
-    async fn get_device_type(&self, _base_model: &str, _model_version: &str) -> Result<HardwareType> {
-        biz::unsupported("get_device_type")
+    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
+        self.client.uninstall_model(model_id).await
     }
 
-    async fn install_model(&self, _model_id: i64, _device: HardwareType) -> Result<ModelMutationResult> {
-        biz::unsupported("install_model")
-    }
-
-    async fn uninstall_model(&self, _model_id: i64) -> Result<ModelMutationResult> {
-        biz::unsupported("uninstall_model")
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        self.client.set_model_current_device(model_id, device).await
     }
 
     async fn list_history_records(
         &self,
-        _request: PageRequest<HistoryFilter>,
+        request: PageRequest<HistoryFilter>,
     ) -> Result<Page<HistoryRecordSummary>> {
-        biz::unsupported("list_history_records")
+        self.client
+            .list_history_records(request.into())
+            .await
+            .map(Into::into)
     }
 
-    async fn get_history_record(&self, _history_id: i64) -> Result<HistoryRecord> {
-        biz::unsupported("get_history_record")
+    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
+        self.client.get_history_record(history_id).await
     }
 
-    async fn read_text_to_speech_audio(&self, _history_id: i64) -> Result<TextToSpeechAudioAsset> {
-        biz::unsupported("read_text_to_speech_audio")
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        match source {
+            GeneratedAudioSource::TextToSpeech { history_id } => {
+                let asset = self.client.read_text_to_speech_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceClone { history_id } => {
+                let asset = self.client.read_voice_clone_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::VoiceDesign { history_id } => {
+                let asset = self.client.read_voice_design_audio(history_id).await?;
+                Ok(GeneratedAudioAsset {
+                    file_name: asset.file_name,
+                    content_type: asset.content_type,
+                    bytes: asset.bytes,
+                })
+            }
+            GeneratedAudioSource::StreamingSpeech { .. } => {
+                anyhow::bail!("远程存储模式暂不支持流式语音音频播放")
+            }
+        }
     }
 
-    async fn read_voice_clone_audio(&self, _history_id: i64) -> Result<VoiceCloneAudioAsset> {
-        biz::unsupported("read_voice_clone_audio")
-    }
-
-    async fn read_voice_design_audio(&self, _history_id: i64) -> Result<VoiceDesignAudioAsset> {
-        biz::unsupported("read_voice_design_audio")
+    async fn save_generated_audio_as(
+        &self,
+        source: GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool> {
+        match source {
+            GeneratedAudioSource::TextToSpeech { history_id } => {
+                let asset = self.client.read_text_to_speech_audio(history_id).await?;
+                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                    .map_err(|err| anyhow::anyhow!(err))
+            }
+            GeneratedAudioSource::VoiceClone { history_id } => {
+                let asset = self.client.read_voice_clone_audio(history_id).await?;
+                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                    .map_err(|err| anyhow::anyhow!(err))
+            }
+            GeneratedAudioSource::VoiceDesign { history_id } => {
+                let asset = self.client.read_voice_design_audio(history_id).await?;
+                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                    .map_err(|err| anyhow::anyhow!(err))
+            }
+            GeneratedAudioSource::StreamingSpeech { .. } => {
+                anyhow::bail!("远程存储模式暂不支持流式语音音频下载")
+            }
+        }
     }
 
     async fn delete_history_record(
         &self,
-        _history_id: i64,
-        _task_type: HistoryTaskType,
+        history_id: i64,
+        task_type: HistoryTaskType,
     ) -> Result<bool> {
-        biz::unsupported("delete_history_record")
+        self.client
+            .delete_history_record(history_id, task_type)
+            .await
     }
 
-    async fn update_task_status(&self, _payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
-        biz::unsupported("update_task_status")
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
+        self.client.update_task_status(payload).await
     }
 
     async fn create_text_to_speech_task(
         &self,
-        _payload: CreateTextToSpeechTaskPayload,
+        payload: CreateTextToSpeechTaskPayload,
     ) -> Result<TextToSpeechTaskResult> {
-        biz::unsupported("create_text_to_speech_task")
+        self.client.create_text_to_speech_task(payload).await
     }
 
     async fn create_model_training_task(
         &self,
-        _payload: CreateModelTrainingTaskPayload,
+        payload: CreateModelTrainingTaskPayload,
     ) -> Result<ModelTrainingTaskResult> {
-        biz::unsupported("create_model_training_task")
+        self.client.create_model_training_task(payload).await
     }
 
-    async fn cancel_history_task(&self, _history_id: i64) -> Result<bool> {
-        biz::unsupported("cancel_history_task")
+    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
+        self.client.cancel_history_task(history_id).await
     }
 
     async fn create_voice_clone_task(
         &self,
-        _payload: CreateVoiceCloneTaskPayload,
+        payload: CreateVoiceCloneTaskPayload,
     ) -> Result<VoiceCloneTaskResult> {
-        biz::unsupported("create_voice_clone_task")
+        self.client.create_voice_clone_task(payload).await
     }
 
     async fn create_voice_design_task(
         &self,
-        _payload: CreateVoiceDesignTaskPayload,
+        payload: CreateVoiceDesignTaskPayload,
     ) -> Result<VoiceDesignTaskResult> {
-        biz::unsupported("create_voice_design_task")
+        self.client.create_voice_design_task(payload).await
+    }
+
+    async fn create_streaming_speech_task(
+        &self,
+        _payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn send_streaming_message(
+        &self,
+        _payload: SendStreamingMessagePayload,
+        _on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+    ) -> Result<()> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn cancel_streaming_task(&self, _task_id: i64) -> Result<bool> {
+        anyhow::bail!("远程存储模式暂不支持流式语音会话")
+    }
+
+    async fn get_streaming_replay_snapshot(
+        &self,
+        _history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        anyhow::bail!("远程存储模式暂不支持流式语音历史重放")
     }
 }

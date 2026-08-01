@@ -17,7 +17,7 @@ mod hooks;
 mod migration;
 mod service;
 pub mod test_support;
-mod utils;
+pub mod utils;
 
 pub use anyhow::Result;
 pub use config::{

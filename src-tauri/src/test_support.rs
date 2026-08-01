@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 use rand::random;
 use sqlx::{sqlite::SqlitePoolOptions, Row};
@@ -13,10 +13,21 @@ use crate::Result;
 // 类型与纯函数。`test_support` 作为对外的公共测试桥接模块，统一重导出测试所需的类型与
 // 抽取出的纯函数 `build_llm_task_script_args`（规则4 参数契约验证）。
 pub use crate::config::HardwareType;
+pub use crate::hooks::streaming::AudioStreamEvent;
 pub use crate::service::models;
-pub use crate::service::pipeline::build_llm_task_script_args;
-pub use crate::service::{LocalService, Service};
 pub use crate::service::models::{PageRequest, SpeakerFilter, SpeakerStatus};
+pub use crate::service::pipeline::api::{
+    PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
+    PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
+    VoiceCloneArgs, VoiceDesignArgs,
+};
+pub use crate::service::pipeline::build_llm_task_script_args;
+pub use crate::service::pipeline::streaming::{
+    frame_to_event, parse_streaming_frame, serialize_input_entry, StreamingContextBasic,
+    StreamingContextJson, StreamingFrame, StreamingFramePayload, StreamingMessageEntry,
+    StreamingSpeaker,
+};
+pub use crate::service::{LocalService, Service};
 
 /// 临时库测试设施：每个 `LocalServiceHarness::new` 在 `std::env::temp_dir` 下创建独立
 /// 临时目录，经 `LocalService::from_paths` 走「建库 → 全量迁移 → sync 模型目录」链路，
@@ -34,8 +45,7 @@ impl LocalServiceHarness {
         let data_dir = root_dir.join("data");
         let model_dir = root_dir.join("models");
         let service =
-            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone())
-                .await?;
+            LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone()).await?;
 
         Ok(Self {
             root_dir,
@@ -67,14 +77,16 @@ impl LocalServiceHarness {
     }
 
     pub async fn speakers_query_succeeds(&self) -> Result<bool> {
-        self.service.list_speaker_infos(PageRequest::default()).await?;
+        self.service
+            .list_speaker_infos(PageRequest::default())
+            .await?;
         Ok(true)
     }
 
     pub async fn create_test_speaker(&self) -> Result<SpeakerInfo> {
         self.service
             .create_speaker_info(CreateSpeakerPayload {
-                name: "SeaOrm Speaker".to_string(),
+                speaker_name: "SeaOrm Speaker".to_string(),
                 samples: 3,
                 base_model: "qwen3_tts".to_string(),
                 description: "created by test".to_string(),
@@ -130,6 +142,32 @@ impl LocalServiceHarness {
         self.service.get_history_record(history_id).await
     }
 
+    /// 读取 `task_history.status`（直接走原生 SQL，不加载 detail）。
+    /// 用于断言清扫/状态机等仅关心 status 的场景，避免对未种子化 detail 行的依赖。
+    pub async fn history_status(&self, history_id: i64) -> Result<TaskStatus> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        let row = sqlx::query("SELECT status FROM task_history WHERE id = ? AND deleted = 0")
+            .bind(history_id)
+            .fetch_optional(&pool)
+            .await?;
+        pool.close().await;
+        let row = row.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("history row {history_id} not found"),
+            )
+        })?;
+        let status: String = row.get("status");
+        status
+            .parse::<TaskStatus>()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e).into())
+    }
+
+    /// 触发流式会话启动清扫（调用真实 `LocalService::sweep_stale_streaming_sessions_impl`）。
+    pub async fn sweep_stale_streaming_sessions(&self) -> Result<()> {
+        self.service.sweep_stale_streaming_sessions_impl().await
+    }
+
     pub fn src_model_root(&self) -> PathBuf {
         self.root_dir.join("src-model")
     }
@@ -144,7 +182,7 @@ impl LocalServiceHarness {
         self.service
             .update_speaker_info(UpdateSpeakerPayload {
                 id,
-                name: "Updated Speaker".to_string(),
+                speaker_name: "Updated Speaker".to_string(),
                 description: "updated by test".to_string(),
             })
             .await
@@ -156,11 +194,7 @@ impl LocalServiceHarness {
 
     // ---- 模型下载状态（覆盖 install/uninstall 的 DB 侧，不真正执行脚本） ----
 
-    pub async fn model_downloaded(
-        &self,
-        base_model: &str,
-        model_version: &str,
-    ) -> Result<bool> {
+    pub async fn model_downloaded(&self, base_model: &str, model_version: &str) -> Result<bool> {
         self.service
             .model_downloaded_impl(base_model, model_version)
             .await
@@ -391,9 +425,7 @@ impl LocalServiceHarness {
         history_id: i64,
     ) -> Result<Option<i64>> {
         let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
-        let sql = format!(
-            "SELECT id FROM {table_name} WHERE history_id = ? AND deleted = 0"
-        );
+        let sql = format!("SELECT id FROM {table_name} WHERE history_id = ? AND deleted = 0");
         let row = sqlx::query(&sql)
             .bind(history_id)
             .fetch_optional(&pool)

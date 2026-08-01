@@ -16,8 +16,8 @@ use std::{
 };
 
 use kirine_client_lib::{
-    load_configs, load_ui_configs, load_ui_configs_from_dir, save_configs, EnvConfig, HistoryTaskType,
-    StorageMode, TaskParamConfig, UiComponentType, UiParamType,
+    load_configs, load_ui_configs, load_ui_configs_from_dir, save_configs, EnvConfig,
+    HistoryTaskType, StorageMode, TaskParamConfig, UiComponentType, UiParamType,
 };
 
 fn current_dir_lock() -> &'static Mutex<()> {
@@ -44,8 +44,7 @@ impl TempCwd {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("kirine-client-settings-{label}-{timestamp}"));
+        let path = std::env::temp_dir().join(format!("kirine-client-settings-{label}-{timestamp}"));
         fs::create_dir_all(&path).expect("failed to create temp cwd");
         let original = std::env::current_dir().expect("failed to capture current dir");
         Self { original, path }
@@ -69,8 +68,11 @@ fn load_configs_backfills_missing_sections_and_persists_defaults() {
     let temp = TempCwd::new("load");
 
     // 仅写 [training] 段，load_configs 应回填 basic/remote 并持久化
-    fs::write(temp.path.join("config.toml"), "[training]\nattn_implementation = \"sdpa\"\n")
-        .expect("failed to write config fixture");
+    fs::write(
+        temp.path.join("config.toml"),
+        "[training]\nattn_implementation = \"sdpa\"\n",
+    )
+    .expect("failed to write config fixture");
     temp.enter();
 
     let config = load_configs().expect("failed to load config");

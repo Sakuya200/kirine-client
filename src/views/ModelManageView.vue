@@ -4,18 +4,25 @@ import { computed, onMounted, ref } from 'vue';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
+import BaseListbox from '@/components/common/BaseListbox.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
+import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT, ModelInstallStatus } from '@/enums/status';
+import { HardwareType, HARDWARE_TYPE_TEXT } from '@/enums/settings';
+import { usePollingResume } from '@/hooks/usePollingResume';
 import { useModelStore } from '@/stores/models';
+import type { ModelInfo } from '@/types/domain';
 
 const modelStore = useModelStore();
 const isMutating = ref(false);
 const mutatingModelId = ref<number | null>(null);
 const mutatingAction = ref<'install' | 'uninstall' | 'reinstall' | null>(null);
 const uninstallTargetId = ref<number | null>(null);
+// 正在持久化当前设备的模型 id：写入期间禁用该行下拉，避免并发覆盖。
+const deviceUpdatingId = ref<number | null>(null);
 
 // 模型目录数量有限，采用前端分页：loadModels 仍经 PageRequest 与 Rust 交互取全，
 // 此处仅对已加载的 items 做切片展示，不破坏 modelStore getter（业务页依赖全量）。
@@ -52,25 +59,59 @@ const featureLabelMap: Record<string, string> = {
   [HistoryTaskType.TextToSpeech]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.TextToSpeech],
   [HistoryTaskType.VoiceClone]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceClone],
   [HistoryTaskType.ModelTraining]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.ModelTraining],
-  [HistoryTaskType.VoiceDesign]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceDesign]
+  [HistoryTaskType.VoiceDesign]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceDesign],
+  [HistoryTaskType.StreamingSpeech]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.StreamingSpeech]
 };
 
 const refreshModels = async () => {
   await modelStore.loadModels();
 };
 
+const installStatusOf = (item: ModelInfo): ModelInstallStatus => modelStore.installStatusOf(item);
+
+// 单设备模型只读展示（后端已自动回填 currentDevice）；多设备需用户主动选择。
+const deviceSelectDisabled = (item: ModelInfo) => isMutating.value || deviceUpdatingId.value === item.id || item.supportedDevices.length <= 1;
+
+const deviceOptions = (item: ModelInfo) =>
+  item.supportedDevices.map(device => ({ label: HARDWARE_TYPE_TEXT[device] ?? device.toUpperCase(), value: device }));
+
+const effectiveInstallDevice = (item: ModelInfo): HardwareType | null => {
+  if (item.currentDevice !== null) {
+    return item.currentDevice;
+  }
+  if (item.supportedDevices.length === 1) {
+    return item.supportedDevices[0] ?? null;
+  }
+  return null;
+};
+
+const handleDeviceChange = async (item: ModelInfo, device: HardwareType) => {
+  if (item.currentDevice === device) return;
+  deviceUpdatingId.value = item.id;
+  try {
+    await modelStore.setCurrentDevice(item.id, device);
+  } finally {
+    deviceUpdatingId.value = null;
+  }
+};
+
 const handleInstall = async (modelId: number) => {
   const target = modelStore.items.find(item => item.id === modelId);
+  const device = target ? effectiveInstallDevice(target) : null;
+  // 多设备模型未选设备时按钮已禁用；此处兜底，避免空设备进入安装。
+  if (!target || device === null) {
+    return;
+  }
   isMutating.value = true;
   mutatingModelId.value = modelId;
-  mutatingAction.value = target?.downloaded ? 'reinstall' : 'install';
+  mutatingAction.value = target.downloaded ? 'reinstall' : 'install';
   try {
-    if (target?.downloaded) {
-      await modelStore.reinstallModel(modelId);
+    if (target.downloaded) {
+      await modelStore.reinstallModel(modelId, device);
       return;
     }
 
-    await modelStore.installModel(modelId);
+    await modelStore.installModel(modelId, device);
   } finally {
     isMutating.value = false;
     mutatingModelId.value = null;
@@ -104,6 +145,35 @@ const confirmUninstall = async () => {
   }
 };
 
+// 解除锁屏 / 唤醒后重新同步模型状态：模型安装/卸载是阻塞式长任务，其 invoke
+// 可能被系统睡眠冻结而卡住 isMutating；安装也可能在睡眠期间已完成。这里重拉
+// 列表，并在后端状态已达到预期时复位 isMutating，避免加载条与按钮永久卡死。
+usePollingResume(async () => {
+  await modelStore.loadModels();
+
+  if (isMutating.value && mutatingModelId.value !== null) {
+    const target = modelStore.items.find(item => item.id === mutatingModelId.value) ?? null;
+    const action = mutatingAction.value;
+    const reached = target
+      ? action === 'install' || action === 'reinstall'
+        ? target.downloaded
+        : action === 'uninstall'
+          ? !target.downloaded
+          : false
+      : false;
+
+    if (reached) {
+      const reachedId = mutatingModelId.value;
+      if (reachedId !== null) {
+        modelStore.clearInstallFailed(reachedId);
+      }
+      isMutating.value = false;
+      mutatingModelId.value = null;
+      mutatingAction.value = null;
+    }
+  }
+});
+
 onMounted(async () => {
   await modelStore.ensureLoaded();
 });
@@ -124,13 +194,14 @@ onMounted(async () => {
       </template>
 
       <div v-if="modelStore.items.length > 0" class="overflow-x-auto">
-        <table class="w-full min-w-[920px] text-left text-sm">
+        <table class="w-full min-w-[1080px] text-left text-sm">
           <thead>
             <tr class="border-b border-brand-100 text-xs uppercase tracking-wide text-stone-500">
               <th class="py-3 align-middle">模型</th>
               <th class="py-3 align-middle">版本</th>
               <th class="py-3 align-middle">支持功能</th>
               <th class="py-3 align-middle">依赖</th>
+              <th class="py-3 align-middle">当前设备</th>
               <th class="py-3 align-middle">状态</th>
               <th class="py-3 align-middle">操作</th>
             </tr>
@@ -154,11 +225,20 @@ onMounted(async () => {
                 <div v-for="name in item.requiredModelNameList" :key="name">{{ name }}</div>
               </td>
               <td class="py-3 align-middle">
-                <span
-                  class="rounded-full border px-2 py-1 text-[11px] font-medium"
-                  :class="item.downloaded ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-stone-100 text-stone-600'"
-                >
-                  {{ item.downloaded ? '已安装' : '未安装' }}
+                <div class="w-44">
+                  <BaseListbox
+                    :model-value="item.currentDevice"
+                    :options="deviceOptions(item)"
+                    :disabled="deviceSelectDisabled(item)"
+                    placeholder="请选择设备"
+                    teleport
+                    @update:model-value="handleDeviceChange(item, $event as HardwareType)"
+                  />
+                </div>
+              </td>
+              <td class="py-3 align-middle">
+                <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="MODEL_INSTALL_STATUS_STYLES[installStatusOf(item)]">
+                  {{ MODEL_INSTALL_STATUS_TEXT[installStatusOf(item)] }}
                 </span>
               </td>
               <td class="py-3 align-middle">
@@ -167,7 +247,8 @@ onMounted(async () => {
                     tone="ghost"
                     size="sm"
                     :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
-                    :disabled="isMutating"
+                    :disabled="isMutating || effectiveInstallDevice(item) === null"
+                    :title="effectiveInstallDevice(item) === null ? '请先选择当前设备' : ''"
                     @click="handleInstall(item.id)"
                   >
                     <ArrowDownTrayIcon

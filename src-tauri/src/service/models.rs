@@ -92,6 +92,7 @@ pub enum HistoryTaskType {
     TextToSpeech,
     VoiceClone,
     VoiceDesign,
+    StreamingSpeech,
 }
 
 impl HistoryTaskType {
@@ -101,6 +102,7 @@ impl HistoryTaskType {
             Self::TextToSpeech => "text-to-speech",
             Self::VoiceClone => "voice-clone",
             Self::VoiceDesign => "voice-design",
+            Self::StreamingSpeech => "streaming-speech",
         }
     }
 
@@ -110,6 +112,7 @@ impl HistoryTaskType {
             Self::TextToSpeech => "tts",
             Self::VoiceClone => "voice_clone",
             Self::VoiceDesign => "voice_design",
+            Self::StreamingSpeech => "streaming",
         }
     }
 }
@@ -213,6 +216,7 @@ impl FromStr for HistoryTaskType {
             "text-to-speech" => Ok(Self::TextToSpeech),
             "voice-clone" => Ok(Self::VoiceClone),
             "voice-design" => Ok(Self::VoiceDesign),
+            "streaming-speech" => Ok(Self::StreamingSpeech),
             other => Err(format!("不支持的历史任务类型: {}", other)),
         }
     }
@@ -365,7 +369,7 @@ impl FromStr for ModelTrainingFileKind {
 #[serde(rename_all = "camelCase")]
 pub struct SpeakerInfo {
     pub id: i64,
-    pub name: String,
+    pub speaker_name: String,
     pub samples: u32,
     pub base_model: BaseModel,
     pub create_time: String,
@@ -375,10 +379,10 @@ pub struct SpeakerInfo {
     pub source: SpeakerSource,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSpeakerPayload {
-    pub name: String,
+    pub speaker_name: String,
     pub samples: u32,
     pub base_model: BaseModel,
     pub description: String,
@@ -386,25 +390,25 @@ pub struct CreateSpeakerPayload {
     pub source: SpeakerSource,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSpeakerPayload {
     pub id: i64,
-    pub name: String,
+    pub speaker_name: String,
     pub description: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportModelAsSpeakerPayload {
     pub base_model: BaseModel,
     pub model_version: String,
     pub source_model_dir_path: String,
-    pub name: String,
+    pub speaker_name: String,
     pub description: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTaskStatusPayload {
     pub task_id: i64,
@@ -424,6 +428,7 @@ pub struct ModelInfo {
     pub required_model_repo_id_list: Vec<String>,
     pub supported_feature_list: Vec<String>,
     pub supported_devices: Vec<HardwareType>,
+    pub current_device: Option<HardwareType>,
     pub supported_languages: Vec<AppLanguage>,
     pub downloaded: bool,
     pub create_time: String,
@@ -502,6 +507,44 @@ pub struct VoiceDesignTaskDetail {
     pub output_file_path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingTaskDetail {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub device: HardwareType,
+    pub model_params: Value,
+    pub context_file_path: String,
+    pub input_cache_file_path: String,
+    pub output_audio_dir: String,
+    pub message_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingReplayMessage {
+    pub history_id: i64,
+    pub message_id: String,
+    pub context_id: String,
+    pub speaker_name: String,
+    pub text: String,
+    pub audio_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingReplaySnapshot {
+    pub task_id: i64,
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub language: AppLanguage,
+    pub device: HardwareType,
+    pub model_params: Value,
+    pub speakers: Vec<StreamingSpeakerInput>,
+    pub messages: Vec<StreamingReplayMessage>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
@@ -533,7 +576,7 @@ pub struct HistoryRecordSummary {
     pub modify_time: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {
     pub speaker_id: Option<i64>,
@@ -569,6 +612,14 @@ pub struct TextToSpeechTaskResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GeneratedAudioAsset {
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextToSpeechAudioAsset {
     pub task_id: i64,
     pub file_name: String,
@@ -594,6 +645,16 @@ pub struct VoiceDesignAudioAsset {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeechAudioAsset {
+    pub history_id: i64,
+    pub message_id: String,
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTrainingFileInput {
@@ -614,7 +675,7 @@ pub struct ModelTrainingSampleInput {
     pub secondary_file: Option<ModelTrainingFileInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateModelTrainingTaskPayload {
     pub language: AppLanguage,
@@ -627,7 +688,7 @@ pub struct CreateModelTrainingTaskPayload {
     pub samples: Vec<ModelTrainingSampleInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceCloneTaskPayload {
     pub base_model: BaseModel,
@@ -643,7 +704,7 @@ pub struct CreateVoiceCloneTaskPayload {
     pub model_params: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVoiceDesignTaskPayload {
     pub base_model: BaseModel,
@@ -655,6 +716,80 @@ pub struct CreateVoiceDesignTaskPayload {
     pub prompt: String,
     pub text: String,
     pub model_params: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeakerInput {
+    pub name: String,
+    pub base_model: BaseModel,
+    #[serde(default)]
+    pub model_version: Option<String>,
+    pub ref_audio_path: String,
+    pub ref_audio_name: String,
+    pub ref_text: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// trained 说话人 = speaker_id；voice-clone 为 None。
+    #[serde(default)]
+    pub speaker_dir_name: Option<String>,
+    /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
+    #[serde(default)]
+    pub category: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateStreamingSpeechTaskPayload {
+    pub base_model: BaseModel,
+    pub model_version: String,
+    pub device: HardwareType,
+    pub language: AppLanguage,
+    pub model_params: Value,
+    pub speakers: Vec<StreamingSpeakerInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendStreamingMessagePayload {
+    pub task_id: i64,
+    pub context_id: String,
+    pub speaker_name: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum GeneratedAudioSource {
+    TextToSpeech {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    VoiceClone {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    VoiceDesign {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+    },
+    StreamingSpeech {
+        #[serde(rename = "historyId")]
+        history_id: i64,
+        #[serde(rename = "messageId", alias = "contextId")]
+        message_id: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeechTaskResult {
+    pub task_id: i64,
+    pub context_file_path: String,
+    pub input_cache_file_path: String,
+    pub output_audio_dir: String,
+    pub status: TaskStatus,
+    pub created_at: String,
 }
 
 #[derive(Debug, Serialize)]

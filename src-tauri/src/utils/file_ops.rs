@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::Path,
-};
+use std::{fs, path::Path};
 
 use anyhow::Context;
 
@@ -188,4 +185,3 @@ pub fn remove_file_if_exists(path: &Path, description: &str) -> Result<()> {
 
     Ok(())
 }
-

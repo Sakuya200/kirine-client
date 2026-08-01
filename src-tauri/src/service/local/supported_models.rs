@@ -8,7 +8,7 @@ use sea_orm::{
 use serde::Deserialize;
 
 use crate::{
-    config::{discover_model_config_file_paths, MODEL_CONFIG_FILE_NAME},
+    config::{discover_model_config_file_paths, HardwareType, MODEL_CONFIG_FILE_NAME},
     service::{
         local::entity::{model_info as model_info_entity, speaker as speaker_entity},
         models::{AppLanguage, ModelDownloadType, SpeakerSource, SpeakerStatus},
@@ -106,7 +106,7 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
         .all(&txn)
         .await?;
     for row in existing_preset_speakers {
-        let key = format!("{}:{}", row.base_model.trim(), row.name.trim());
+        let key = format!("{}:{}", row.base_model.trim(), row.speaker_name.trim());
         if active_speaker_keys.contains(&key) {
             continue;
         }
@@ -122,8 +122,8 @@ pub(crate) async fn sync_supported_models(orm: &DatabaseConnection) -> Result<()
 }
 
 fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
-    let config_paths = discover_model_config_file_paths(MODEL_CONFIG_FILE_NAME)
-        .context("发现模型配置文件失败")?;
+    let config_paths =
+        discover_model_config_file_paths(MODEL_CONFIG_FILE_NAME).context("发现模型配置文件失败")?;
 
     let mut models = Vec::new();
     let mut speakers = Vec::new();
@@ -137,11 +137,7 @@ fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
             .with_context(|| format!("解析模型配置文件失败: {}", config_path.display()))?;
 
         for model in file_config.models {
-            let key = format!(
-                "{}:{}",
-                model.base_model.trim(),
-                model.model_version.trim()
-            );
+            let key = format!("{}:{}", model.base_model.trim(), model.model_version.trim());
             if !model_keys.insert(key.clone()) {
                 tracing::warn!(
                     key = %key,
@@ -168,10 +164,7 @@ fn load_supported_models_catalog() -> Result<SupportedModelsConfig> {
     }
 
     if models.is_empty() {
-        bail!(
-            "未从 {} 聚合到任何模型定义",
-            MODEL_CONFIG_FILE_NAME
-        );
+        bail!("未从 {} 聚合到任何模型定义", MODEL_CONFIG_FILE_NAME);
     }
 
     Ok(SupportedModelsConfig { models, speakers })
@@ -264,6 +257,12 @@ where
     if let Some(row) = existing {
         let downloaded = row.downloaded;
         let create_time = row.create_time.clone();
+        // current_device 跨 sync 保留用户选择：仅当原值仍属于 supported_devices 时保留。
+        // 不在表同步阶段写入默认设备，保持可空；空值由任务执行前设备探测流程回填。
+        let current_device = resolve_current_device_value(
+            row.current_device.as_deref(),
+            &definition.supported_devices,
+        );
         let mut active_model: model_info_entity::ActiveModel = row.into();
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.model_name = Set(definition.model_name.trim().to_string());
@@ -275,11 +274,14 @@ where
         active_model.supported_devices = Set(supported_devices_json);
         active_model.supported_languages = Set(supported_languages_json);
         active_model.downloaded = Set(downloaded);
+        active_model.current_device = Set(current_device);
         active_model.create_time = Set(create_time);
         active_model.modify_time = Set(now.to_string());
         active_model.deleted = Set(0);
         active_model.update(connection).await?;
     } else {
+        // 新插入行不写默认设备，保持 current_device 可空。
+        let current_device = resolve_current_device_value(None, &definition.supported_devices);
         model_info_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
             base_model: Set(definition.base_model.trim().to_string()),
@@ -290,6 +292,7 @@ where
             required_model_repo_id_list_json: Set(required_model_repo_id_list_json),
             supported_feature_list_json: Set(supported_feature_list_json),
             supported_devices: Set(supported_devices_json),
+            current_device: Set(current_device),
             supported_languages: Set(supported_languages_json),
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
@@ -303,6 +306,34 @@ where
     Ok(())
 }
 
+/// 计算 model_info.current_device 应写入的值：
+/// - 已有值仍属于 supported_devices -> 保留（跨会话持久化用户选择）
+/// - 其余情况 -> None（保持可空，交由任务执行前探测回填）
+fn resolve_current_device_value(
+    existing: Option<&str>,
+    supported_devices: &[String],
+) -> Option<String> {
+    let parsed: Vec<HardwareType> = supported_devices
+        .iter()
+        .filter_map(|item| {
+            item.trim()
+                .to_ascii_lowercase()
+                .parse::<HardwareType>()
+                .ok()
+        })
+        .collect();
+
+    if let Some(existing_value) = existing {
+        if let Ok(existing_device) = existing_value.trim().parse::<HardwareType>() {
+            if parsed.contains(&existing_device) {
+                return Some(existing_device.as_str().to_string());
+            }
+        }
+    }
+
+    None
+}
+
 async fn upsert_speaker_definition<C>(
     connection: &C,
     definition: &SupportedSpeakerDefinition,
@@ -313,7 +344,7 @@ where
 {
     let existing = speaker_entity::Entity::find()
         .filter(speaker_entity::Column::BaseModel.eq(definition.base_model.trim()))
-        .filter(speaker_entity::Column::Name.eq(definition.name.trim()))
+        .filter(speaker_entity::Column::SpeakerName.eq(definition.name.trim()))
         .filter(speaker_entity::Column::Source.eq(SpeakerSource::Preset.as_str()))
         .one(connection)
         .await?;
@@ -321,7 +352,7 @@ where
     if let Some(row) = existing {
         let create_time = row.create_time.clone();
         let mut active_model: speaker_entity::ActiveModel = row.into();
-        active_model.name = Set(definition.name.trim().to_string());
+        active_model.speaker_name = Set(definition.name.trim().to_string());
         active_model.samples = Set(0);
         active_model.base_model = Set(definition.base_model.trim().to_string());
         active_model.description = Set(definition.description.trim().to_string());
@@ -334,7 +365,7 @@ where
     } else {
         speaker_entity::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
-            name: Set(definition.name.trim().to_string()),
+            speaker_name: Set(definition.name.trim().to_string()),
             samples: Set(0),
             base_model: Set(definition.base_model.trim().to_string()),
             description: Set(definition.description.trim().to_string()),

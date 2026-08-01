@@ -15,8 +15,12 @@ mod m20260521_000006_rename_model_training_task_model_name_to_speaker_name;
 mod m20260522_000007_add_task_device_and_model_supported_devices;
 mod m20260604_000008_add_voice_design_tasks;
 mod m20260626_000009_add_model_supported_languages_and_drop_speaker_languages;
+mod m20260706_000010_rename_speakers_name_to_speaker_name;
+mod m20260718_000011_add_streaming_tasks;
+mod m20260723_000012_add_model_current_device;
+mod m20260801_000013_clear_model_current_device;
 
-const LOCAL_SCHEMA_VERSION: &str = "26";
+const LOCAL_SCHEMA_VERSION: &str = "30";
 
 pub(crate) struct Migrator;
 
@@ -37,6 +41,12 @@ impl MigratorTrait for Migrator {
             Box::new(
                 m20260626_000009_add_model_supported_languages_and_drop_speaker_languages::Migration,
             ),
+            Box::new(
+                m20260706_000010_rename_speakers_name_to_speaker_name::Migration,
+            ),
+            Box::new(m20260718_000011_add_streaming_tasks::Migration),
+            Box::new(m20260723_000012_add_model_current_device::Migration),
+            Box::new(m20260801_000013_clear_model_current_device::Migration),
         ]
     }
 }
