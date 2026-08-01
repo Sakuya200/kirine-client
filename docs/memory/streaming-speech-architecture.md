@@ -9,7 +9,7 @@ metadata:
 
 # 流式语音生成（StreamingSpeech）架构
 
-> 状态截至 2026-07-28 · 分支 `v.0.12.0`
+> 状态截至 2026-08-01 · 分支 `v.0.12.0`
 
 区别于 TTS/克隆/设计的「一次性脚本跑完出文件」，流式语音是**会话级长期进程**：一个 task 拉起一个常驻 `streaming.py`，多条聊天消息复用同一进程，音频按 chunk 实时经 Tauri IPC Channel 下发前端播放。
 
@@ -64,9 +64,11 @@ metadata:
 
 `streaming_context_json_path`（context.json）/ `streaming_input_cache_path`（input.jsonl，Rust->Python 输入）/ `streaming_frames_path`（frames.jsonl，Python->Rust 帧输出，临时）/ `streaming_output_audio_dir`（按 contextId 分音频文件）/ `streaming.params.json` / task-log-file。`history.rs::load_streaming_detail` 支持历史回放 StreamingSpeech 详情。
 
-## 前端（详见 [[tech-stack-frontend]] / [[data-flow-and-types]]）
+## 前端与历史回放（详见 [[tech-stack-frontend]] / [[data-flow-and-types]]）
 
 `StreamingSpeechView`（ChatUI）+ `StreamingConfigDrawer` + `StreamingSpeakerForm` + `StreamableAudioPlayer`(mode='stream') + `useStreamableAudioPlayer`。`stores/streamingSpeech.ts`：首条消息 `invoke create_streaming_speech_task` 拿 taskId 回填，后续 `invoke send_streaming_message`（带 Channel），取消 `invoke cancel_streaming_task`；防连点产生僵尸会话。`StreamingSpeakerCategory` 现支持 `voice-clone`（前端本地，ref 音频+台词）与 `trained`（经 `StreamingSpeakerForm` 从 `list_speaker_infos`(status=Ready) 按 baseModel 过滤选择，存 `speakerDirName=speaker.id`）两类；payload speakers 携带 `category` + `speakerDirName`。
+
+历史会话由 `get_streaming_replay_snapshot(historyId)` 恢复消息和配置。历史消息的音频播放与另存为统一使用 `GeneratedAudioSource::StreamingSpeech { historyId, messageId }`：前端调用 `get_generated_audio` 取得字节、创建 Blob URL 并缓存到组件卸载；下载调用 `save_generated_audio_as`。该回放路径按持久化的历史和消息 ID 读取文件，不依赖已退出的长期会话进程或 WebView 本地文件 URL。
 
 ## trained 说话人回接（moss_tts_realtime 首例）
 

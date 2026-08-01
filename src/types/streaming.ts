@@ -3,15 +3,14 @@ import type { HardwareType } from '@/enums/settings';
 
 /**
  * 流式语音说话人来源类别。
- * 本期仅实现 voice-clone（名称 + 参考音频 + 参考文本），preset/trained 为预留，
- * 未来再确定是否支持（届时可接入现有 speakerStore 体系）。
+ * voice-clone 使用名称、参考音频和参考文本；trained 从已有 Ready 说话人选择。
+ * preset 为预留类型。
  */
 export type StreamingSpeakerCategory = 'voice-clone' | 'preset' | 'trained';
 
 /**
- * 流式语音生成页本地说话人配置（语音克隆式）。
- * 不接入现有 speakerStore，纯前端本地管理；时间字段由后端生成、前端只读，
- * 纯前端本地阶段留空，未来接入后端持久化时由后端返回填充。
+ * 流式语音生成页说话人配置。voice-clone 由前端本地管理，
+ * trained 关联已有说话人；时间字段由后端生成、前端只读。
  */
 export interface StreamingSpeakerConfig {
   id: string;

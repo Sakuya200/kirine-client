@@ -9,7 +9,7 @@ metadata:
 
 # 后端架构 (Tauri 2 / Rust)
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`
+> 状态截至 2026-08-01 · 分支 `v.0.12.0`
 
 ## 目录结构
 ```
@@ -38,7 +38,7 @@ src-tauri/src/
 │   ├── mod.rs                     # load_hooks() 注册所有命令
 │   ├── model_info.rs              # list_model_infos, get_device_type, install_model, uninstall_model, set_model_current_device
 │   ├── speaker_info.rs            # create_speaker_info, import_model_as_speaker, list/update/delete
-│   ├── task_history.rs            # 任务创建/查询/取消 + 音频获取/导出/删除
+│   ├── task_history.rs            # 任务创建/查询/取消 + 统一生成音频读取/导出/删除
 │   ├── streaming.rs               # 流式语音命令（create/send/cancel）+ AudioStreamEvent 协议
 │   └── settings.rs                # get_settings_config, save_settings_config, get_ui_config
 │
@@ -116,7 +116,7 @@ src-tauri/src/
 | `config/ui_config.rs` | JSON 参数配置 -> 配置驱动的参数表单 |
 
 ### 业务模型统一
-`service/models.rs` 集中定义所有枚举（`AppLanguage`, `HistoryTaskType`(含 StreamingSpeech), `TaskStatus`, `SpeakerStatus`, `SpeakerSource`, `ModelDownloadType`, `ModelTrainingSampleType`, `ModelTrainingFileKind`, `TextToSpeechFormat`）和结构体（`ModelInfo`, `SpeakerInfo`, `HistoryRecord`, 各 TaskDetail/Payload/Result，流式 `CreateStreamingSpeechTaskPayload`/`SendStreamingMessagePayload`/`StreamingSpeechTaskResult`/`StreamingSpeakerInput`）。
+`service/models.rs` 集中定义所有枚举（`AppLanguage`, `HistoryTaskType`(含 StreamingSpeech), `TaskStatus`, `SpeakerStatus`, `SpeakerSource`, `ModelDownloadType`, `ModelTrainingSampleType`, `ModelTrainingFileKind`, `TextToSpeechFormat`）和结构体（`ModelInfo`, `SpeakerInfo`, `HistoryRecord`, 各 TaskDetail/Payload/Result，流式 `CreateStreamingSpeechTaskPayload`/`SendStreamingMessagePayload`/`StreamingSpeechTaskResult`/`StreamingSpeakerInput`）。`GeneratedAudioSource` 是 TTS、克隆、设计和流式消息的统一音频索引；`GeneratedAudioAsset { file_name, content_type, bytes }` 是统一读取结果。
 
 分页类型：`PageRequest<T>` (含 `Default`)、`Page<T>` (含 `::new()`)、`SpeakerFilter` / `ModelFilter` / `HistoryFilter`、`SpeakerPageResult` (分页 + 统计)。`list_model_infos` / `list_speaker_infos` / `list_history_records` 三个 service 方法与对应 hooks 命令均接收 `PageRequest<TFilter>`、返回 `Page<T>` / `SpeakerPageResult`；`list_history_records` 仅返回 `HistoryRecordSummary`（不含 detail/taskLog）。
 
@@ -171,7 +171,7 @@ DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260
 - 新表 `streaming_tasks` + migration `m20260718_000011`（schema 27->28）；`HistoryTaskType::StreamingSpeech`（`"streaming-speech"` / 目录 `"streaming"`）。
 - `hooks/streaming.rs`：`AudioStreamEvent` 协议（started/chunk/finished/error，经 `ipc::Channel` 下发）+ 3 命令（create/send/cancel）。
 - `service/local/streaming.rs`：会话创建/发消息/取消/清扫 + 会话句柄管理（`ActiveTaskControl.streaming_extra`）。
-- `service/pipeline/streaming.rs`：帧解析纯函数 + `run_streaming_session` 长期 runner（stdout 分帧按 contextId 分发、cancel kill、状态机 Running->Cancelled/Failed）。
+- `service/pipeline/streaming.rs`：帧解析纯函数 + `run_streaming_session` 长期 runner（tail `frames.jsonl` 后按 contextId 分发、cancel kill、状态机 Running->Cancelled/Failed）。
 - Remote 模式不支持（bail）。
 
 ### 测试约定
@@ -198,12 +198,8 @@ DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260
 | `get_history_record` | task_history | 历史详情 |
 | `cancel_history_task` | task_history | 取消任务 |
 | `delete_history_record` | task_history | 删除历史记录 |
-| `get_text_to_speech_audio` | task_history | 获取 TTS 音频 |
-| `get_voice_clone_audio` | task_history | 获取声音克隆音频 |
-| `get_voice_design_audio` | task_history | 获取音色设计音频 |
-| `save_text_to_speech_audio_as` | task_history | TTS 音频另存为 |
-| `save_voice_clone_audio_as` | task_history | 声音克隆音频另存为 |
-| `save_voice_design_audio_as` | task_history | 音色设计音频另存为 |
+| `get_generated_audio` | task_history | 通过 `GeneratedAudioSource` 读取生成音频字节 |
+| `save_generated_audio_as` | task_history | 通过同一 source 另存为生成音频 |
 | `save_model_training_template_as` | task_history | 微调模板另存为 |
 | `create_streaming_speech_task` | streaming | 创建流式语音会话（建表 + 拉起长期进程） |
 | `send_streaming_message` | streaming | 发送一条流式消息（带 `on_event: Channel`，等终帧/300s 超时） |

@@ -9,7 +9,7 @@ metadata:
 
 # 数据流与类型体系
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`
+> 状态截至 2026-08-01 · 分支 `v.0.12.0`
 
 ## 前后端通信
 前端通过 `@tauri-apps/api/core` 的 `invoke<T>(command, payload)` 调用后端 Tauri 命令。所有数据经过 serde 自动序列化/反序列化（后端用 `camelCase`，前端一致）。流式语音额外用 Tauri 2 `ipc::Channel<AudioStreamEvent>` 下发实时事件。
@@ -35,12 +35,8 @@ metadata:
 | `get_history_record` | task_history | -> | 历史详情 (含 detail JSON) |
 | `cancel_history_task` | task_history | -> | 取消运行中任务 |
 | `delete_history_record` | task_history | -> | 删除历史记录 |
-| `get_text_to_speech_audio` | task_history | -> | 获取 TTS 音频 |
-| `get_voice_clone_audio` | task_history | -> | 获取声音克隆音频 |
-| `get_voice_design_audio` | task_history | -> | 获取音色设计音频 |
-| `save_text_to_speech_audio_as` | task_history | -> | TTS 音频另存为 |
-| `save_voice_clone_audio_as` | task_history | -> | 声音克隆音频另存为 |
-| `save_voice_design_audio_as` | task_history | -> | 音色设计音频另存为 |
+| `get_generated_audio` | task_history | -> | 按 `GeneratedAudioSource` 读取生成音频字节，前端构造 Blob URL 播放 |
+| `save_generated_audio_as` | task_history | -> | 按同一 `GeneratedAudioSource` 另存为生成音频 |
 | `save_model_training_template_as` | task_history | -> | 微调模板导出 |
 | `create_streaming_speech_task` | streaming | -> | 创建流式语音会话（`CreateStreamingSpeechTaskPayload` -> `StreamingSpeechTaskResult`，建 task_history+streaming_tasks 记录 + 拉起长期进程） |
 | `send_streaming_message` | streaming | -> | 发送一条流式消息（`SendStreamingMessagePayload` + `on_event: Channel<AudioStreamEvent>`，等终帧或 300s 超时） |
@@ -86,7 +82,7 @@ Pipeline 后台线程:
 
 runner (run_streaming_session, 长期存活):
    -> 置 Running -> spawn begin_llm_task -> streaming.py
-   -> 逐行读 stdout, parse_streaming_frame -> frame_to_event -> forward_event
+   -> tail `frames.jsonl`, parse_streaming_frame -> frame_to_event -> forward_event
    -> 按 contextId 分发到 message_channels 的 Channel
    -> cancel 信号到达 kill 子进程; 退出置 Cancelled/Failed
    -> init_db 时 sweep 残留 Running 流式会话为 Cancelled
@@ -211,13 +207,19 @@ runner (run_streaming_session, 长期存活):
 完整架构见 [[streaming-speech-architecture]]。
 
 **前端类型**（`types/streaming.ts`）：
-- `StreamingSpeakerConfig`：本地语音克隆式说话人（id/name/category/baseModel/refAudioPath/refAudioName/refText）；`StreamingSpeakerCategory` 当前固定 `voice-clone`，预留 `preset`/`trained`。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
+- `StreamingSpeakerConfig`：流式说话人配置（id/name/category/baseModel/refAudioPath/refAudioName/refText）。`voice-clone` 使用前端本地参考音频与台词；`trained` 从 Ready 说话人按基础模型选择并携带 `speakerDirName`；`preset` 仍为预留。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
 - `StreamingChatMessage`：聊天消息（role/text/synthText/speakerId/taskId/contextId/status）；assistant 消息挂 `StreamableAudioPlayer(mode='stream')`。
 - `StreamingSessionConfig`：会话级配置（baseModel/modelVersion/device/language/modelParams），抽屉编辑、聊天页消费；提交后端 payload 不含时间。
 
 **前后端契约类型**（`domain.ts` ↔ `service/models.rs` + `hooks/streaming.rs`）：`StreamingSpeakerInput` / `CreateStreamingSpeechTaskPayload` / `SendStreamingMessagePayload` / `StreamingSpeechTaskResult` / `AudioStreamEvent`（serde `tag="type"` + `rename_all="camelCase"`：`started` / `chunk{bytes}` / `finished` / `error{message}`，经 `ipc::Channel<AudioStreamEvent>` 下发）。
 
-**帧协议**：脚本 stdout 每行一个 JSON `{type, contextId, bytes?(base64), message?}` ↔ Rust `StreamingFrame` ↔ `AudioStreamEvent` 下发前端。`contextId` 由前端生成，多路复用同一会话进程。
+**帧协议**：脚本向会话临时文件 `frames.jsonl` 追加每行一个 JSON `{type, contextId, bytes?(base64), message?}`；Rust tail 读取为 `StreamingFrame`，再转换为 `AudioStreamEvent` 下发前端。`contextId` 由前端生成，多路复用同一会话进程。
+
+## 统一生成音频读取、回放与导出
+
+`GeneratedAudioSource` 是所有已生成音频的唯一定位契约：`text-to-speech`、`voice-clone`、`voice-design` 使用 `historyId`，`streaming-speech` 使用 `historyId + messageId`（后端兼容 `contextId` 别名）。
+
+前端通过 `get_generated_audio` 取得 `{ fileName, contentType, bytes }`，以 `Uint8Array` 和 `Blob` 构建 object URL 后交给浏览器 `Audio` 播放；组件卸载时释放 object URL。导出复用完全相同的 source，通过 `save_generated_audio_as` 在 Rust 侧读取字节并弹出另存为对话框。该路径不依赖 WebView 对本地文件或 asset URL 的媒体访问能力，历史流式消息也不依赖会话运行句柄。
 
 前端 `useStreamableAudioPlayer` 订阅 Channel、累计 chunk 为 Blob、点击播放时构建 objectURL，缓冲播放语义。`streamingSpeech` store 首条消息 invoke `create_streaming_speech_task` 拿 taskId 回填，后续 invoke `send_streaming_message`，取消 invoke `cancel_streaming_task`。
 

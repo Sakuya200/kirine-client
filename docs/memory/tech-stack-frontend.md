@@ -9,7 +9,7 @@ metadata:
 
 # 前端架构 (Vue 3 + TypeScript)
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`
+> 状态截至 2026-08-01 · 分支 `v.0.12.0`
 
 ## 目录结构
 ```
@@ -62,8 +62,8 @@ src/
 │   └── textToSpeech.ts      # TextToSpeechFormat (wav/mp3/flac)
 ├── hooks/
 │   ├── useErrorMessage.ts   # 错误消息格式化
-│   ├── useTaskAudioPlayer.ts # 音频播放
-│   ├── useStreamableAudioPlayer.ts # 流式/路径双模式音频播放
+│   ├── useTaskAudioPlayer.ts # 一次性任务音频播放
+│   ├── useStreamableAudioPlayer.ts # 流式实时缓冲与历史 Blob 音频播放
 │   ├── useTaskDeviceTypeGuard.ts # 设备类型校验
 │   ├── usePagination.ts     # 统一服务端分页 hook
 │   ├── loadRecentHistoryRecords.ts # 业务页结果卡懒加载历史 detail
@@ -81,6 +81,7 @@ src/
 │   ├── streaming.ts         # 流式语音前端类型 (说话人/消息/会话配置；与 Rust 后端契约对齐)
 │   └── uiConfig.ts          # UI 配置类型系统
 ├── utils/
+│   ├── audioDownload.ts              # 统一生成音频另存为
 │   ├── createTaskExportAudioName.ts
 │   ├── formatDurationClock.ts
 │   └── uiConfigModelParams.ts  # 配置->模型参数转换
@@ -119,7 +120,7 @@ src/
 ### 状态管理
 - `models` store：模型列表、设备检测、install/uninstall、feature 检测（`supportsFeature`）、设备/语言访问器（`getSupportedDevices` / `getSupportedLanguages`，空时回退全部）。`normalizeModelInfo` 将 `currentDevice` 归一为合法且 ∈ supportedDevices 的 HardwareType，否则 null；`setCurrentDevice(modelId, device)` invoke `set_model_current_device` 写库并即时替换本地条目。`installModel`/`reinstallModel` 需显式 device 参数（不再默认 Cpu），ModelManageView 传当前模型的 `currentDevice`，未选设备时安装按钮禁用。
 - `speakers` store：说话人 CRUD、模型导入为说话人
-- `streamingSpeech` store：流式语音会话状态--本地说话人列表（语音克隆式，不接入 speakers）、聊天消息、会话配置、抽屉开关。`sendMessage` 首条消息 `invoke('create_streaming_speech_task')` 拿 taskId 回填，后续 `invoke('send_streaming_message', { onEvent: Channel })` 接收流式事件；取消 `invoke('cancel_streaming_task')`。防连点/回车连击产生僵尸会话。流式接收交 `StreamableAudioPlayer(mode='stream')`。
+- `streamingSpeech` store：流式语音会话状态--本地说话人配置、聊天消息、会话配置、抽屉开关。说话人可为参考音频语音克隆，也可选择 Ready 状态的已训练说话人；`sendMessage` 首条消息 `invoke('create_streaming_speech_task')` 拿 taskId 回填，后续 `invoke('send_streaming_message', { onEvent: Channel })` 接收流式事件；取消 `invoke('cancel_streaming_task')`。防连点/回车连击产生僵尸会话。流式接收交 `StreamableAudioPlayer(mode='stream')`。
 - `taskPreferences` store：当前任务的偏好设置（如固定基础模型）
 - `uiConfig` store：管理从后端动态加载的 UI 参数配置
 
@@ -144,9 +145,10 @@ src/
 
 - `StreamingSpeechView`：ChatUI 风格对话页，user/assistant 气泡 + 底部说话人选择与文本输入（Enter 发送 / Shift+Enter 换行）。assistant 消息挂 `StreamableAudioPlayer(mode='stream')`，借其 `watch immediate` 契约自动 `startStreaming(taskId, contextId)`，经 `send_streaming_message` 的 `ipc::Channel` 接收 `AudioStreamEvent`（started/chunk/finished/error）累计播放。
 - `StreamingConfigDrawer`：右侧可拖拽抽屉（左边缘 pointer 事件调宽 320–560px，默认收起按需唤起，带半透明遮罩），三段 `PanelCard`：基础配置（模型/版本/设备/语言，镜像 `VoiceCloneView` 的 watch 同步）/ 说话人管理 / 模型参数（`GenericTaskParamsForm`）。`StreamingSpeakerForm` 基于 `BaseDialog`，字段为名称/对应模型/参考音频/参考文本（按模型可选）/类别只读。
-- 说话人为**前端本地语音克隆式**定义（名称+参考音频+参考文本+类别），不接入 `speakerStore`；`StreamingSpeakerCategory` 当前固定 `voice-clone`，预留 `preset`/`trained`。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
+- 说话人支持两类输入：`voice-clone` 为前端本地定义（名称+参考音频+参考文本），`trained` 从 `list_speaker_infos(status=Ready)` 按基础模型筛选，提交 `speakerDirName=speaker.id`；`preset` 仍为预留类型。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
 - `requiresRefText(baseModel)` 复用 `DYNAMIC_REFERENCE_BASE_MODELS` 模式（`gpt_sovits_cpufast`）判断参考文本是否必填。
 - `streamingSpeech` store：首条消息 `invoke create_streaming_speech_task` 拿 `StreamingSpeechTaskResult`（taskId + 三个路径）回填，后续 `invoke send_streaming_message`（payload 含 taskId/contextId/speakerName/text，附 `onEvent: Channel`）；`cancel_streaming_task` 终止会话。
+- 历史流式消息由 `get_streaming_replay_snapshot` 恢复；`StreamableAudioPlayer` 以 `historyId + messageId` 调用 `get_generated_audio`，将返回字节转为 Blob URL 后播放。TTS、声音克隆和音色设计的结果卡也使用该命令加载音频；所有四类生成音频的下载均通过 `utils/audioDownload.ts` 调用 `save_generated_audio_as`。
 
 ### 路由
 - 默认路由 `/` 重定向到 `/model-training`
