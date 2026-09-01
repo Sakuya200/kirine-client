@@ -143,7 +143,7 @@ src/
 ### 流式语音生成
 前端 ChatUI + 后端会话级长期进程的实时流式语音合成。后端架构见 [[streaming-speech-architecture]]。
 
-- `StreamingSpeechView`：ChatUI 风格对话页，user/assistant 气泡 + 底部说话人选择与文本输入（Enter 发送 / Shift+Enter 换行）。assistant 消息挂 `StreamableAudioPlayer(mode='stream')`，借其 `watch immediate` 契约自动 `startStreaming(taskId, contextId)`，经 `send_streaming_message` 的 `ipc::Channel` 接收 `AudioStreamEvent`（started/chunk/finished/error）累计播放。
+- `StreamingSpeechView`：ChatUI 风格对话页，user/assistant 气泡 + 底部说话人选择与文本输入（Enter 发送 / Shift+Enter 换行）。assistant 消息挂 `StreamableAudioPlayer(mode='stream')`，借其 `watch immediate` 契约自动 `startStreaming(taskId, contextId)`，经 `send_streaming_message` 的 Tauri `Channel` 接收事件（控制事件 started/finished/error 为 JSON 对象，chunk 为 ArrayBuffer 二进制）累计播放。
 - `StreamingConfigDrawer`：右侧可拖拽抽屉（左边缘 pointer 事件调宽 320–560px，默认收起按需唤起，带半透明遮罩），三段 `PanelCard`：基础配置（模型/版本/设备/语言，镜像 `VoiceCloneView` 的 watch 同步）/ 说话人管理 / 模型参数（`GenericTaskParamsForm`）。`StreamingSpeakerForm` 基于 `BaseDialog`，字段为名称/对应模型/参考音频/参考文本（按模型可选）/类别只读。
 - 说话人支持两类输入：`voice-clone` 为前端本地定义（名称+参考音频+参考文本），`trained` 从 `list_speaker_infos(status=Ready)` 按基础模型筛选，提交 `speakerDirName=speaker.id`；`preset` 仍为预留类型。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
 - `requiresRefText(baseModel)` 复用 `DYNAMIC_REFERENCE_BASE_MODELS` 模式（`gpt_sovits_cpufast`）判断参考文本是否必填。

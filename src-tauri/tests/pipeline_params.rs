@@ -275,7 +275,8 @@ fn writes_streaming_params_file_with_expected_fields() {
             input_cache_file_path: "/ctx/input.jsonl".to_string(),
             output_audio_dir: "/ctx/audio".to_string(),
             model_root_path: String::new(),
-            frames_file_path: "/ctx/frames.jsonl".to_string(),
+            streaming_socket_addr: "127.0.0.1:54321".to_string(),
+            streaming_socket_token: "tok-abc".to_string(),
             model_params_json: Value::Null,
             speakers: vec![StreamingSpeakerArg {
                 name: "A".to_string(),
@@ -298,8 +299,12 @@ fn writes_streaming_params_file_with_expected_fields() {
         "/ctx/input.jsonl"
     );
     assert_eq!(
-        json["args"]["Streaming"]["frames_file_path"],
-        "/ctx/frames.jsonl"
+        json["args"]["Streaming"]["streaming_socket_addr"],
+        "127.0.0.1:54321"
+    );
+    assert_eq!(
+        json["args"]["Streaming"]["streaming_socket_token"],
+        "tok-abc"
     );
     assert_eq!(json["args"]["Streaming"]["speakers"][0]["name"], "A");
     assert_eq!(json["args"]["Streaming"]["speakers"][0]["ref_text"], "参考");

@@ -21,7 +21,6 @@ use crate::{
         },
     },
     config::{BaseModel, HardwareType},
-    hooks::streaming::AudioStreamEvent,
     service::{
         local::entity::{
             streaming_task as streaming_task_entity, task_history as task_history_entity,
@@ -344,7 +343,7 @@ impl LocalService {
     pub(crate) async fn send_streaming_message_impl(
         &self,
         payload: SendStreamingMessagePayload,
-        on_event: Channel<AudioStreamEvent>,
+        on_event: Channel<tauri::ipc::InvokeResponseBody>,
     ) -> Result<()> {
         let task_id = payload.task_id;
         let context_id = payload.context_id.clone();
@@ -399,7 +398,7 @@ impl LocalService {
             guard.insert(context_id.clone(), MessageChannel::new(on_event, done_tx));
         }
 
-        // 追加 context.json messages + input.jsonl
+        // 追加 context.json messages + input.jsonl（审计日志），并经 Socket 推送 input 帧
         let feed_result: Result<()> = async {
             let _guard = context_lock.lock().await;
             let ctx_bytes = std::fs::read(&context_json_path)?;
@@ -424,6 +423,11 @@ impl LocalService {
                 .open(&input_cache_path)?;
             use std::io::Write;
             writeln!(file, "{entry_line}")?;
+
+            // Socket 推送（Python 阻塞 recv，即刻可读；替代此前的 input.jsonl 轮询）。
+            extra.send_input_frame(
+                crate::service::pipeline::streaming_transport::encode_input_frame(&entry_line),
+            )?;
             Ok(())
         }
         .await;
@@ -444,9 +448,9 @@ impl LocalService {
                 // 若 runner 已先行 remove（终帧已到），则不下发，避免成功后误报错误。
                 if let Ok(mut guard) = extra.message_channels.write() {
                     if let Some(mc) = guard.remove(&context_id) {
-                        let _ = mc.on_event.send(AudioStreamEvent::Error {
-                            message: "流式生成超时".into(),
-                        });
+                        let _ = mc.on_event.send(
+                            crate::service::pipeline::streaming::error_event("流式生成超时".into()),
+                        );
                     }
                 }
                 bail!("流式生成超时（contextId={context_id}）");

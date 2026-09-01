@@ -4,6 +4,7 @@ pub mod model_paths;
 pub mod pipeline;
 pub mod script_paths;
 pub mod streaming;
+pub mod streaming_transport;
 pub mod training;
 pub mod tts;
 pub mod voice_clone;

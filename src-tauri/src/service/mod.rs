@@ -116,7 +116,7 @@ pub trait Service: Send + Sync {
     async fn send_streaming_message(
         &self,
         payload: SendStreamingMessagePayload,
-        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+        on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     ) -> Result<()>;
     async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool>;
     async fn get_streaming_replay_snapshot(

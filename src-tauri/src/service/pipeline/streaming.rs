@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::{BufRead, Write},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::Duration,
@@ -8,10 +7,12 @@ use std::{
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tokio::{
+    net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener},
     process::Child,
-    sync::{oneshot, watch, Mutex},
+    sync::{mpsc, oneshot, watch, Mutex},
+    time::timeout,
 };
 use tracing::{error, info, warn};
 
@@ -19,8 +20,8 @@ use crate::{
     common::{
         local_paths::resolve_local_log_dir,
         task_paths::{
-            streaming_context_json_path, streaming_frames_path, streaming_input_cache_path,
-            streaming_output_audio_dir, task_log_file_path, task_sample_dir,
+            streaming_context_json_path, streaming_input_cache_path, streaming_output_audio_dir,
+            task_log_file_path, task_sample_dir,
         },
     },
     config::HardwareType,
@@ -38,6 +39,11 @@ use crate::{
                 resolve_src_model_root, src_model_begin_llm_task_script_path,
                 src_model_model_python_script_path, ScriptPlatform,
             },
+            streaming_transport::{
+                decode_frame_header, generate_session_token, parse_auth_payload,
+                parse_chunk_payload, FRAME_HEADER_LEN, FRAME_KIND_AUTH, FRAME_KIND_CHUNK,
+                FRAME_KIND_CONTROL,
+            },
             StreamingPipelineRequest,
         },
     },
@@ -45,7 +51,7 @@ use crate::{
     Result,
 };
 
-/// 脚本 stdout 单帧（JSON 行）。`bytes` 为 base64。
+/// 流式会话环回 Socket 帧承载的一条消息（Python -> Rust）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamingFrame {
     pub context_id: String,
@@ -130,12 +136,11 @@ struct RawFrame {
     #[serde(rename = "contextId")]
     context_id: String,
     #[serde(default)]
-    bytes: Option<String>,
-    #[serde(default)]
     message: Option<String>,
 }
 
-/// 解析脚本 stdout 一行。空行返回 `Ok(None)`；坏行返回 `Err`。
+/// 解析控制帧 payload（JSON 文本）。空文本返回 `Ok(None)`；坏行返回 `Err`。
+/// chunk 不经此路径（二进制帧，见 `streaming_transport::parse_chunk_payload`）。
 pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -145,10 +150,6 @@ pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
     let payload = match raw.kind.as_str() {
         "started" => StreamingFramePayload::Started,
         "session_ready" => StreamingFramePayload::SessionReady,
-        "chunk" => {
-            let bytes = base64_decode(raw.bytes.as_deref().unwrap_or(""))?;
-            StreamingFramePayload::Chunk { bytes }
-        }
         "finished" => StreamingFramePayload::Finished,
         "error" => StreamingFramePayload::Error {
             message: raw.message.unwrap_or_default(),
@@ -161,26 +162,28 @@ pub fn parse_streaming_frame(line: &str) -> Result<Option<StreamingFrame>> {
     }))
 }
 
-/// 将帧映射为下发前端的 `AudioStreamEvent`。
-pub fn frame_to_event(frame: &StreamingFrame) -> Option<AudioStreamEvent> {
+/// 将帧映射为下发前端的 IPC 载荷：控制事件走 JSON，chunk 走 `Raw` 二进制
+/// （前端收到 ArrayBuffer，>1KB 由 Tauri 经 fetch 快速路径回传，避免 JSON
+/// 数字数组 ~4 倍膨胀与逐字节物化）。
+pub fn frame_to_event(frame: &StreamingFrame) -> Option<InvokeResponseBody> {
     match &frame.payload {
-        StreamingFramePayload::Started => Some(AudioStreamEvent::Started),
+        StreamingFramePayload::Started => Some(json_event(&AudioStreamEvent::Started)),
         StreamingFramePayload::SessionReady => None,
-        StreamingFramePayload::Chunk { bytes } => Some(AudioStreamEvent::Chunk {
-            bytes: bytes.clone(),
-        }),
-        StreamingFramePayload::Finished => Some(AudioStreamEvent::Finished),
-        StreamingFramePayload::Error { message } => Some(AudioStreamEvent::Error {
+        StreamingFramePayload::Chunk { bytes } => Some(InvokeResponseBody::Raw(bytes.clone())),
+        StreamingFramePayload::Finished => Some(json_event(&AudioStreamEvent::Finished)),
+        StreamingFramePayload::Error { message } => Some(json_event(&AudioStreamEvent::Error {
             message: message.clone(),
-        }),
+        })),
     }
 }
 
-fn base64_decode(value: &str) -> Result<Vec<u8>> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-    STANDARD
-        .decode(value)
-        .context("failed to base64-decode chunk bytes")
+fn json_event(event: &AudioStreamEvent) -> InvokeResponseBody {
+    InvokeResponseBody::Json(serde_json::to_string(event).unwrap_or_default())
+}
+
+/// 构造 error 控制事件的 IPC 载荷（会话层超时/收尾路径直接下发前端用）。
+pub fn error_event(message: String) -> InvokeResponseBody {
+    json_event(&AudioStreamEvent::Error { message })
 }
 
 #[derive(Debug, Clone)]
@@ -194,8 +197,6 @@ pub(crate) struct ResolvedStreamingPaths {
     pub context_json_path: PathBuf,
     pub input_cache_path: PathBuf,
     pub output_audio_dir: PathBuf,
-    /// Python->Rust 帧缓冲文件（NDJSON append），runner 轮询 tail。
-    pub frames_path: PathBuf,
     /// = service.model_dir()，trained 说话人 checkpoint 解析所需。
     pub model_root_path: PathBuf,
     pub params_json_path: PathBuf,
@@ -219,7 +220,6 @@ pub(crate) fn resolve_streaming_paths(
     let context_json_path = streaming_context_json_path(&sample_root);
     let input_cache_path = streaming_input_cache_path(&sample_root);
     let output_audio_dir = streaming_output_audio_dir(&sample_root);
-    let frames_path = streaming_frames_path(&sample_root);
     let params_json_path = sample_root.join("streaming.params.json");
 
     Ok(ResolvedStreamingPaths {
@@ -232,7 +232,6 @@ pub(crate) fn resolve_streaming_paths(
         context_json_path,
         input_cache_path,
         output_audio_dir,
-        frames_path,
         model_root_path: PathBuf::from(service.model_dir()),
         params_json_path,
     })
@@ -245,6 +244,8 @@ pub(crate) fn build_streaming_invocation(
     device: HardwareType,
     model_params: serde_json::Value,
     speakers: Vec<StreamingSpeakerInput>,
+    socket_addr: &str,
+    socket_token: &str,
 ) -> PythonScriptInvocationSpec {
     PythonScriptInvocationSpec {
         version: "1.0.0".to_string(),
@@ -261,7 +262,8 @@ pub(crate) fn build_streaming_invocation(
             input_cache_file_path: paths.input_cache_path.to_string_lossy().to_string(),
             output_audio_dir: paths.output_audio_dir.to_string_lossy().to_string(),
             model_root_path: paths.model_root_path.to_string_lossy().to_string(),
-            frames_file_path: paths.frames_path.to_string_lossy().to_string(),
+            streaming_socket_addr: socket_addr.to_string(),
+            streaming_socket_token: socket_token.to_string(),
             model_params_json: model_params,
             speakers: speakers
                 .into_iter()
@@ -277,15 +279,16 @@ pub(crate) fn build_streaming_invocation(
     }
 }
 
-/// 单条消息的前端 Channel + 完成信号。
+/// 单条消息的前端 Channel + 完成信号。Channel 载荷为 `InvokeResponseBody`：
+/// 控制事件 JSON、chunk 二进制。
 pub(crate) struct MessageChannel {
-    pub on_event: Channel<AudioStreamEvent>,
+    pub on_event: Channel<InvokeResponseBody>,
     pub done: oneshot::Sender<StreamMessageOutcome>,
 }
 
 impl MessageChannel {
     pub(crate) fn new(
-        on_event: Channel<AudioStreamEvent>,
+        on_event: Channel<InvokeResponseBody>,
         done: oneshot::Sender<StreamMessageOutcome>,
     ) -> Self {
         Self { on_event, done }
@@ -315,6 +318,38 @@ pub(crate) struct StreamingSessionExtra {
     /// 串行化 context.json 的 read-modify-write，避免同会话并发发送时后写覆盖前写、
     /// 丢失先到达的消息记录。每会话独立一把锁（`register_streaming_session` 时创建）。
     pub context_lock: Arc<Mutex<()>>,
+    /// Rust->Python input 帧通道：Socket 连接建立后由 runner 注入，
+    /// `send_streaming_message` 持此推送消息（替代 input.jsonl 轮询）。
+    pub input_tx: Arc<std::sync::Mutex<Option<mpsc::Sender<Vec<u8>>>>>,
+}
+
+impl StreamingSessionExtra {
+    /// 注入 input 帧通道（Socket 连接建立后由 runner 调用）。
+    pub(crate) fn set_input_sender(&self, tx: mpsc::Sender<Vec<u8>>) {
+        if let Ok(mut guard) = self.input_tx.lock() {
+            *guard = Some(tx);
+        }
+    }
+
+    /// 会话结束时关闭 input 通道，令 Socket writer 任务退出。
+    pub(crate) fn close_input_sender(&self) {
+        if let Ok(mut guard) = self.input_tx.lock() {
+            *guard = None;
+        }
+    }
+
+    /// 推送一条 input 帧到 Python。通道未建立（会话未就绪/已结束）或阻塞时报错。
+    pub(crate) fn send_input_frame(&self, frame: Vec<u8>) -> Result<()> {
+        let guard = self
+            .input_tx
+            .lock()
+            .map_err(|_| anyhow::anyhow!("流式会话输入通道锁损坏"))?;
+        let tx = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("流式会话 Socket 未连接"))?;
+        tx.try_send(frame)
+            .map_err(|_| anyhow::anyhow!("流式会话输入通道阻塞"))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -327,12 +362,29 @@ pub(crate) struct LoadedStreamingDetail {
     pub speakers: Vec<StreamingSpeakerInput>,
 }
 
-/// 长期存活的流式会话 runner：spawn `begin_llm_task` -> streaming.py，轮询 tail
-/// `frames.jsonl` 缓冲文件分帧、按 contextId 分发到 `message_channels`；cancel 信号
-/// 到达即 kill 子进程并通知所有 pending 消息。会话状态机：Running（spawn 后）->
-/// Cancelled/Failed/Exited（退出）。`detail` / `extra` 由 `start_streaming_session`
-/// （Task 5）从 DB / 会话注册表取后传入，本函数不调用 `load_streaming_task_detail` /
-/// `streaming_session_extra`，避免前向依赖。
+/// 等待 Python 连接会话 Socket 的超时。Python 启动后即刻连接（模型加载在连接之后），
+/// 预留 shell/venv 启动开销。
+const STREAMING_SOCKET_ACCEPT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Rust->Python input 帧的通道缓冲。帧体为小体积 JSON，Python 合成期间到达的消息
+/// 在此排队（语义对齐此前的 input.jsonl append）。
+const STREAMING_INPUT_CHANNEL_CAPACITY: usize = 128;
+/// Python->Rust 帧通道缓冲。
+const STREAMING_FRAME_CHANNEL_CAPACITY: usize = 256;
+/// Socket EOF 后等待子进程退出的宽限：shell 滞后于 Python 退出属正常，超时则强杀
+/// 进程树，避免孤儿进程占用 GPU/模型。
+const CHILD_EXIT_GRACE: Duration = Duration::from_secs(5);
+/// 帧静默时的周期性 try_wait 间隔：捕获「shell 存活但 Python 已死」等 Socket 未及时
+/// 关闭的场景。
+const CHILD_LIVENESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// cancel/进程退出后尽力回收已缓冲帧的等待时长。
+const FRAME_DRAIN_WAIT: Duration = Duration::from_millis(50);
+
+/// 长期存活的流式会话 runner：spawn `begin_llm_task` -> streaming.py，监听环回
+/// Socket 接收二进制帧、按 contextId 分发到 `message_channels`，input 消息经同一
+/// Socket 推送给 Python；cancel 信号到达即 kill 子进程并通知所有 pending 消息。
+/// 会话状态机：Running（spawn 后）-> Cancelled/Failed/Exited（退出）。
+/// `detail` / `extra` 由 `start_streaming_session` 从 DB / 会话注册表取后传入，
+/// 本函数不调用 `load_streaming_task_detail` / `streaming_session_extra`，避免前向依赖。
 pub(crate) async fn run_streaming_session(
     service: &LocalService,
     request: StreamingPipelineRequest,
@@ -351,6 +403,15 @@ pub(crate) async fn run_streaming_session(
     }
     let paths =
         resolve_streaming_paths(service, task_id, &detail.base_model, &detail.model_version)?;
+
+    // 先 bind 再 spawn：listener 先于 Python 启动存在，连接无竞态；
+    // 环回绑定不触发 Windows 防火墙弹窗，令牌防本机其它进程注入。
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .with_context(|| "failed to bind streaming session socket")?;
+    let socket_addr = listener.local_addr()?.to_string();
+    let session_token = generate_session_token()?;
+
     let invocation = build_streaming_invocation(
         &paths,
         &detail.base_model,
@@ -358,6 +419,8 @@ pub(crate) async fn run_streaming_session(
         detail.device,
         detail.model_params.clone(),
         detail.speakers,
+        &socket_addr,
+        &session_token,
     );
     invocation.write_to_json_file(&paths.params_json_path)?;
 
@@ -391,10 +454,7 @@ pub(crate) async fn run_streaming_session(
         &detail.base_model,
     ));
 
-    // 清理可能残留的旧帧缓冲（上次会话异常退出未清理），避免 tail 读到陈旧帧。
-    let _ = std::fs::remove_file(&paths.frames_path);
-
-    // 帧走缓冲文件 frames.jsonl（Python append -> Rust tail），不再经 stdout。
+    // 帧与输入均走环回 Socket（Python 连接 <-> Rust 分帧读写），不再经缓冲文件。
     // 这里统一通过 process.rs 的日志封装把 stderr 接管到任务日志，避免
     // Python/PowerShell 错误只落在子进程管道而未进入统一的 task log。
     let (mut child, stream_tasks) = spawn_logged_child_with_stderr(
@@ -407,23 +467,64 @@ pub(crate) async fn run_streaming_session(
     .await
     .with_context(|| "failed to spawn streaming begin_llm_task")?;
 
+    // 等待 Python 连接并完成令牌鉴权；失败则收尾子进程后交由上层置 Failed。
+    let socket = match timeout(
+        STREAMING_SOCKET_ACCEPT_TIMEOUT,
+        listener.accept(),
+    )
+    .await
+    {
+        Ok(Ok((socket, _peer))) => socket,
+        Ok(Err(err)) => {
+            cleanup_child_after_transport_error(&mut child, stream_tasks).await;
+            bail!("流式会话 Socket 接受连接失败: {err}");
+        }
+        Err(_) => {
+            cleanup_child_after_transport_error(&mut child, stream_tasks).await;
+            bail!("流式会话 Socket 连接超时（Python 未在 120 秒内连接）");
+        }
+    };
+    let (mut read_half, write_half) = socket.into_split();
+    let (kind, payload) = match read_socket_frame(&mut read_half).await {
+        Ok(frame) => frame,
+        Err(err) => {
+            cleanup_child_after_transport_error(&mut child, stream_tasks).await;
+            bail!("流式会话 Socket 鉴权帧读取失败: {err}");
+        }
+    };
+    if kind != FRAME_KIND_AUTH || parse_auth_payload(&payload)? != session_token {
+        cleanup_child_after_transport_error(&mut child, stream_tasks).await;
+        bail!("流式会话 Socket 鉴权失败");
+    }
+
+    // input 帧写入任务：`send_streaming_message` 经 mpsc 投递，writer 落到 Socket。
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(STREAMING_INPUT_CHANNEL_CAPACITY);
+    extra.set_input_sender(input_tx);
+    let writer_task = tokio::spawn(streaming_socket_writer(write_half, input_rx));
+
+    // 帧读取任务：阻塞分帧读取，EOF/错误时发送 `None` 通知 drive 循环收尾。
+    let (frame_tx, frame_rx) = mpsc::channel::<Option<StreamingFrame>>(STREAMING_FRAME_CHANNEL_CAPACITY);
+    let reader_task = tokio::spawn(streaming_socket_reader(read_half, frame_tx));
+
     let mut ready_tx = ready_tx;
-    let outcome = drive_streaming_buffer(
+    let outcome = drive_streaming_socket(
         &mut child,
-        &paths.frames_path,
+        frame_rx,
         &extra,
         &mut cancel_rx,
         &mut ready_tx,
-        stream_tasks,
         &task_log_path,
     )
     .await;
 
-    // 退出前清理所有 pending 消息（cancel / 进程退出）
+    // 退出前清理：关闭 input 通道（writer 随之退出）、通知所有 pending 消息、回收任务。
+    extra.close_input_sender();
     drain_pending_channels(&extra, outcome.is_cancelled());
-
-    // 帧缓冲文件是会话级临时传输载体（非产物），会话结束清理。
-    let _ = std::fs::remove_file(&paths.frames_path);
+    let _ = reader_task.await;
+    let _ = writer_task.await;
+    for task in stream_tasks {
+        let _ = task.await;
+    }
 
     let final_status = match &outcome {
         StreamSessionOutcome::Cancelled => TaskStatus::Cancelled,
@@ -444,6 +545,23 @@ pub(crate) async fn run_streaming_session(
     }
 }
 
+/// 传输层建立失败（accept 超时/鉴权失败）时的子进程收尾：强杀进程树并回收日志任务，
+/// 避免孤儿进程占用 GPU/模型。
+async fn cleanup_child_after_transport_error(child: &mut Child, stream_tasks: Vec<tokio::task::JoinHandle<()>>) {
+    if let Some(pid) = child.id() {
+        if let Err(err) = crate::utils::process::force_terminate_process(pid) {
+            warn!(error = %err, "force terminate process tree failed, falling back to child.kill");
+            let _ = child.kill().await;
+        }
+    } else {
+        let _ = child.kill().await;
+    }
+    let _ = child.wait().await;
+    for task in stream_tasks {
+        let _ = task.await;
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum StreamSessionOutcome {
     Cancelled,
@@ -457,172 +575,139 @@ impl StreamSessionOutcome {
     }
 }
 
-/// 帧缓冲文件 tail：持有读句柄，每次 poll 从上次位置读出新增完整行并转发。
-///
-/// 与 `input.jsonl`（Rust 写 -> Python 轮询读）同构，方向相反：Python append 写
-/// `frames.jsonl`，本结构轮询读取。读写分属不同进程的不同访问模式（Python 写 /
-/// Rust 读），Windows 文件共享互不排斥（Rust `File::open` 默认共享 R|W|DELETE，
-/// Python 写句柄默认共享 R），不会重蹈此前"写-写争用同一 task log"的覆辙。
-struct FrameFileTail {
-    reader: Option<std::io::BufReader<std::fs::File>>,
-    path: PathBuf,
-    /// 跨 poll 保留的半行：`read_until` 在 EOF 处读到不含 `'\n'` 的尾巴时缓存，
-    /// 下次 poll 追加新字节继续拼接，避免把半截 JSON 当坏行丢弃。
-    pending: Vec<u8>,
-    /// 上次观察到的文件大小；若文件被截断/重建则重置 reader 从头读。
-    last_size: Option<u64>,
+/// 从 Socket 读取一帧：`[u32 LE len][kind][payload]`。
+async fn read_socket_frame(read_half: &mut OwnedReadHalf) -> Result<(u8, Vec<u8>)> {
+    use tokio::io::AsyncReadExt;
+    let mut header = [0u8; FRAME_HEADER_LEN];
+    read_half
+        .read_exact(&mut header)
+        .await
+        .context("failed to read streaming frame header")?;
+    let (kind, payload_len) = decode_frame_header(&header)?;
+    let mut payload = vec![0u8; payload_len];
+    read_half
+        .read_exact(&mut payload)
+        .await
+        .context("failed to read streaming frame payload")?;
+    Ok((kind, payload))
 }
 
-impl FrameFileTail {
-    fn new(path: PathBuf) -> Self {
-        Self {
-            reader: None,
-            path,
-            pending: Vec::new(),
-            last_size: None,
-        }
-    }
-
-    /// 读出文件当前所有可用完整帧行并转发；文件尚未创建时静默返回。
-    fn poll_and_forward(&mut self) -> Vec<StreamingFrame> {
-        let mut frames = Vec::new();
-        let metadata = match std::fs::metadata(&self.path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                self.reader = None;
-                self.pending.clear();
-                self.last_size = None;
-                return frames; // Python 尚未创建 frames.jsonl
-            }
-        };
-        let current_size = metadata.len();
-        if self
-            .last_size
-            .is_some_and(|last_size| current_size < last_size)
-        {
-            self.reader = None;
-            self.pending.clear();
-            self.last_size = None;
-        }
-        if self.reader.is_none() {
-            let file = match std::fs::File::open(&self.path) {
-                Ok(f) => f,
-                Err(_) => return frames,
-            };
-            self.reader = Some(std::io::BufReader::new(file));
-        }
-        self.last_size = Some(current_size);
-
-        let reader = self.reader.as_mut().expect("frames reader initialized");
-        loop {
-            let n = match reader.read_until(b'\n', &mut self.pending) {
-                Ok(n) => n,
-                Err(_) => break,
-            };
-            if n == 0 {
-                break; // EOF，本次无新数据（pending 中可能仍残留半行待下次）
-            }
-            if !self.pending.ends_with(b"\n") {
-                break; // 半行，等下次 poll 拼接
-            }
-            // 完整一行（含 '\n'）：剥离换行后解析转发
-            let line_bytes = std::mem::take(&mut self.pending);
-            let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]);
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            match parse_streaming_frame(trimmed) {
-                Ok(Some(frame)) => frames.push(frame),
-                Ok(None) => {}
-                Err(err) => {
-                    warn!(error = %err, line = %trimmed, "ignoring unparseable streaming line");
+/// 帧读取任务：持续分帧读取并投递解析结果；EOF/读错误投递 `None` 后退出。
+async fn streaming_socket_reader(
+    mut read_half: OwnedReadHalf,
+    frame_tx: mpsc::Sender<Option<StreamingFrame>>,
+) {
+    loop {
+        match read_socket_frame(&mut read_half).await {
+            Ok((kind, payload)) => {
+                let frame = match kind {
+                    FRAME_KIND_CONTROL => match std::str::from_utf8(&payload) {
+                        Ok(text) => parse_streaming_frame(text),
+                        Err(err) => Err(anyhow::anyhow!("control frame is not utf-8: {err}")),
+                    },
+                    FRAME_KIND_CHUNK => parse_chunk_payload(&payload).map(|(context_id, bytes)| {
+                        Some(StreamingFrame {
+                            context_id: context_id.to_string(),
+                            payload: StreamingFramePayload::Chunk {
+                                bytes: bytes.to_vec(),
+                            },
+                        })
+                    }),
+                    other => {
+                        warn!(kind = other, "ignoring unknown streaming socket frame kind");
+                        continue;
+                    }
+                };
+                match frame {
+                    Ok(Some(frame)) => {
+                        if frame_tx.send(Some(frame)).await.is_err() {
+                            break; // drive 循环已结束
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(error = %err, "ignoring unparseable streaming frame");
+                    }
                 }
             }
+            Err(err) => {
+                // EOF 或读错误：由 drive 循环收尾探活。
+                warn!(error = %err, "streaming socket read ended");
+                let _ = frame_tx.send(None).await;
+                break;
+            }
         }
-        frames
     }
 }
 
-/// 帧缓冲轮询间隔。文件增长无 readiness 事件，靠轮询 tail；20ms 对音频流足够
-///（chunk 本就 ~100ms 级），CPU 可忽略。
-const FRAME_POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// input 帧写入任务：消费 mpsc 队列并写到 Socket；通道关闭（会话结束）即退出。
+async fn streaming_socket_writer(
+    mut write_half: OwnedWriteHalf,
+    mut input_rx: mpsc::Receiver<Vec<u8>>,
+) {
+    use tokio::io::AsyncWriteExt;
+    while let Some(frame) = input_rx.recv().await {
+        if write_half.write_all(&frame).await.is_err() {
+            break; // Python 侧已断开
+        }
+        let _ = write_half.flush().await;
+    }
+    let _ = write_half.shutdown().await;
+}
 
-/// 流式会话驱动：轮询 tail `frames.jsonl` 取帧并按 contextId 分发；`try_wait` 探活
-/// 子进程退出；cancel 信号到达即 kill。会话状态机：Running（spawn 后）->
-/// Cancelled/Failed/Exited（退出）。
-async fn drive_streaming_buffer(
+/// 流式会话驱动：消费帧读取任务产出的帧并按 contextId 分发；Socket EOF 收尾探活；
+/// cancel 信号到达即 kill。会话状态机：Running（spawn 后）-> Cancelled/Failed/Exited。
+async fn drive_streaming_socket(
     child: &mut Child,
-    frames_path: &Path,
+    mut frame_rx: mpsc::Receiver<Option<StreamingFrame>>,
     extra: &StreamingSessionExtra,
     cancel_rx: &mut watch::Receiver<bool>,
     ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
-    stream_tasks: Vec<tokio::task::JoinHandle<()>>,
     task_log_path: &Path,
 ) -> StreamSessionOutcome {
-    let mut tail = FrameFileTail::new(frames_path.to_path_buf());
     let mut failed = false;
     let mut cancelled = false;
     loop {
-        // 1. 排空当前可用帧
-        for frame in tail.poll_and_forward() {
-            match &frame.payload {
-                StreamingFramePayload::SessionReady => {
-                    if let Some(tx) = ready_tx.take() {
-                        let _ = tx.send(Ok(()));
-                    }
-                }
-                StreamingFramePayload::Error { message } => {
-                    warn!(context_id = %frame.context_id, "streaming frame error");
-                    if let Err(err) = append_task_log_text(
-                        &task_log_path,
-                        &format!(
-                            "[streaming][error] contextId={} {}",
-                            frame.context_id, message
-                        ),
-                    ) {
-                        warn!(error = %err, context_id = %frame.context_id, "failed to append streaming frame error to task log");
-                    }
-                }
-                _ => {}
-            }
-            if let Some(event) = frame_to_event(&frame) {
-                forward_event(extra, &frame.context_id, event);
-            }
-        }
-
-        // 2. 非阻塞探活：进程退出则再 tail 一次（收尾帧，含 finished/error）后结束
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    failed = true;
-                    if let Err(err) = append_task_log_text(
-                        &task_log_path,
-                        &format!("[streaming] child exited with status {}", status),
-                    ) {
-                        warn!(error = %err, "failed to append child exit status to task log");
-                    }
-                }
-                tail.poll_and_forward();
-                break;
-            }
-            Ok(None) => {}
-            Err(err) => {
-                error!(error = %err, "streaming child try_wait failed");
-                failed = true;
-                break;
-            }
-        }
-
-        // 3. 等待 cancel 或轮询间隔
         tokio::select! {
             biased;
+            maybe_frame = frame_rx.recv() => {
+                match maybe_frame {
+                    Some(Some(frame)) => {
+                        dispatch_frame(extra, ready_tx, task_log_path, frame);
+                    }
+                    Some(None) => {
+                        // Socket EOF：Python 侧关闭（正常收尾或异常退出）。
+                        match timeout(CHILD_EXIT_GRACE, child.wait()).await {
+                            Ok(Ok(status)) => {
+                                if !status.success() {
+                                    failed = true;
+                                    log_child_exit(task_log_path, status);
+                                }
+                            }
+                            Ok(Err(err)) => {
+                                error!(error = %err, "streaming child wait failed");
+                                failed = true;
+                            }
+                            Err(_) => {
+                                warn!("streaming child still alive after socket EOF, force terminating");
+                                if let Some(pid) = child.id() {
+                                    let _ = crate::utils::process::force_terminate_process(pid);
+                                }
+                                let _ = child.kill().await;
+                                failed = true;
+                            }
+                        }
+                        break;
+                    }
+                    None => break, // reader 任务终止且未显式发 EOF，按已退出处理
+                }
+            }
             _ = cancel_rx.changed() => {
                 if *cancel_rx.borrow() {
                     info!("streaming cancel signal received, killing child");
                     // child.kill() 仅 TerminateProcess 直系 shell 子进程（powershell.exe），
                     // 不杀 PS1 经 `& $venvPython | Out-File` 拉起的 python.exe 孙进程，
-                    // 致其孤儿化、长期占用 GPU/模型——表现为“终止会话”后进程仍阻塞。
+                    // 致其孤儿化、长期占用 GPU/模型--表现为“终止会话”后进程仍阻塞。
                     // 按 PID 强杀整棵进程树（Windows = taskkill /T /F），与
                     // run_logged_command_cancellable 一致；PID 未知则回退 child.kill()。
                     if let Some(pid) = child.id() {
@@ -634,11 +719,20 @@ async fn drive_streaming_buffer(
                         let _ = child.kill().await;
                     }
                     cancelled = true;
-                    tail.poll_and_forward();
+                    drain_buffered_frames(&mut frame_rx, extra, ready_tx, task_log_path).await;
                     break;
                 }
             }
-            _ = tokio::time::sleep(FRAME_POLL_INTERVAL) => {}
+            _ = tokio::time::sleep(CHILD_LIVENESS_POLL_INTERVAL) => {
+                if let Ok(Some(status)) = child.try_wait() {
+                    if !status.success() {
+                        failed = true;
+                        log_child_exit(task_log_path, status);
+                    }
+                    drain_buffered_frames(&mut frame_rx, extra, ready_tx, task_log_path).await;
+                    break;
+                }
+            }
         }
     }
 
@@ -646,11 +740,9 @@ async fn drive_streaming_buffer(
         let _ = tx.send(Err("streaming session terminated before ready".to_string()));
     }
 
-    // 始终 reap 子进程，避免僵尸进程（对齐既有 run_logged_shell_script_cancellable 的 wait 语义）。
+    // 始终 reap 子进程，避免僵尸进程（对齐既有 run_logged_shell_script_cancellable 的 wait 语义；
+    // tokio Child 缓存退出状态，重复 wait 幂等）。
     let _ = child.wait().await;
-    for task in stream_tasks {
-        let _ = task.await;
-    }
     if cancelled {
         StreamSessionOutcome::Cancelled
     } else if failed {
@@ -660,18 +752,78 @@ async fn drive_streaming_buffer(
     }
 }
 
-fn forward_event(extra: &StreamingSessionExtra, context_id: &str, event: AudioStreamEvent) {
+fn log_child_exit(task_log_path: &Path, status: std::process::ExitStatus) {
+    if let Err(err) = append_task_log_text(
+        task_log_path,
+        &format!("[streaming] child exited with status {}", status),
+    ) {
+        warn!(error = %err, "failed to append child exit status to task log");
+    }
+}
+
+/// 单帧处理：session_ready 唤醒就绪等待、error 帧落任务日志，并向前端 Channel 分发。
+fn dispatch_frame(
+    extra: &StreamingSessionExtra,
+    ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
+    task_log_path: &Path,
+    frame: StreamingFrame,
+) {
+    match &frame.payload {
+        StreamingFramePayload::SessionReady => {
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(Ok(()));
+            }
+        }
+        StreamingFramePayload::Error { message } => {
+            warn!(context_id = %frame.context_id, "streaming frame error");
+            if let Err(err) = append_task_log_text(
+                task_log_path,
+                &format!(
+                    "[streaming][error] contextId={} {}",
+                    frame.context_id, message
+                ),
+            ) {
+                warn!(error = %err, context_id = %frame.context_id, "failed to append streaming frame error to task log");
+            }
+        }
+        _ => {}
+    }
+    if let Some(event) = frame_to_event(&frame) {
+        forward_event(extra, &frame, event);
+    }
+}
+
+/// 尽力回收已缓冲在帧通道中的收尾帧（cancel/进程退出后调用）。
+async fn drain_buffered_frames(
+    frame_rx: &mut mpsc::Receiver<Option<StreamingFrame>>,
+    extra: &StreamingSessionExtra,
+    ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
+    task_log_path: &Path,
+) {
+    tokio::time::sleep(FRAME_DRAIN_WAIT).await;
+    while let Ok(maybe_frame) = frame_rx.try_recv() {
+        if let Some(frame) = maybe_frame {
+            dispatch_frame(extra, ready_tx, task_log_path, frame);
+        }
+    }
+}
+
+fn forward_event(
+    extra: &StreamingSessionExtra,
+    frame: &StreamingFrame,
+    event: InvokeResponseBody,
+) {
     let is_terminal = matches!(
-        event,
-        AudioStreamEvent::Finished | AudioStreamEvent::Error { .. }
+        frame.payload,
+        StreamingFramePayload::Finished | StreamingFramePayload::Error { .. }
     );
     if is_terminal {
         let mut guard = match extra.message_channels.write() {
             Ok(g) => g,
             Err(_) => return,
         };
-        if let Some(mc) = guard.remove(context_id) {
-            let errored = matches!(event, AudioStreamEvent::Error { .. });
+        if let Some(mc) = guard.remove(&frame.context_id) {
+            let errored = matches!(frame.payload, StreamingFramePayload::Error { .. });
             let _ = mc.on_event.send(event);
             let _ = mc.done.send(StreamMessageOutcome {
                 cancelled: false,
@@ -683,7 +835,7 @@ fn forward_event(extra: &StreamingSessionExtra, context_id: &str, event: AudioSt
             Ok(g) => g,
             Err(_) => return,
         };
-        if let Some(mc) = guard.get(context_id) {
+        if let Some(mc) = guard.get(&frame.context_id) {
             // Channel::send 取 &self，读锁即可，避免 Chunk 高频时不必要的写锁竞争。
             let _ = mc.on_event.send(event);
         }
@@ -698,13 +850,13 @@ fn drain_pending_channels(extra: &StreamingSessionExtra, cancelled: bool) {
     let pending = guard.drain().collect::<Vec<_>>();
     drop(guard);
     for (_, mc) in pending {
-        let _ = mc.on_event.send(AudioStreamEvent::Error {
+        let _ = mc.on_event.send(json_event(&AudioStreamEvent::Error {
             message: if cancelled {
                 "流式会话已终止".to_string()
             } else {
                 "流式会话已结束".to_string()
             },
-        });
+        }));
         let _ = mc.done.send(StreamMessageOutcome {
             cancelled,
             errored: !cancelled,

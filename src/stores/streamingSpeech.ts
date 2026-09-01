@@ -37,7 +37,15 @@ interface AudioState {
   errorMessage: string | null;
 }
 
-type AudioStreamEvent = { type: 'started' } | { type: 'chunk'; bytes: number[] } | { type: 'finished' } | { type: 'error'; message: string };
+/**
+ * 流式音频事件：chunk 为二进制载荷（ArrayBuffer，Tauri Channel Raw 路径），
+ * started/finished/error 为 JSON 控制事件。
+ */
+type AudioStreamEvent =
+  | { type: 'started' }
+  | { type: 'finished' }
+  | { type: 'error'; message: string }
+  | ArrayBuffer;
 
 let speakerSeed = 0;
 let messageSeed = 0;
@@ -59,7 +67,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     modelParams: {}
   });
   const audioStates = reactive<Record<string, AudioState>>({});
-  const audioBuffers = ref(new Map<string, number[]>());
+  /** 每条消息的音频分块（chunk 到达仅 push 引用，聚合交给 Blob，避免逐 chunk 全量拷贝）。 */
+  const audioBuffers = ref(new Map<string, Uint8Array[]>());
   const audioUrls = ref(new Map<string, { url: string; length: number }>());
 
   const speakerOptions = computed(() =>
@@ -110,17 +119,18 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     if (cached && cached.length === -1) {
       return cached.url;
     }
-    const buffer = audioBuffers.value.get(messageId);
-    if (!buffer || buffer.length === 0) {
+    const chunks = audioBuffers.value.get(messageId);
+    if (!chunks || chunks.length === 0) {
       return cached?.length === -1 ? cached.url : null;
     }
-    if (cached && cached.length === buffer.length) {
+    if (cached && cached.length === chunks.length) {
       return cached.url;
     }
     revokeAudioUrl(messageId);
-    const blob = new Blob([Uint8Array.from(buffer)], { type: 'audio/wav' });
+    // Blob 直接接受分块数组聚合，无需先拼接成单个缓冲
+    const blob = new Blob(chunks, { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
-    audioUrls.value.set(messageId, { url, length: buffer.length });
+    audioUrls.value.set(messageId, { url, length: chunks.length });
     return url;
   };
 
@@ -282,18 +292,22 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
 
     const channel = new Channel<AudioStreamEvent>();
     channel.onmessage = (message: AudioStreamEvent) => {
+      // chunk 为二进制载荷（ArrayBuffer）；控制事件为 JSON 对象
+      if (message instanceof ArrayBuffer) {
+        state.isStreaming = true;
+        state.hasData = true;
+        let chunks = audioBuffers.value.get(assistantId);
+        if (!chunks) {
+          chunks = [];
+          audioBuffers.value.set(assistantId, chunks);
+        }
+        chunks.push(new Uint8Array(message));
+        return;
+      }
       switch (message.type) {
         case 'started':
           state.isStreaming = true;
           break;
-        case 'chunk': {
-          state.isStreaming = true;
-          state.hasData = true;
-          const bytes = message.bytes ?? [];
-          const nextBuffer = [...(audioBuffers.value.get(assistantId) ?? []), ...bytes];
-          audioBuffers.value.set(assistantId, nextBuffer);
-          break;
-        }
         case 'finished': {
           state.isStreaming = false;
           state.streamComplete = true;

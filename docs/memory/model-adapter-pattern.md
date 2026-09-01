@@ -9,7 +9,7 @@ metadata:
 
 # 模型适配器架构
 
-> 状态截至 2026-07-27 · 分支 `v.0.12.0`
+> 状态截至 2026-09-01 · 分支 `v.0.12.0`
 
 ## 模型体系
 项目采用 **Git 子模块 + 配置驱动** 的模型适配器架构。每个模型作为独立 Git 子模块存在于 `src-model/` 目录，通过标准化的命令行接口（`--params-file`）与后端 Pipeline 通信。
@@ -144,7 +144,7 @@ src-model/dots_tts/
 - 上游: GitHub `OpenMOSS/MOSS-TTS`（克隆到 `base-models/moss_tts_realtime/`，cwd=`src-model/`，零改动上游）；`mossttsrealtime` 包位于仓库根的 `moss_tts_realtime/` 子目录，脚本不在仓库根运行（`sys.path[0]`=脚本目录），故运行前由 `common.ensure_package_on_path()` 把包目录注入 `sys.path`。权重 HF `OpenMOSS-Team/MOSS-TTS-Realtime`（基座）+ `OpenMOSS-Team/MOSS-Audio-Tokenizer`（codec）。
 - `supportedDevices: ["cuda", "cpu"]`（CUDA=生产路径 bf16/fp16+sdpa；CPU=本地无 GPU 测试 fp32+eager，慢仅验证流程）；`supportedFeatureList: ["streaming-speech"]`（无 TTS/克隆/设计/微调）。
 - **CPU 加载须显式 `.to(device, dtype)` 统一 dtype**：基座 checkpoint 以 `bfloat16` 存储（`config.dtype=bfloat16`），且 `language_config.dtype=bfloat16` 传播到 Qwen3 `language_model` 子模型。transformers 5.0 加载时（`core_model_loading.py:1174`）对每参数取 `empty_param.dtype != 目标 dtype` 即回退到子模型 init dtype，故 CPU 上 `from_pretrained(torch_dtype=float32).to(device)` 会留下 **混合 dtype**：`embed_tokens` float32、`language_model` bfloat16。forward 时 float32 embed 输出撞 bf16 权重，报 `expected m1 and m2 to have the same dtype, but got: float != struct c10::BFloat16`（streaming.py `load_model_and_codec` 已改 `.to(torch_device, dtype)` 修复；CUDA 因目标 bf16 与子 config bf16 一致本无此问题）。
-- **首个实现会话级 `streaming.py` 契约的适配器**：自写会话循环（读 `streaming.params.json` + `context.json` basic.speakers，轮询 `input.jsonl`，按 `contextId` 顺序合成，向 `frames.jsonl` 缓冲文件 append started/chunk/finished/error 帧，Rust runner 轮询 tail 读取，不经 stdout）。用法对齐上游 `example_multiturn_stream_to_tts.py`（`MossTTSRealtimeStreamingSession`/`MossTTSRealtimeInference`/`AudioStreamDecoder`）。多轮语义取最简：每消息独立合成（voice prompt + 文本 -> 音频），轮间不保 KV cache、不采集 user 音频。
+- **首个实现会话级 `streaming.py` 契约的适配器**：自写会话循环（读 `streaming.params.json` + `context.json` basic.speakers，模型加载前 `connect_session_socket` 连 Rust 环回 Socket 并 AUTH，随后阻塞 `read_frame` 收 INPUT 帧，按到达顺序按 `contextId` 合成，经 Socket 二进制帧回传 started/chunk/finished/error，不经 stdout、不轮询文件）。用法对齐上游 `example_multiturn_stream_to_tts.py`（`MossTTSRealtimeStreamingSession`/`MossTTSRealtimeInference`/`AudioStreamDecoder`）。多轮语义取最简：每消息独立合成（voice prompt + 文本 -> 音频），轮间不保 KV cache、不采集 user 音频。
 - **chunk 字节格式**：首 chunk = 44 字节 WAV 头（data size 哨兵 `0xFFFFFFFF`）+ PCM16，后续 chunk = PCM16，前端 `useStreamableAudioPlayer` 累加成单个 `audio/wav` Blob 整播。
 - **不提供微调**：上游 deepspeed 仅用于微调（`finetuning/sft.py` 的 ZeRO-3 可选路径）且在 Windows 构建安装受阻（pip build isolation 临时环境无 torch 触发 "Unable to pre-compile ops without torch installed"），故本适配器移除 `model-training` 能力与 `training.py`，仅保留推理。如需用已训练说话人，可外部产出 checkpoint 后按下条加载。
 - **trained 说话人回接流式**：外部产出的 `<model_root_path>/<speaker_dir_name>/checkpoint_final/` 经 `StreamingSpeakerForm` trained 类别从 `list_speaker_infos`(status=Ready) 选择；streaming.py 加载该 checkpoint 合成。一会话至多一个 trained 说话人。
