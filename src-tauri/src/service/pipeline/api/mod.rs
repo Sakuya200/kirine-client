@@ -102,10 +102,14 @@ pub struct StreamingArgs {
     /// = service.model_dir()，streaming.py 解析 <model_root_path>/<speaker_dir_name>。
     #[serde(default)]
     pub model_root_path: String,
-    /// 流式帧缓冲文件路径：streaming.py 往此文件 append NDJSON 帧，Rust runner
-    /// 轮询 tail 读取（替代 stdout 传输）。
+    /// 流式会话环回 Socket 地址（127.0.0.1:port）：Rust 侧监听，streaming.py 连接后
+    /// 经此双向传输（input 帧 Rust->Python、二进制 chunk/控制帧 Python->Rust），
+    /// 替代此前 frames.jsonl + input.jsonl 缓冲文件轮询方案。
     #[serde(default)]
-    pub frames_file_path: String,
+    pub streaming_socket_addr: String,
+    /// 流式会话 Socket 令牌：Python 连接后首帧须回传此值完成鉴权，防本机其它进程注入。
+    #[serde(default)]
+    pub streaming_socket_token: String,
     /// 流式 UI 参数（temperature/topP 等），透传给 streaming.py。
     #[serde(default)]
     pub model_params_json: serde_json::Value,

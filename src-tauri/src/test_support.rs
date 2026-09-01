@@ -23,9 +23,14 @@ pub use crate::service::pipeline::api::{
 };
 pub use crate::service::pipeline::build_llm_task_script_args;
 pub use crate::service::pipeline::streaming::{
-    frame_to_event, parse_streaming_frame, serialize_input_entry, StreamingContextBasic,
-    StreamingContextJson, StreamingFrame, StreamingFramePayload, StreamingMessageEntry,
-    StreamingSpeaker,
+    error_event, frame_to_event, parse_streaming_frame, serialize_input_entry,
+    StreamingContextBasic, StreamingContextJson, StreamingFrame, StreamingFramePayload,
+    StreamingMessageEntry, StreamingSpeaker,
+};
+pub use crate::service::pipeline::streaming_transport::{
+    decode_frame_header, encode_chunk_frame, encode_control_frame, encode_frame,
+    encode_input_frame, generate_session_token, parse_auth_payload, parse_chunk_payload,
+    FRAME_HEADER_LEN, FRAME_KIND_AUTH, FRAME_KIND_CHUNK, FRAME_KIND_CONTROL, FRAME_KIND_INPUT,
 };
 pub use crate::service::{LocalService, Service};
 

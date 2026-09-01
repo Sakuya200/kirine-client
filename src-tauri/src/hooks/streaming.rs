@@ -8,12 +8,12 @@ use crate::service::{
     ServiceState,
 };
 
-/// 流式音频事件协议。前端通过 `Channel<AudioStreamEvent>` 订阅。
+/// 流式音频事件协议（控制事件，经 Channel 以 JSON 下发）。chunk 不走此协议：
+/// Rust 侧以 `InvokeResponseBody::Raw` 直发二进制，前端收到 ArrayBuffer。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AudioStreamEvent {
     Started,
-    Chunk { bytes: Vec<u8> },
     Finished,
     Error { message: String },
 }
@@ -35,7 +35,7 @@ pub async fn create_streaming_speech_task(
 #[tauri::command]
 pub async fn send_streaming_message(
     payload: SendStreamingMessagePayload,
-    on_event: tauri::ipc::Channel<AudioStreamEvent>,
+    on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     state: State<'_, ServiceState>,
 ) -> std::result::Result<(), String> {
     state

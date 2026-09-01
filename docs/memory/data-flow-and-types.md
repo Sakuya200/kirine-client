@@ -9,10 +9,10 @@ metadata:
 
 # 数据流与类型体系
 
-> 状态截至 2026-08-01 · 分支 `v.0.12.0`
+> 状态截至 2026-09-01 · 分支 `v.0.12.0`
 
 ## 前后端通信
-前端通过 `@tauri-apps/api/core` 的 `invoke<T>(command, payload)` 调用后端 Tauri 命令。所有数据经过 serde 自动序列化/反序列化（后端用 `camelCase`，前端一致）。流式语音额外用 Tauri 2 `ipc::Channel<AudioStreamEvent>` 下发实时事件。
+前端通过 `@tauri-apps/api/core` 的 `invoke<T>(command, payload)` 调用后端 Tauri 命令。所有数据经过 serde 自动序列化/反序列化（后端用 `camelCase`，前端一致）。流式语音额外用 Tauri 2 `Channel<InvokeResponseBody>` 下发实时事件（控制事件 Json、音频 chunk Raw 二进制，前端收 ArrayBuffer）。
 
 ## 核心 Tauri 命令列表
 | 命令 | Hook 模块 | 方向 | 说明 |
@@ -39,7 +39,7 @@ metadata:
 | `save_generated_audio_as` | task_history | -> | 按同一 `GeneratedAudioSource` 另存为生成音频 |
 | `save_model_training_template_as` | task_history | -> | 微调模板导出 |
 | `create_streaming_speech_task` | streaming | -> | 创建流式语音会话（`CreateStreamingSpeechTaskPayload` -> `StreamingSpeechTaskResult`，建 task_history+streaming_tasks 记录 + 拉起长期进程） |
-| `send_streaming_message` | streaming | -> | 发送一条流式消息（`SendStreamingMessagePayload` + `on_event: Channel<AudioStreamEvent>`，等终帧或 300s 超时） |
+| `send_streaming_message` | streaming | -> | 发送一条流式消息（`SendStreamingMessagePayload` + `on_event: Channel<InvokeResponseBody>`，等终帧或 300s 超时） |
 | `cancel_streaming_task` | streaming | -> | 取消流式会话（`taskId` -> `bool`，kill 子进程） |
 | `get_settings_config` | settings | -> | 获取配置 |
 | `save_settings_config` | settings | -> | 保存配置 |
@@ -82,15 +82,17 @@ Pipeline 后台线程:
 
 runner (run_streaming_session, 长期存活):
    -> 置 Running -> spawn begin_llm_task -> streaming.py
-   -> tail `frames.jsonl`, parse_streaming_frame -> frame_to_event -> forward_event
-   -> 按 contextId 分发到 message_channels 的 Channel
+   -> bind 127.0.0.1 随机端口 + accept + AUTH 令牌校验
+   -> reader task 分帧读 Socket: parse_streaming_frame -> frame_to_event -> forward_event
+   -> 按 contextId 分发到 message_channels 的 Channel (chunk 为 Raw 二进制)
    -> cancel 信号到达 kill 子进程; 退出置 Cancelled/Failed
    -> init_db 时 sweep 残留 Running 流式会话为 Cancelled
 
 前端发消息 invoke send_streaming_message (带 on_event Channel):
-   -> 校验 Running -> 注册 Channel -> append context.json + input.jsonl
+   -> 校验 Running -> 注册 Channel -> append context.json + input.jsonl (审计)
+   -> 经 input_tx 推 INPUT 帧 -> Python read_frame 收到后合成
    -> 等终帧 oneshot (300s 超时) -> 成功自增 message_count
-   -> 前端 StreamableAudioPlayer 订阅 Channel 累计 chunk 播放
+   -> 前端 StreamableAudioPlayer 订阅 Channel 累计 chunk (ArrayBuffer) 播放
 ```
 完整架构（帧协议/并发模型/状态机/清扫）见 [[streaming-speech-architecture]]。
 
@@ -126,7 +128,7 @@ runner (run_streaming_session, 长期存活):
 | `ModelDownloadType` | `ModelDownloadType` | HF-Like, Custom |
 | `ModelTrainingSampleType` | `ModelTrainingSampleType` | single, dataset |
 | `ModelTrainingFileKind` | `ModelTrainingFileKind` | audio, archive, annotation |
-| `AudioStreamEvent` (streaming.ts) | `AudioStreamEvent` (hooks/streaming.rs) | started, chunk{bytes}, finished, error{message} |
+| `AudioStreamEvent` (streamingSpeech.ts) | `AudioStreamEvent` (hooks/streaming.rs) | started, finished, error{message}（控制事件 Json）；chunk 为 ArrayBuffer（Raw 路径，无 TS↔Rust 枚举对应） |
 
 > ⚠️ `ModelInstallStatus`（`enums/status.ts`）为**前端会话级**状态，**无对应 Rust 枚举**：值 `installed` / `not-installed` / `failed`。Rust 侧 `ModelInfo.downloaded` 仅反映权重是否就绪，无法表达"最近一次安装失败"，故 `models` store 用 `failedModelIds: Set<number>` 在前端单独追踪。
 
@@ -211,9 +213,9 @@ runner (run_streaming_session, 长期存活):
 - `StreamingChatMessage`：聊天消息（role/text/synthText/speakerId/taskId/contextId/status）；assistant 消息挂 `StreamableAudioPlayer(mode='stream')`。
 - `StreamingSessionConfig`：会话级配置（baseModel/modelVersion/device/language/modelParams），抽屉编辑、聊天页消费；提交后端 payload 不含时间。
 
-**前后端契约类型**（`domain.ts` ↔ `service/models.rs` + `hooks/streaming.rs`）：`StreamingSpeakerInput` / `CreateStreamingSpeechTaskPayload` / `SendStreamingMessagePayload` / `StreamingSpeechTaskResult` / `AudioStreamEvent`（serde `tag="type"` + `rename_all="camelCase"`：`started` / `chunk{bytes}` / `finished` / `error{message}`，经 `ipc::Channel<AudioStreamEvent>` 下发）。
+**前后端契约类型**（`domain.ts` ↔ `service/models.rs` + `hooks/streaming.rs`）：`StreamingSpeakerInput` / `CreateStreamingSpeechTaskPayload` / `SendStreamingMessagePayload` / `StreamingSpeechTaskResult` / `AudioStreamEvent`（serde `tag="type"` + `rename_all="camelCase"`：`started` / `finished` / `error{message}`，仅控制事件；chunk 不在枚举中，以 `InvokeResponseBody::Raw` 二进制直接下发）。`on_event` 为 `Channel<InvokeResponseBody>`，前端 `onmessage` 收到 ArrayBuffer（chunk）或 JSON 对象（控制事件）。
 
-**帧协议**：脚本向会话临时文件 `frames.jsonl` 追加每行一个 JSON `{type, contextId, bytes?(base64), message?}`；Rust tail 读取为 `StreamingFrame`，再转换为 `AudioStreamEvent` 下发前端。`contextId` 由前端生成，多路复用同一会话进程。
+**帧协议**：Python↔Rust 走环回 TCP Socket 二进制帧（`[u32 LE len][kind u8][payload]`）：CHUNK 帧为 `contextId 长度前缀 + contextId + PCM 裸字节`（首帧前置 WAV 哨兵头，无 base64/JSON），CONTROL 帧为 JSON，INPUT 帧（Rust→Python）为 JSON。`contextId` 由前端生成，多路复用同一会话进程。详见 [[streaming-speech-architecture]]。
 
 ## 统一生成音频读取、回放与导出
 

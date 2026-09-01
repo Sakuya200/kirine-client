@@ -1,6 +1,7 @@
 //! 流式契约 serde 往返测试：验证 StreamingArgs / StreamingSpeakerArg / StreamingSpeaker
-//! 新增字段（model_root_path / frames_file_path / model_params_json / speaker_dir_name /
-//! category）在序列化-反序列化往返中保持，且缺省时按 serde(default) 规则回填。
+//! 新增字段（model_root_path / streaming_socket_addr / streaming_socket_token /
+//! model_params_json / speaker_dir_name / category）在序列化-反序列化往返中保持，
+//! 且缺省时按 serde(default) 规则回填。
 
 use serde_json::Value;
 
@@ -13,7 +14,8 @@ fn streaming_args_roundtrip_preserves_trained_speaker() {
         input_cache_file_path: "/in.jsonl".into(),
         output_audio_dir: "/out".into(),
         model_root_path: "/models".into(),
-        frames_file_path: "/frames.jsonl".into(),
+        streaming_socket_addr: "127.0.0.1:54321".into(),
+        streaming_socket_token: "tok-abc".into(),
         model_params_json: serde_json::json!({"temperature": 0.5}),
         speakers: vec![StreamingSpeakerArg {
             name: "spk1".into(),
@@ -26,7 +28,8 @@ fn streaming_args_roundtrip_preserves_trained_speaker() {
     let json = serde_json::to_string(&args).expect("serialize");
     let back: StreamingArgs = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.model_root_path, "/models");
-    assert_eq!(back.frames_file_path, "/frames.jsonl");
+    assert_eq!(back.streaming_socket_addr, "127.0.0.1:54321");
+    assert_eq!(back.streaming_socket_token, "tok-abc");
     assert_eq!(back.model_params_json["temperature"], 0.5);
     let spk = &back.speakers[0];
     assert_eq!(spk.category, "trained");
@@ -38,7 +41,8 @@ fn streaming_args_defaults_when_absent() {
     let json = r#"{"context_file_path":"/c","input_cache_file_path":"/i","output_audio_dir":"/o","speakers":[{"name":"n","ref_audio_path":"/r","ref_text":"t"}]}"#;
     let args: StreamingArgs = serde_json::from_str(json).expect("deserialize");
     assert_eq!(args.model_root_path, "");
-    assert_eq!(args.frames_file_path, "");
+    assert_eq!(args.streaming_socket_addr, "");
+    assert_eq!(args.streaming_socket_token, "");
     assert!(args.model_params_json.is_null());
     assert_eq!(args.speakers[0].category, "");
     assert!(args.speakers[0].speaker_dir_name.is_none());

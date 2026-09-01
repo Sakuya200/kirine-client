@@ -9,7 +9,7 @@ metadata:
 
 # 后端架构 (Tauri 2 / Rust)
 
-> 状态截至 2026-08-01 · 分支 `v.0.12.0`
+> 状态截至 2026-09-01 · 分支 `v.0.12.0`
 
 ## 目录结构
 ```
@@ -169,9 +169,9 @@ DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260
 ### 流式语音生成 (StreamingSpeech)
 会话级长期进程的实时流式语音合成，区别于一次性脚本的 TTS/克隆/设计。完整架构（任务类型/DB/hooks/Service/LocalService 会话层/Pipeline runner/帧协议/并发模型/清扫/测试）见 [[streaming-speech-architecture]]。要点：
 - 新表 `streaming_tasks` + migration `m20260718_000011`（schema 27->28）；`HistoryTaskType::StreamingSpeech`（`"streaming-speech"` / 目录 `"streaming"`）。
-- `hooks/streaming.rs`：`AudioStreamEvent` 协议（started/chunk/finished/error，经 `ipc::Channel` 下发）+ 3 命令（create/send/cancel）。
+- `hooks/streaming.rs`：`AudioStreamEvent` 协议（started/finished/error 控制事件，经 `Channel<InvokeResponseBody>` Json 下发；chunk 走 Raw 二进制）+ 3 命令（create/send/cancel）。
 - `service/local/streaming.rs`：会话创建/发消息/取消/清扫 + 会话句柄管理（`ActiveTaskControl.streaming_extra`）。
-- `service/pipeline/streaming.rs`：帧解析纯函数 + `run_streaming_session` 长期 runner（tail `frames.jsonl` 后按 contextId 分发、cancel kill、状态机 Running->Cancelled/Failed）。
+- `service/pipeline/streaming.rs`：帧解析纯函数 + `run_streaming_session` 长期 runner（环回 TCP Socket bind/accept/AUTH + reader/writer task 分帧读写，按 contextId 分发、cancel kill、状态机 Running->Cancelled/Failed）；`service/pipeline/streaming_transport.rs`：二进制帧编解码纯函数。
 - Remote 模式不支持（bail）。
 
 ### 测试约定

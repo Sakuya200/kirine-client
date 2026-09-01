@@ -1,14 +1,15 @@
-//! 流式脚本 stdout 帧解析与事件映射的纯函数单测。
+//! 流式控制帧解析与事件映射的纯函数单测。
 //!
 //! 原位于 `src/service/pipeline/streaming.rs` 内联 `#[cfg(test)]` 模块；被测项
 //! （`parse_streaming_frame` / `frame_to_event` / `serialize_input_entry` 及若干
 //! `StreamingContext*` 结构）为 `pub(crate)`，经 `test_support` 桥接重导出后迁入本文件。
+//! chunk 不走 JSON 控制帧（二进制帧编解码见 `streaming_transport.rs` 测试）。
 
 use kirine_client_lib::test_support::{
-    frame_to_event, parse_streaming_frame, serialize_input_entry, AudioStreamEvent,
-    StreamingContextBasic, StreamingContextJson, StreamingFramePayload, StreamingMessageEntry,
-    StreamingSpeaker,
+    frame_to_event, parse_streaming_frame, serialize_input_entry, StreamingContextBasic,
+    StreamingContextJson, StreamingFramePayload, StreamingMessageEntry, StreamingSpeaker,
 };
+use tauri::ipc::InvokeResponseBody;
 
 #[test]
 fn parses_started_frame() {
@@ -17,20 +18,6 @@ fn parses_started_frame() {
         .expect("some");
     assert_eq!(frame.context_id, "msg-1");
     assert_eq!(frame.payload, StreamingFramePayload::Started);
-}
-
-#[test]
-fn parses_chunk_frame_with_base64_bytes() {
-    // "hi" -> base64 "aGk="
-    let frame = parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
-        .expect("parse")
-        .expect("some");
-    assert_eq!(
-        frame.payload,
-        StreamingFramePayload::Chunk {
-            bytes: vec![b'h', b'i']
-        }
-    );
 }
 
 #[test]
@@ -146,37 +133,49 @@ fn unknown_frame_type_is_err() {
 }
 
 #[test]
-fn frame_to_event_maps_each_payload() {
-    // AudioStreamEvent 未派生 PartialEq，用 match + 字段断言。
+fn frame_to_event_maps_control_payloads_to_json() {
     let started = parse_streaming_frame(r#"{"type":"started","contextId":"msg-1"}"#)
         .expect("parse")
         .expect("some");
     match frame_to_event(&started) {
-        Some(AudioStreamEvent::Started) => {}
-        other => panic!("expected Started, got {other:?}"),
-    }
-
-    let chunk = parse_streaming_frame(r#"{"type":"chunk","contextId":"msg-1","bytes":"aGk="}"#)
-        .expect("parse")
-        .expect("some");
-    match frame_to_event(&chunk) {
-        Some(AudioStreamEvent::Chunk { bytes }) => assert_eq!(bytes, vec![b'h', b'i']),
-        other => panic!("expected Chunk, got {other:?}"),
+        Some(InvokeResponseBody::Json(json)) => {
+            assert_eq!(json, r#"{"type":"started"}"#);
+        }
+        other => panic!("expected Json, got {other:?}"),
     }
 
     let finished = parse_streaming_frame(r#"{"type":"finished","contextId":"msg-1"}"#)
         .expect("parse")
         .expect("some");
     match frame_to_event(&finished) {
-        Some(AudioStreamEvent::Finished) => {}
-        other => panic!("expected Finished, got {other:?}"),
+        Some(InvokeResponseBody::Json(json)) => {
+            assert_eq!(json, r#"{"type":"finished"}"#);
+        }
+        other => panic!("expected Json, got {other:?}"),
     }
 
     let error = parse_streaming_frame(r#"{"type":"error","contextId":"msg-1","message":"boom"}"#)
         .expect("parse")
         .expect("some");
     match frame_to_event(&error) {
-        Some(AudioStreamEvent::Error { message }) => assert_eq!(message, "boom"),
-        other => panic!("expected Error, got {other:?}"),
+        Some(InvokeResponseBody::Json(json)) => {
+            assert!(json.contains(r#""type":"error""#));
+            assert!(json.contains("boom"));
+        }
+        other => panic!("expected Json, got {other:?}"),
+    }
+}
+
+#[test]
+fn frame_to_event_maps_chunk_payload_to_raw_bytes() {
+    let frame = kirine_client_lib::test_support::StreamingFrame {
+        context_id: "msg-1".to_string(),
+        payload: StreamingFramePayload::Chunk {
+            bytes: vec![b'h', b'i'],
+        },
+    };
+    match frame_to_event(&frame) {
+        Some(InvokeResponseBody::Raw(bytes)) => assert_eq!(bytes, vec![b'h', b'i']),
+        other => panic!("expected Raw, got {other:?}"),
     }
 }

@@ -11,7 +11,9 @@
 use std::fs;
 
 use kirine_client_lib::test_support::{
-    models::{HistoryFilter, HistoryTaskType, TaskStatus, UpdateTaskStatusPayload},
+    models::{
+        GeneratedAudioSource, HistoryFilter, HistoryTaskType, TaskStatus, UpdateTaskStatusPayload,
+    },
     LocalServiceHarness, PageRequest, Service,
 };
 use kirine_client_lib::Result;
@@ -169,8 +171,8 @@ async fn read_text_to_speech_audio_returns_bytes() -> Result<()> {
         .seed_tts_detail(20, BASE, VERSION, Some(&audio.to_string_lossy()))
         .await?;
 
-    let asset = harness.service().read_text_to_speech_audio(20).await?;
-    assert_eq!(asset.task_id, 20);
+    let source = GeneratedAudioSource::TextToSpeech { history_id: 20 };
+    let asset = harness.service().read_generated_audio(source).await?;
     assert!(!asset.bytes.is_empty());
     assert_eq!(asset.bytes, b"RIFF....fake-audio-bytes");
 
@@ -194,8 +196,8 @@ async fn read_voice_clone_audio_returns_bytes() -> Result<()> {
         .seed_voice_clone_detail(21, BASE, VERSION, Some(&audio.to_string_lossy()))
         .await?;
 
-    let asset = harness.service().read_voice_clone_audio(21).await?;
-    assert_eq!(asset.task_id, 21);
+    let source = GeneratedAudioSource::VoiceClone { history_id: 21 };
+    let asset = harness.service().read_generated_audio(source).await?;
     assert!(!asset.bytes.is_empty());
 
     harness.shutdown().await
@@ -218,8 +220,8 @@ async fn read_voice_design_audio_returns_bytes() -> Result<()> {
         .seed_voice_design_detail(22, BASE, VERSION, Some(&audio.to_string_lossy()))
         .await?;
 
-    let asset = harness.service().read_voice_design_audio(22).await?;
-    assert_eq!(asset.task_id, 22);
+    let source = GeneratedAudioSource::VoiceDesign { history_id: 22 };
+    let asset = harness.service().read_generated_audio(source).await?;
     assert!(!asset.bytes.is_empty());
 
     harness.shutdown().await
@@ -242,7 +244,8 @@ async fn read_audio_errors_when_task_not_completed() -> Result<()> {
         .seed_tts_detail(23, BASE, VERSION, Some(&audio.to_string_lossy()))
         .await?;
 
-    let err = harness.service().read_text_to_speech_audio(23).await;
+    let source = GeneratedAudioSource::TextToSpeech { history_id: 23 };
+    let err = harness.service().read_generated_audio(source).await;
     assert!(
         err.is_err(),
         "reading audio of a non-completed task should error"

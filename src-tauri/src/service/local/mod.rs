@@ -219,7 +219,7 @@ impl Service for LocalService {
     async fn send_streaming_message(
         &self,
         payload: SendStreamingMessagePayload,
-        on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+        on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     ) -> Result<()> {
         self.send_streaming_message_impl(payload, on_event).await
     }

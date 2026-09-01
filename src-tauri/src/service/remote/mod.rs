@@ -232,7 +232,7 @@ impl Service for RemoteService {
     async fn send_streaming_message(
         &self,
         _payload: SendStreamingMessagePayload,
-        _on_event: tauri::ipc::Channel<crate::hooks::streaming::AudioStreamEvent>,
+        _on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     ) -> Result<()> {
         anyhow::bail!("远程存储模式暂不支持流式语音会话")
     }
