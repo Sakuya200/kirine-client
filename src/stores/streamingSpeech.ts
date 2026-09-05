@@ -68,8 +68,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const activeTaskId = ref<number | null>(null);
   /** 回放模式下的历史任务 id（回放不占用 activeTaskId，但头像同步仍需定位任务）。 */
   const replayTaskId = ref<number | null>(null);
-  /** 聊天记录重建版本：restoreFromReplaySnapshot 时递增，驱动消息列表整体重挂载（重载头像）。 */
-  const messagesVersion = ref(0);
+  /** 头像缓存版本：clearAvatarUrls 递增，驱动已挂载的头像组件 watch 重载（替代旧的 messagesVersion 整列表重挂载）。 */
+  const avatarCacheVersion = ref(0);
   const isStartingSession = ref(false);
   const sessionConfig = reactive<StreamingSessionConfig>({
     baseModel: '',
@@ -176,6 +176,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       }
     }
     avatarUrls.value.clear();
+    // 缓存已整体失效，递增版本号让已挂载的头像组件 watch 重载
+    avatarCacheVersion.value += 1;
   };
 
   const ensureSpeakerAvatar = async (taskId: number, speakerName: string): Promise<string | null> => {
@@ -490,7 +492,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       messages.value.push(message);
       setAudioPathForMessage(messageId, entry.audioPath ?? null);
     }
-    messagesVersion.value += 1;
   };
 
   return {
@@ -520,6 +521,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     getAudioUrl,
     setAudioPathForMessage,
     ensureSpeakerAvatar,
-    messagesVersion
+    avatarCacheVersion
   };
 });

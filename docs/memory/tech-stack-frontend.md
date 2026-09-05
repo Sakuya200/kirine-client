@@ -44,6 +44,9 @@ src/
 │   │   └── HistoryTaskDetailDialog.vue
 │   ├── streaming/            # 流式语音生成页专用组件
 │   │   ├── StreamingConfigDrawer.vue   # 右侧可拖拽配置抽屉
+│   │   ├── StreamingMessageAvatar.vue  # 消息头像（Blob URL + 首字占位回退）
+│   │   ├── StreamingMessageItem.vue    # 单条消息整行（头像/昵称/状态/气泡/播放器）
+│   │   ├── StreamingMessageStatusPill.vue # 消息状态标签（生成中/已完成/异常）
 │   │   └── StreamingSpeakerForm.vue    # 说话人增删改表单
 │   └── ui/                 # 配置驱动的 UI 参数组件
 │       ├── UiParamInputField.vue          # 数字/文本输入
@@ -143,7 +146,7 @@ src/
 ### 流式语音生成
 前端 ChatUI + 后端会话级长期进程的实时流式语音合成。后端架构见 [[streaming-speech-architecture]]。
 
-- `StreamingSpeechView`：ChatUI 风格对话页，user/assistant 气泡 + 底部说话人选择与文本输入（Enter 发送 / Shift+Enter 换行）。assistant 消息挂 `StreamableAudioPlayer(mode='stream')`，借其 `watch immediate` 契约自动 `startStreaming(taskId, contextId)`，经 `send_streaming_message` 的 Tauri `Channel` 接收事件（控制事件 started/finished/error 为 JSON 对象，chunk 为 ArrayBuffer 二进制）累计播放。
+- `StreamingSpeechView`：ChatUI 风格对话页，消息行由 `StreamingMessageItem` 渲染（`<TransitionGroup name="message-stack">` 进出场动画：transform+opacity，不动画高度；气泡 hover 抬升；`compact` prop 控制简洁展示，隐藏状态标签与播放/下载区）。列表 key 为纯 `message.id`；头像缓存失效经 store 的 `avatarCacheVersion`（`clearAvatarUrls` 内递增）驱动头像组件 watch 重载。底部说话人选择与文本输入（Enter 发送 / Shift+Enter 换行）。assistant 消息内嵌 `StreamableAudioPlayer(mode='stream')`，借其 `watch immediate` 契约自动 `startStreaming(taskId, contextId)`，经 `send_streaming_message` 的 Tauri `Channel` 接收事件（控制事件 started/finished/error 为 JSON 对象，chunk 为 ArrayBuffer 二进制）累计播放。
 - `StreamingConfigDrawer`：右侧可拖拽抽屉（左边缘 pointer 事件调宽 320–560px，默认收起按需唤起，带半透明遮罩），三段 `PanelCard`：基础配置（模型/版本/设备/语言，镜像 `VoiceCloneView` 的 watch 同步）/ 说话人管理 / 模型参数（`GenericTaskParamsForm`）。`StreamingSpeakerForm` 基于 `BaseDialog`，字段为名称/对应模型/参考音频/参考文本（按模型可选）/类别只读。
 - 说话人支持两类输入：`voice-clone` 为前端本地定义（名称+参考音频+参考文本），`trained` 从 `list_speaker_infos(status=Ready)` 按基础模型筛选，提交 `speakerDirName=speaker.id`；`preset` 仍为预留类型。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
 - `requiresRefText(baseModel)` 复用 `DYNAMIC_REFERENCE_BASE_MODELS` 模式（`gpt_sovits_cpufast`）判断参考文本是否必填。

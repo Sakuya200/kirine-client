@@ -23,11 +23,13 @@ const loadAvatar = async () => {
     url.value = null;
     return;
   }
+  // 旧 URL 可能已被 clearAvatarUrls revoke，先回退占位避免破图帧，待新 URL 就绪再上屏
+  url.value = null;
   url.value = await store.ensureSpeakerAvatar(props.taskId, props.speakerName);
 };
 
 onMounted(loadAvatar);
-watch(() => [props.taskId, props.speakerName, props.hasAvatar], loadAvatar);
+watch(() => [props.taskId, props.speakerName, props.hasAvatar, store.avatarCacheVersion], loadAvatar);
 
 const initial = computed(() => Array.from((props.speakerName || '？').trim())[0]?.toUpperCase() ?? '？');
 </script>
