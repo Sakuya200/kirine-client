@@ -14,7 +14,7 @@ import { HistoryTaskType } from '@/enums/task';
 import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
 import { requiresRefText, type StreamingSpeakerInput } from '@/stores/streamingSpeech';
-import type { StreamingSpeakerConfig } from '@/types/streaming';
+import { IMAGE_FILE_EXTENSIONS, type StreamingSpeakerConfig } from '@/types/streaming';
 import type { SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 
 interface Props {
@@ -37,6 +37,11 @@ const categoryOptions = [
   { label: '已训练', value: 'trained' }
 ];
 
+const sideOptions = [
+  { label: '右侧', value: 'right' },
+  { label: '左侧', value: 'left' }
+];
+
 const createEmptyForm = (): StreamingSpeakerInput => ({
   name: '',
   baseModel: '',
@@ -46,7 +51,10 @@ const createEmptyForm = (): StreamingSpeakerInput => ({
   refText: '',
   description: '',
   category: 'voice-clone',
-  speakerDirName: ''
+  speakerDirName: '',
+  side: 'right',
+  avatarPath: '',
+  avatarName: ''
 });
 
 const form = ref<StreamingSpeakerInput>(createEmptyForm());
@@ -59,9 +67,7 @@ const isTrained = computed(() => form.value.category === 'trained');
 const needsRefText = computed(() => requiresRefText(form.value.baseModel));
 
 const trainedSpeakerOptions = computed(() =>
-  trainedSpeakers.value
-    .filter(s => s.baseModel === form.value.baseModel)
-    .map(s => ({ label: s.speakerName, value: String(s.id) }))
+  trainedSpeakers.value.filter(s => s.baseModel === form.value.baseModel).map(s => ({ label: s.speakerName, value: String(s.id) }))
 );
 
 const canSubmit = computed(() => {
@@ -102,7 +108,10 @@ const hydrateFromSpeaker = (speaker: StreamingSpeakerConfig | null) => {
       refText: speaker.refText,
       description: speaker.description ?? '',
       category: speaker.category,
-      speakerDirName: speaker.speakerDirName ?? ''
+      speakerDirName: speaker.speakerDirName ?? '',
+      side: speaker.side ?? 'right',
+      avatarPath: speaker.avatarPath ?? '',
+      avatarName: speaker.avatarName ?? ''
     };
     if (speaker.category === 'trained') {
       loadTrainedSpeakers();
@@ -208,6 +217,29 @@ const clearRefAudio = () => {
   form.value.refAudioName = '';
 };
 
+const selectAvatar = async () => {
+  try {
+    const selected = await openFileDialog({
+      title: '选择头像图片',
+      multiple: false,
+      directory: false,
+      filters: [{ name: '图片文件', extensions: [...IMAGE_FILE_EXTENSIONS] }]
+    });
+    if (typeof selected === 'string' && selected.trim().length > 0) {
+      const segments = selected.split(/[/\\]/);
+      form.value.avatarPath = selected;
+      form.value.avatarName = segments[segments.length - 1] ?? selected;
+    }
+  } catch (error) {
+    uiStore.notifyError(formatErrorMessage('打开文件选择器失败', error));
+  }
+};
+
+const clearAvatar = () => {
+  form.value.avatarPath = '';
+  form.value.avatarName = '';
+};
+
 const submit = () => {
   if (!canSubmit.value) {
     return;
@@ -221,7 +253,10 @@ const submit = () => {
     refText: form.value.refText.trim(),
     description: form.value.description?.trim() || undefined,
     category: form.value.category,
-    speakerDirName: isTrained.value ? form.value.speakerDirName : undefined
+    speakerDirName: isTrained.value ? form.value.speakerDirName : undefined,
+    side: form.value.side ?? 'right',
+    avatarPath: form.value.avatarPath || undefined,
+    avatarName: form.value.avatarName || undefined
   });
 };
 </script>
@@ -231,16 +266,28 @@ const submit = () => {
     <div class="space-y-4">
       <label class="block text-sm text-slate-700">
         <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
-        <input
-          v-model="form.name"
-          class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-          placeholder="为该说话人起个名字"
-        />
+        <input v-model="form.name" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="为该说话人起个名字" />
       </label>
 
       <BaseListbox v-model="form.baseModel" label="对应模型" :options="modelOptions" :disabled="modelOptions.length === 0" />
 
       <BaseListbox v-model="form.category" label="说话人类别" :options="categoryOptions" />
+
+      <BaseListbox v-model="form.side" label="消息显示侧" :options="sideOptions" />
+
+      <label class="block text-sm text-slate-700">
+        <span class="mb-1 block text-xs text-stone-500">头像（可选）</span>
+        <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
+          <BaseButton tone="ghost" @click="selectAvatar">
+            <FolderOpenIcon class="h-4 w-4" aria-hidden="true" />
+            <span>选择图片</span>
+          </BaseButton>
+          <span class="min-w-0 flex-1 break-all">{{ form.avatarName || '尚未选择头像图片' }}</span>
+          <button v-if="form.avatarPath" type="button" class="text-xs text-stone-500 transition hover:text-brand-700" @click="clearAvatar">
+            清空
+          </button>
+        </div>
+      </label>
 
       <template v-if="isTrained">
         <BaseListbox
@@ -249,9 +296,7 @@ const submit = () => {
           :options="trainedSpeakerOptions"
           :disabled="trainedSpeakerOptions.length === 0"
         />
-        <p v-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">
-          当前模型暂无可用已训练说话人，请先在模型微调页完成一次微调。
-        </p>
+        <p v-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">当前模型暂无可用已训练说话人，请先在模型微调页完成一次微调。</p>
       </template>
 
       <template v-else>

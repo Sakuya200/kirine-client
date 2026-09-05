@@ -1,12 +1,18 @@
 import type { AppLanguage } from '@/enums/language';
 import type { HardwareType } from '@/enums/settings';
 
+/** 头像图片扩展名白名单（与后端 STREAMING_AVATAR_IMAGE_EXTENSIONS 对齐）。 */
+export const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif'] as const;
+
 /**
  * 流式语音说话人来源类别。
  * voice-clone 使用名称、参考音频和参考文本；trained 从已有 Ready 说话人选择。
  * preset 为预留类型。
  */
 export type StreamingSpeakerCategory = 'voice-clone' | 'preset' | 'trained';
+
+/** 消息展示侧：同一说话人的消息固定一侧，缺省视为 right。 */
+export type StreamingSpeakerSide = 'left' | 'right';
 
 /**
  * 流式语音生成页说话人配置。voice-clone 由前端本地管理，
@@ -24,22 +30,26 @@ export interface StreamingSpeakerConfig {
   refAudioName: string;
   refText: string;
   description?: string;
+  /** 消息展示侧；缺省视为 right。 */
+  side?: StreamingSpeakerSide;
+  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  avatarPath?: string;
+  /** 头像原始文件名（展示用）。 */
+  avatarName?: string;
   createTime?: string;
   modifyTime?: string;
 }
 
-export type StreamingMessageRole = 'user' | 'assistant';
 export type StreamingMessageStatus = 'streaming' | 'completed' | 'error';
 
 /**
- * 流式语音聊天消息。assistant 消息挂载 StreamableAudioPlayer(mode='stream')。
+ * 流式语音聊天消息。每个说话人即用户本身，每次发送只产生一条消息，
+ * contextId 即消息 id（后端以其命名 audio/<contextId>.wav）。
  * 任务创建时间由后端执行任务前生成、响应返回时填充，前端不赋值。
  */
 export interface StreamingChatMessage {
   id: string;
-  role: StreamingMessageRole;
   text: string;
-  synthText: string; // 该轮待合成的文本（assistant 消息携带，传给 send_streaming_message）
   speakerId: string | null;
   speakerName?: string;
   taskId: number;

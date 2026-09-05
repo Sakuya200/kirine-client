@@ -655,6 +655,17 @@ pub struct StreamingSpeechAudioAsset {
     pub bytes: Vec<u8>,
 }
 
+/// 流式说话人头像字节资产（前端 Blob URL 显示用；语义为图片，不复用音频资产）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeakerAvatarAsset {
+    pub history_id: i64,
+    pub speaker_name: String,
+    pub file_name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTrainingFileInput {
@@ -736,6 +747,15 @@ pub struct StreamingSpeakerInput {
     /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
     #[serde(default)]
     pub category: String,
+    /// 消息展示侧："left" | "right"；空串/缺省视为 "right"。
+    #[serde(default)]
+    pub side: String,
+    /// 头像原图绝对路径；创建任务时复制进 sample 目录后存序列化路径。
+    #[serde(default)]
+    pub avatar_path: Option<String>,
+    /// 头像原始文件名（展示用）。
+    #[serde(default)]
+    pub avatar_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

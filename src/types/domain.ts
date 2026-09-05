@@ -148,6 +148,12 @@ export interface StreamingSpeakerPayload {
   description?: string;
   category?: 'voice-clone' | 'preset' | 'trained';
   speakerDirName?: string;
+  /** 消息展示侧；缺省视为 right。 */
+  side?: 'left' | 'right';
+  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  avatarPath?: string;
+  /** 头像原始文件名（展示用）。 */
+  avatarName?: string;
 }
 
 export interface CreateStreamingSpeechTaskPayload {

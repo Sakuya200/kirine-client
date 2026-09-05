@@ -9,6 +9,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import StreamableAudioPlayer from '@/components/common/StreamableAudioPlayer.vue';
 import StreamingConfigDrawer from '@/components/streaming/StreamingConfigDrawer.vue';
+import StreamingMessageAvatar from '@/components/streaming/StreamingMessageAvatar.vue';
 import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
@@ -18,6 +19,7 @@ import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { StreamingReplaySnapshot } from '@/types/domain';
+import type { StreamingChatMessage, StreamingSpeakerConfig } from '@/types/streaming';
 
 const store = useStreamingSpeechStore();
 const modelStore = useModelStore();
@@ -46,8 +48,14 @@ const canSend = computed(
 const hasSpeakers = computed(() => store.speakers.length > 0);
 const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? '未选择');
 
+/** 消息所属说话人；回放消息按 speakerId 匹配，匹配不到返回 null（占位头像兜底）。 */
+const messageSpeaker = (message: StreamingChatMessage) => store.getSpeaker(message.speakerId);
+/** 消息展示侧由说话人配置的左右标记决定，缺省视为 right。 */
+const isMessageLeft = (message: StreamingChatMessage) => messageSpeaker(message)?.side === 'left';
+const messageHasAvatar = (message: StreamingChatMessage) => Boolean(messageSpeaker(message)?.avatarPath);
+
 watch(
-  () => store.speakers,
+  () => store.speakers as StreamingSpeakerConfig[],
   speakers => {
     if (selectedSpeakerId.value !== null && speakers.some(speaker => speaker.id === selectedSpeakerId.value)) {
       return;
@@ -212,9 +220,24 @@ onMounted(async () => {
         </div>
 
         <template v-else>
-          <div v-for="message in store.messages.filter(item => item.role === 'assistant')" :key="message.id" class="flex justify-end">
-            <div class="flex w-fit max-w-[92%] flex-col items-end sm:max-w-[82%]">
-              <div class="mb-1.5 flex items-center justify-end gap-2 text-[11px] text-stone-500">
+          <div
+            v-for="message in store.messages"
+            :key="`${store.messagesVersion}-${message.id}`"
+            class="flex items-start gap-2.5"
+            :class="isMessageLeft(message) ? 'justify-start' : 'justify-end'"
+          >
+            <StreamingMessageAvatar
+              v-if="isMessageLeft(message)"
+              :task-id="message.taskId"
+              :speaker-name="message.speakerName"
+              :has-avatar="messageHasAvatar(message)"
+            />
+
+            <div class="flex w-fit max-w-[92%] flex-col sm:max-w-[82%]" :class="isMessageLeft(message) ? 'items-start' : 'items-end'">
+              <div
+                class="mb-1.5 flex items-center gap-2 text-[11px] text-stone-500"
+                :class="isMessageLeft(message) ? 'justify-start' : 'justify-end'"
+              >
                 <span class="truncate font-medium text-slate-600">{{ message.speakerName || '默认说话人' }}</span>
                 <span class="h-1 w-1 rounded-full bg-stone-300" />
                 <span
@@ -232,17 +255,29 @@ onMounted(async () => {
               </div>
 
               <div
-                class="relative max-w-full rounded-[18px] rounded-br-[8px] border border-sky-200/80 bg-sky-50/70 px-4 py-3 shadow-[0_10px_24px_rgba(14,116,144,0.08)]"
+                class="relative max-w-full rounded-[18px] border px-4 py-3"
+                :class="
+                  isMessageLeft(message)
+                    ? 'rounded-bl-[8px] border-brand-200/80 bg-brand-50/70 shadow-[0_10px_24px_rgba(180,83,9,0.08)]'
+                    : 'rounded-br-[8px] border-sky-200/80 bg-sky-50/70 shadow-[0_10px_24px_rgba(14,116,144,0.08)]'
+                "
               >
-                <p class="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{{ message.synthText || message.text }}</p>
+                <p class="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{{ message.text }}</p>
               </div>
 
-              <div class="mt-2 flex justify-end self-end">
+              <div class="mt-2 flex" :class="isMessageLeft(message) ? 'justify-start self-start' : 'justify-end self-end'">
                 <div class="max-w-[28rem]">
                   <StreamableAudioPlayer mode="stream" :message-id="message.id" :audio-path="message.audioPath" :speaker-name="message.speakerName" />
                 </div>
               </div>
             </div>
+
+            <StreamingMessageAvatar
+              v-if="!isMessageLeft(message)"
+              :task-id="message.taskId"
+              :speaker-name="message.speakerName"
+              :has-avatar="messageHasAvatar(message)"
+            />
           </div>
         </template>
       </div>

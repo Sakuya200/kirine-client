@@ -85,6 +85,11 @@ fn context_json_round_trips() {
                 description: None,
                 speaker_dir_name: None,
                 category: String::new(),
+                side: "left".to_string(),
+                avatar_path: Some(
+                    "%DATA_DIR_PATH%/samples/streaming-speech_7/avatar_1_A.png".to_string(),
+                ),
+                avatar_name: Some("A.png".to_string()),
             }],
         },
         messages: vec![StreamingMessageEntry {

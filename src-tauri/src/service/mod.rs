@@ -10,8 +10,9 @@ use crate::{
         HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
         ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
         SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-        StreamingReplaySnapshot, StreamingSpeechTaskResult, TextToSpeechTaskResult,
-        UpdateSpeakerPayload, UpdateTaskStatusPayload, VoiceCloneTaskResult, VoiceDesignTaskResult,
+        StreamingReplaySnapshot, StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult,
+        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+        VoiceCloneTaskResult, VoiceDesignTaskResult,
     },
     Result,
 };
@@ -123,6 +124,18 @@ pub trait Service: Send + Sync {
         &self,
         history_id: i64,
     ) -> Result<StreamingReplaySnapshot>;
+    async fn read_streaming_speaker_avatar(
+        &self,
+        history_id: i64,
+        speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarAsset>;
+    async fn update_streaming_speaker_avatar(
+        &self,
+        history_id: i64,
+        speaker_name: String,
+        avatar_path: Option<String>,
+        avatar_name: Option<String>,
+    ) -> Result<()>;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {
