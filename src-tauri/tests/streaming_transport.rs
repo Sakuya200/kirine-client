@@ -4,8 +4,9 @@
 
 use kirine_client_lib::test_support::{
     decode_frame_header, encode_chunk_frame, encode_control_frame, encode_frame,
-    encode_input_frame, generate_session_token, parse_auth_payload, parse_chunk_payload,
-    FRAME_KIND_AUTH, FRAME_KIND_CONTROL, FRAME_KIND_CHUNK, FRAME_KIND_INPUT, FRAME_HEADER_LEN,
+    encode_input_frame, encode_speakers_update_frame, generate_session_token, parse_auth_payload,
+    parse_chunk_payload, FRAME_HEADER_LEN, FRAME_KIND_AUTH, FRAME_KIND_CONTROL, FRAME_KIND_CHUNK,
+    FRAME_KIND_INPUT, FRAME_KIND_SPEAKERS_UPDATE,
 };
 
 #[test]
@@ -102,6 +103,29 @@ fn control_frame_carries_json_payload() {
     let (kind, _) = decode_frame_header(&frame[..FRAME_HEADER_LEN]).expect("header");
     assert_eq!(kind, FRAME_KIND_CONTROL);
     assert_eq!(&frame[FRAME_HEADER_LEN..], json.as_bytes());
+}
+
+#[test]
+fn speakers_update_frame_layout_matches_protocol() {
+    // 0x11 帧：与 0x10 input 帧共用同一种帧头（u32 LE 长度 + kind 字节），
+    // payload 为全量 speakers JSON 快照（Rust 不接收该帧，仅发送）。
+    let json = r#"{"speakers":[{"name":"A","category":"voice-clone"}]}"#;
+    let frame = encode_speakers_update_frame(json);
+    let (kind, payload_len) = decode_frame_header(&frame[..FRAME_HEADER_LEN]).expect("header");
+    assert_eq!(kind, FRAME_KIND_SPEAKERS_UPDATE);
+    assert_eq!(payload_len, json.len());
+    assert_eq!(&frame[FRAME_HEADER_LEN..], json.as_bytes());
+    // 长度前缀含 kind 字节，与 Python 侧 encode_frame 对齐
+    assert_eq!(&frame[..4], &((json.len() + 1) as u32).to_le_bytes());
+}
+
+#[test]
+fn speakers_update_frame_round_trips_through_decode_frame_header() {
+    let frame = encode_speakers_update_frame("{}");
+    assert_ne!(FRAME_KIND_SPEAKERS_UPDATE, FRAME_KIND_INPUT);
+    let (kind, payload_len) = decode_frame_header(&frame[..FRAME_HEADER_LEN]).expect("header");
+    assert_eq!(kind, FRAME_KIND_SPEAKERS_UPDATE);
+    assert_eq!(payload_len, 2);
 }
 
 #[test]

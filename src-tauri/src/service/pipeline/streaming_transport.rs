@@ -7,6 +7,9 @@
 //! - `0x03` chunk：Python->Rust，`[u16 LE contextIdLen][contextId UTF-8][音频裸字节]`
 //!   （首 chunk 含 44 字节 WAV 哨兵头），无 base64、无 JSON。
 //! - `0x10` input：Rust->Python，JSON 消息条目（contextId/speakerName/text/audioPath）。
+//! - `0x11` speakers_update：Rust->Python，JSON `{"speakers": [...]}` 全量说话人快照
+//!   （字段同 `StreamingSpeakerInput`，camelCase）。运行中说话人热更新：Python 收到后
+//!   重建说话人表并增量编码 voice-clone prompt。
 
 use anyhow::{bail, Context};
 
@@ -16,6 +19,7 @@ pub const FRAME_KIND_AUTH: u8 = 0x01;
 pub const FRAME_KIND_CONTROL: u8 = 0x02;
 pub const FRAME_KIND_CHUNK: u8 = 0x03;
 pub const FRAME_KIND_INPUT: u8 = 0x10;
+pub const FRAME_KIND_SPEAKERS_UPDATE: u8 = 0x11;
 
 /// 单帧 payload 上限：防止长度前缀损坏时巨量分配。音频 chunk 为百 KB 级，16MB 已远超所需。
 pub const MAX_FRAME_PAYLOAD: usize = 16 * 1024 * 1024;
@@ -40,6 +44,11 @@ pub fn encode_control_frame(json: &str) -> Vec<u8> {
 /// 编码 input 帧（Rust->Python 消息条目，payload 为 JSON 文本）。
 pub fn encode_input_frame(json: &str) -> Vec<u8> {
     encode_frame(FRAME_KIND_INPUT, json.as_bytes())
+}
+
+/// 编码 speakers_update 帧（Rust->Python 全量说话人快照，payload 为 JSON 文本）。
+pub fn encode_speakers_update_frame(json: &str) -> Vec<u8> {
+    encode_frame(FRAME_KIND_SPEAKERS_UPDATE, json.as_bytes())
 }
 
 /// 编码 chunk 帧：contextId 前置长度前缀，后接音频裸字节。

@@ -60,6 +60,22 @@ let messageSeed = 0;
 const nextSpeakerId = () => `spk-${++speakerSeed}`;
 const nextMessageId = () => `msg-${++messageSeed}`;
 
+/** 说话人配置 → 后端 StreamingSpeakerInput 映射（startSession 与 persistSpeakers 共用）。 */
+const toSpeakerPayload = (s: StreamingSpeakerConfig) => ({
+  name: s.name,
+  baseModel: s.baseModel,
+  modelVersion: s.modelVersion,
+  refAudioPath: s.refAudioPath,
+  refAudioName: s.refAudioName,
+  refText: s.refText,
+  description: s.description,
+  category: s.category,
+  speakerDirName: s.speakerDirName,
+  side: s.side,
+  avatarPath: s.avatarPath,
+  avatarName: s.avatarName
+});
+
 export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const uiStore = useUiStore();
   const speakers = ref<StreamingSpeakerConfig[]>([]);
@@ -202,6 +218,37 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     }
   };
 
+  /** 说话人列表持久化进行中标记（乐观更新已生效、后端写入未完成）。 */
+  const persistingSpeakers = ref(false);
+
+  /**
+   * 将当前说话人列表全量写入任务 context.json；会话运行中（activeTaskId）时后端
+   * 还会经 0x11 帧通知 Python 进程热重建说话人表，实现运行中即时生效。
+   * 乐观更新由调用方先行完成，这里在失败时回滚到调用前快照。
+   */
+  const persistSpeakers = async (snapshot: StreamingSpeakerConfig[]) => {
+    const taskId = activeTaskId.value ?? replayTaskId.value;
+    if (taskId === null) {
+      return;
+    }
+    persistingSpeakers.value = true;
+    try {
+      await invoke('update_streaming_speakers', {
+        payload: {
+          historyId: taskId,
+          speakers: speakers.value.map(toSpeakerPayload)
+        }
+      });
+      // 头像可能被替换/清空：失效缓存让已挂载头像组件重载（version 驱动 watch）
+      clearAvatarUrls();
+    } catch (error) {
+      speakers.value = snapshot;
+      uiStore.notifyError(`同步说话人配置失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      persistingSpeakers.value = false;
+    }
+  };
+
   const addSpeaker = (payload: StreamingSpeakerInput): StreamingSpeakerConfig => {
     const speaker: StreamingSpeakerConfig = {
       id: nextSpeakerId(),
@@ -218,57 +265,33 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       avatarPath: payload.avatarPath,
       avatarName: payload.avatarName
     };
+    const snapshot = speakers.value;
     speakers.value = [...speakers.value, speaker];
+    void persistSpeakers(snapshot);
     return speaker;
   };
 
-  const updateSpeaker = async (id: string, patch: Partial<StreamingSpeakerInput>) => {
-    const previous = getSpeaker(id);
+  const updateSpeaker = (id: string, patch: Partial<StreamingSpeakerInput>) => {
+    const snapshot = speakers.value;
     speakers.value = speakers.value.map(item =>
       item.id === id
         ? {
             ...item,
+            // name 即说话人身份（context.json id = name），不支持改名
             ...patch,
+            name: item.name,
             id: item.id,
             category: item.category
           }
         : item
     );
-    if (!previous) {
-      return;
-    }
-    // 头像字节由后端从任务 context.json 提供：会话进行中/回放时更新头像须同步到
-    // context.json，再失效缓存并触发历史消息重新加载头像。
-    const avatarChanged =
-      (patch.avatarPath ?? undefined) !== (previous.avatarPath ?? undefined) ||
-      (patch.avatarName ?? undefined) !== (previous.avatarName ?? undefined);
-    const taskId = activeTaskId.value ?? replayTaskId.value;
-    if (!avatarChanged || taskId === null) {
-      return;
-    }
-    try {
-      await invoke('update_streaming_speaker_avatar', {
-        historyId: taskId,
-        speakerName: previous.name,
-        avatarPath: patch.avatarPath ?? null,
-        avatarName: patch.avatarName ?? null
-      });
-      // 存在流式生成中的消息时跳过重载，避免打断进行中的音频流
-      if (messages.value.some(m => m.status === 'streaming')) {
-        return;
-      }
-      // 主动重载：拉取最新快照重建聊天记录（含头像），不引入监听机制
-      const snapshot = await invoke<StreamingReplaySnapshot>('get_streaming_replay_snapshot', {
-        historyId: taskId
-      });
-      restoreFromReplaySnapshot(snapshot);
-    } catch (error) {
-      uiStore.notifyError(`同步说话人头像失败：${error instanceof Error ? error.message : String(error)}`);
-    }
+    void persistSpeakers(snapshot);
   };
 
   const removeSpeaker = (id: string) => {
+    const snapshot = speakers.value;
     speakers.value = speakers.value.filter(item => item.id !== id);
+    void persistSpeakers(snapshot);
   };
 
   const openDrawer = () => {
@@ -304,20 +327,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           device: sessionConfig.device,
           language: sessionConfig.language,
           modelParams: sessionConfig.modelParams,
-          speakers: speakers.value.map(s => ({
-            name: s.name,
-            baseModel: s.baseModel,
-            modelVersion: s.modelVersion,
-            refAudioPath: s.refAudioPath,
-            refAudioName: s.refAudioName,
-            refText: s.refText,
-            description: s.description,
-            category: s.category,
-            speakerDirName: s.speakerDirName,
-            side: s.side,
-            avatarPath: s.avatarPath,
-            avatarName: s.avatarName
-          }))
+          speakers: speakers.value.map(toSpeakerPayload)
         }
       });
       activeTaskId.value = result.taskId;
@@ -499,6 +509,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     messages,
     isDrawerOpen,
     activeTaskId,
+    replayTaskId,
     isStartingSession,
     sessionConfig,
     audioStates,
@@ -508,6 +519,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     addSpeaker,
     updateSpeaker,
     removeSpeaker,
+    persistingSpeakers,
     openDrawer,
     closeDrawer,
     toggleDrawer,

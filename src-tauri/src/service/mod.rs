@@ -1,4 +1,4 @@
-mod local;
+pub(crate) mod local;
 pub mod models;
 mod remote;
 use crate::{
@@ -11,8 +11,9 @@ use crate::{
         ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
         SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
         StreamingReplaySnapshot, StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult,
-        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
-        VoiceCloneTaskResult, VoiceDesignTaskResult,
+        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateStreamingSpeakersPayload,
+        UpdateStreamingSpeakersResult, UpdateTaskStatusPayload, VoiceCloneTaskResult,
+        VoiceDesignTaskResult,
     },
     Result,
 };
@@ -129,13 +130,10 @@ pub trait Service: Send + Sync {
         history_id: i64,
         speaker_name: String,
     ) -> Result<StreamingSpeakerAvatarAsset>;
-    async fn update_streaming_speaker_avatar(
+    async fn update_streaming_speakers(
         &self,
-        history_id: i64,
-        speaker_name: String,
-        avatar_path: Option<String>,
-        avatar_name: Option<String>,
-    ) -> Result<()>;
+        payload: UpdateStreamingSpeakersPayload,
+    ) -> Result<UpdateStreamingSpeakersResult>;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {

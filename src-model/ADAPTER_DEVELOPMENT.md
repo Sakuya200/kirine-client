@@ -358,7 +358,31 @@ if __name__ == "__main__":
 - `requirements-torch.txt`：Torch 运行时依赖，由 `ensure_torch_runtime` 在 CPU/CUDA 切换时按 `index-url` 安装对应轮子。
 - `requirements-post-torch.txt`：可选；依赖 torch 的运行时依赖（构建需要 torch 已就绪），由 `init_task_runtime` 在 torch 安装完成后安装。文件不存在则跳过，其他适配器不受影响。
 
-三个文件共同保证不同适配器的依赖互不污染（每个适配器独立 venv/conda_env）。
+三个文件共同保证不同适配器的依赖重不污染（每个适配器独立 venv/conda_env）。
+
+### 5.7 流式语音（StreamingSpeech）适配器
+
+支持「会话级流式语音生成」功能的适配器在上述四类任务之外额外提供一个会话入口 `streaming.py`，Rust 端（`run_streaming_session`）以**会话级长期进程**方式运行：一条聊天消息一个 contextId，音频经环回 Socket 二进制帧实时回传。
+
+**入口契约**：Rust 拼装 `streaming.params.json`（含 `context_file_path` / `streaming_socket_addr` / `streaming_socket_token` / `output_audio_dir` / `model_root_path` / `device` 及 `model_params_json`）后以 `--script-path streaming.py --params-file <file>` 拉起进程；适配器 `main()` 解析参数后调用 `streaming_session.run_streaming_session(params, backend)`。
+
+**复用方式**：把公共层两个文件复制进适配器目录（与 `params_entity.py` 复制约定一致）：
+
+| 文件 | 职责 | 依赖 |
+| --- | --- | --- |
+| `streaming_transport.py` | 环回 Socket 帧协议：帧编解码、AUTH 鉴权连接、chunk/控制帧发送、WAV 哨兵头/落盘 | 仅 stdlib（`LOG_TAG` 改成适配器 tag） |
+| `streaming_session.py` | 通用会话主循环：读 context.json speakers → 连接 → `backend.prepare` → 帧分发（INPUT / SPEAKERS_UPDATE / skip）→ EOF | 仅 stdlib + transport |
+
+**适配器实现 `StreamingModelBackend` 四个方法**（均在单线程主循环内串行调用，无需加锁）：
+
+| 方法 | 职责 | 失败语义 |
+| --- | --- | --- |
+| `prepare(speakers)` | 模型加载 + 说话人预处理（如 voice prompt 预编码） | 抛异常 = 会话启动失败（任务置 Failed） |
+| `apply_speakers_update(speakers)` | 收到 0x11 全量说话人快照：重建说话人表 + 增量预处理 | 自兜异常：失败打印 stderr 并**保持旧表** |
+| `resolve_speaker(name)` | 按名称查说话人，不存在返回 None（主循环回 error 帧） | — |
+| `synthesize(speaker, text, context_id, output_audio_dir, sink)` | 单条消息合成：emit started → chunk* → finished | 自兜异常（error 帧不退进程）；推理上下文（如 `torch.inference_mode`）自行包裹 |
+
+参考实现：`moss_tts_realtime/streaming.py` 的 `MossTTSBackend`（首个实现者）。说话人条目字段为 context.json 的 camelCase（`name` / `category` / `speakerDirName` / `refAudioPath` / `refText` / `side` 等）；帧协议细节以 `streaming_transport.py` 模块注释与 Rust `streaming_transport.rs` 为准（两侧逐字节对齐）。
 
 ---
 

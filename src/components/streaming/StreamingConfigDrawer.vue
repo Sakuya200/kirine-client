@@ -60,10 +60,18 @@ const normalizeModelParams = (baseModel: string, modelParams: Record<string, unk
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
-// 选项同步默认值（镜像 VoiceCloneView 的 watch 模式）
+/** 会话运行中或历史回放中：会话级配置已固化，仅说话人可改（运行中即时生效）。 */
+const isSessionLocked = computed(() => store.activeTaskId !== null || store.replayTaskId !== null);
+
+// 选项同步默认值（镜像 VoiceCloneView 的 watch 模式）。
+// 会话锁定时必须跳过：这些 watch 会把 sessionConfig 重置为默认值，
+// 并在下次创建会话时把错误配置持久化。
 watch(
   modelOptions,
   options => {
+    if (isSessionLocked.value) {
+      return;
+    }
     if (options.length === 0) {
       return;
     }
@@ -77,6 +85,9 @@ watch(
 watch(
   modelVersionOptions,
   options => {
+    if (isSessionLocked.value) {
+      return;
+    }
     if (options.length === 0) {
       store.setSessionConfig({ modelVersion: '' });
       return;
@@ -91,6 +102,9 @@ watch(
 watch(
   deviceOptions,
   options => {
+    if (isSessionLocked.value) {
+      return;
+    }
     if (options.length === 0) {
       store.setSessionConfig({ device: HardwareType.Cpu });
       return;
@@ -104,6 +118,9 @@ watch(
 watch(
   languageOptions,
   options => {
+    if (isSessionLocked.value) {
+      return;
+    }
     if (options.length === 0) {
       store.setSessionConfig({ language: AppLanguage.Chinese });
       return;
@@ -117,6 +134,9 @@ watch(
 watch(
   () => store.sessionConfig.baseModel,
   nextBaseModel => {
+    if (isSessionLocked.value) {
+      return;
+    }
     store.setSessionConfig({ modelParams: normalizeModelParams(nextBaseModel, store.sessionConfig.modelParams) });
   },
   { immediate: true }
@@ -215,38 +235,47 @@ onBeforeUnmount(() => {
           </header>
 
           <div class="flex-1 space-y-4 overflow-y-auto p-5">
-            <PanelCard class="z-30" title="基础配置" subtitle="选择模型、设备与输出语言">
+            <PanelCard
+              class="z-30"
+              title="基础配置"
+              :subtitle="isSessionLocked ? '会话已开启，模型与设备配置不可更改' : '选择模型、设备与输出语言'"
+            >
               <div class="grid gap-4 md:grid-cols-2">
                 <BaseListbox
                   :model-value="store.sessionConfig.baseModel"
                   label="基础模型"
                   :options="modelOptions"
+                  :disabled="isSessionLocked"
                   @update:model-value="onBaseModelChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.modelVersion"
                   label="模型版本"
                   :options="modelVersionOptions"
-                  :disabled="modelVersionOptions.length === 0"
+                  :disabled="isSessionLocked || modelVersionOptions.length === 0"
                   @update:model-value="onModelVersionChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.device"
                   label="设备类型"
                   :options="deviceOptions"
-                  :disabled="deviceOptions.length === 0"
+                  :disabled="isSessionLocked || deviceOptions.length === 0"
                   @update:model-value="onDeviceChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.language"
                   label="输出语言"
                   :options="languageOptions"
+                  :disabled="isSessionLocked"
                   @update:model-value="onLanguageChange"
                 />
               </div>
             </PanelCard>
 
-            <PanelCard title="说话人管理" subtitle="配置可在聊天中选择的语音克隆说话人">
+            <PanelCard
+              title="说话人管理"
+              :subtitle="isSessionLocked ? '会话中修改说话人将即时生效' : '配置可在聊天中选择的语音克隆说话人'"
+            >
               <template #actions>
                 <BaseButton tone="ghost" size="sm" @click="openAddSpeaker">
                   <PlusIcon class="h-4 w-4" aria-hidden="true" />
@@ -292,10 +321,14 @@ onBeforeUnmount(() => {
 
             <PanelCard title="模型参数" subtitle="根据所选模型动态生成">
               <GenericTaskParamsForm
+                v-if="!isSessionLocked"
                 :model-value="store.sessionConfig.modelParams"
                 :task-config="activeTaskConfig"
                 @update:model-value="onModelParamsChange"
               />
+              <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-4 text-sm text-stone-500">
+                会话进行中模型参数不可更改。
+              </div>
             </PanelCard>
           </div>
         </aside>
@@ -303,7 +336,13 @@ onBeforeUnmount(() => {
     </Transition>
   </Teleport>
 
-  <StreamingSpeakerForm :open="isFormOpen" :speaker="editingSpeaker" @close="closeSpeakerForm" @submit="submitSpeaker" />
+  <StreamingSpeakerForm
+    :open="isFormOpen"
+    :speaker="editingSpeaker"
+    :session-locked="isSessionLocked"
+    @close="closeSpeakerForm"
+    @submit="submitSpeaker"
+  />
 </template>
 
 <style scoped>

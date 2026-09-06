@@ -1,6 +1,6 @@
 ---
 name: streaming-speech-architecture
-description: 流式语音生成功能的前后端完整架构（会话生命周期、环回 Socket 二进制帧协议、长期进程 runner、并发模型、清扫、远程不支持）
+description: 流式语音生成功能的前后端完整架构（会话生命周期、环回 Socket 二进制帧协议含 0x11 说话人热更新、Python 脚本三层解耦、长期进程 runner、并发模型、清扫、远程不支持）
 metadata: 
   node_type: memory
   type: project
@@ -23,16 +23,17 @@ metadata:
 
 - `AudioStreamEvent` enum（仅控制事件）：`Started / Finished / Error{message}`，`#[serde(tag="type", rename_all="camelCase")]` -> JSON `{type:"started"|"finished"|"error", message?}`。chunk 不在枚举中——音频以二进制直接下发。
 - `send_streaming_message` 的 `on_event: Channel<tauri::ipc::InvokeResponseBody>`：控制事件 `InvokeResponseBody::Json`（serde JSON 字符串），chunk 为 `InvokeResponseBody::Raw(Vec<u8>)`。>1024 字节载荷走 Tauri 2.10 fetch 快速路径，JS `channel.onmessage` 收到 **ArrayBuffer**（无 JSON number[] ~4 倍膨胀）。
-- 6 个命令：`create_streaming_speech_task` / `send_streaming_message`（带 `on_event: Channel`）/ `cancel_streaming_task` / `get_streaming_replay_snapshot`（历史回放恢复）/ `get_streaming_speaker_avatar` / `update_streaming_speaker_avatar`（说话人头像读取与替换），注册于 `hooks/mod.rs`。
+- 6 个命令：`create_streaming_speech_task` / `send_streaming_message`（带 `on_event: Channel`）/ `cancel_streaming_task` / `get_streaming_replay_snapshot`（历史回放恢复）/ `get_streaming_speaker_avatar` / `update_streaming_speakers`（说话人列表全量更新，会话运行中经 0x11 帧热重建），注册于 `hooks/mod.rs`。
 
 ## Service trait（`service/mod.rs`）
 
-含 6 个流式方法：`create_streaming_speech_task` / `send_streaming_message` / `cancel_streaming_task` / `get_streaming_replay_snapshot` / `read_streaming_speaker_avatar` / `update_streaming_speaker_avatar`（Service trait 共 27 业务方法）。`RemoteService` 的流式五方法（含回放与头像）均 `bail!("远程存储模式暂不支持流式语音…")`（Remote 模式不支持流式；create/send/cancel 三方法为既有 bail）。
+含 6 个流式方法：`create_streaming_speech_task` / `send_streaming_message` / `cancel_streaming_task` / `get_streaming_replay_snapshot` / `read_streaming_speaker_avatar` / `update_streaming_speakers`（Service trait 共 27 业务方法）。`RemoteService` 的流式五方法（含回放与说话人更新）均 `bail!("远程存储模式暂不支持流式语音…")`（Remote 模式不支持流式；create/send/cancel 三方法为既有 bail）。
 
 ## LocalService 会话层（`service/local/streaming.rs`）
 
 - `create_streaming_speech_task_impl`：校验模型/设备/说话人 -> 事务写 `task_history`(Pending) + `streaming_tasks` -> `copy_model_param_files` -> 写初始 `context.json` -> `register_streaming_session` + `start_streaming_session`。**启动失败回滚运行句柄并把任务置 Failed**（避免卡 Pending 误导前端）。
 - `send_streaming_message_impl`：校验任务 Running 且为 StreamingSpeech -> 取 detail 解析音频目录 -> **先注册 Channel 再喂入输入**（防终帧早到丢失）-> `context_lock` 串行化 `context.json` read-modify-write + append `input.jsonl`（审计日志）+ 经 `StreamingSessionExtra::send_input_frame` 推送 INPUT 二进制帧 -> 等 `oneshot` 终帧信号（`STREAMING_MESSAGE_TIMEOUT = 300s`）-> 成功自增 `message_count`。超时/进程退出经 `error_event` 下发 Error，避免前端永久转圈。
+- `update_streaming_speakers_impl`（前端全量提交说话人列表）：校验任务存在且 type -> `validate_streaming_speakers` 基础校验 -> `context_lock` 内读 context.json -> 进程运行中（`streaming_session_extra` 为 Some）时先 `validate_streaming_speakers_hot_update`（新 trained 的 speakerDirName 必须都在旧 trained 集合内：**加/换 trained 拒，删放行**）-> 逐 speaker 头像 ingest（`is_serialized_task_path` 判 `%DATA_DIR_PATH%` 前缀：已序列化原样保留 / 绝对路径复制进 sample 并清旧 / None 清空删旧）-> 替换 `basic.speakers`（`id = name`，**name 即身份，禁改名**）+ 清理被移除 speaker 的旧头像 -> 写回 -> 进程在则发 0x11 帧（失败仅 warn + `applied_to_session=false`，**不回滚写盘**）。返回 `UpdateStreamingSpeakersResult { applied_to_session }`。
 - `cancel_streaming_task_impl`：复用 `request_active_task_cancel`（`watch::Sender` -> runner kill child）。
 - `sweep_stale_streaming_sessions_impl` / `sweep_stale_streaming_sessions_on_orm`：`init_db` 时把残留 Running 流式会话标 Cancelled（仅扫 StreamingSpeech，不误伤其它 Running 任务）。
 - `register_streaming_session` / `streaming_session_extra` / `load_streaming_task_detail` / `start_streaming_session`：会话运行句柄管理。`start_streaming_session` spawn runner，退出路径兜底置 Failed。
@@ -49,9 +50,17 @@ metadata:
 - `run_streaming_session`：spawn `begin_llm_task` -> `streaming.py`（参数含 Socket 地址/令牌）-> bind `TcpListener("127.0.0.1:0")` 随机端口 -> `timeout(120s)` accept -> 首帧 AUTH 令牌校验（失败/超时 `cleanup_child_after_transport_error` 进程树强杀，防孤儿）-> `into_split` 后 **writer task**（`streaming_socket_writer` 消费 mpsc<Vec<u8>> 逐帧写 Socket）+ **reader task**（`streaming_socket_reader` 按 5 字节头分帧 `read_exact`，EOF 投递 None）-> `drive_streaming_socket` 主循环（`select! { frame_rx.recv() | cancel_rx.changed() | sleep(2s) child.try_wait() 探活 }`；EOF 后 `timeout(5s, child.wait())` 超时强杀标 Failed；cancel 时 `drain_buffered_frames` 排空残余帧）-> `close_input_sender` + `drain_pending_channels` + await tasks。cancel 信号 kill 子进程；状态机 **Running(spawn 后) -> Cancelled/Failed/Exited(退出)**，进程自然退出视为 Exited（映射 Cancelled 终态）。子进程 stdout/stderr 均 null——stderr 经 PS1 `2>&1 | Out-File` 落 task-log（PS1 独占写 task log，Rust 不持有该句柄，消除写-写争用）。
 - `forward_event`：**终帧**（Finished/Error）写锁 remove channel + `on_event.send` + `done.send`；**非终帧**（Chunk）读锁 `on_event.send`（避免高频 chunk 写锁竞争）。
 
+## Python 脚本解耦分层（`src-model/moss_tts_realtime/`，未来流式适配器同构复用）
+
+脚本端拆为三层，**会话/帧通信与模型推理解耦**（新流式适配器 = 复制 `streaming_transport.py` + `streaming_session.py` 两文件 + 实现 Backend 接口，与 `params_entity.py` 复制复用约定一致，不引入跨子模块共享包；详见 `src-model/ADAPTER_DEVELOPMENT.md` §5.7）：
+
+- **`streaming_transport.py`（纯帧协议，仅 stdlib）**：`FRAME_KIND_*`（含 0x11）、`encode_frame`/`read_frame`/`SocketFrameSink`/`emit_chunk`/`emit_error_frame`/`connect_session_socket`/`save_wav` 等，与 Rust `streaming_transport.rs` 逐字节对齐；日志前缀为模块级 `LOG_TAG`（复制时改一行）。
+- **`streaming_session.py`（通用会话主循环，仅 stdlib + transport）**：`StreamingModelBackend` ABC 四方法——`prepare(speakers)`（失败抛异常=会话启动失败，进程退出）、`apply_speakers_update(speakers)`（**自兜异常**：失败 stderr + 保持旧表，不退进程）、`resolve_speaker(name)`、`synthesize(speaker, text, context_id, output_audio_dir, sink)`（异常由框架兜 error 帧，不退进程）；`load_context_speakers` + `run_streaming_session(params, backend)` 主循环：连 Socket/AUTH -> `prepare` -> `session_ready` -> 阻塞 `read_frame` 分发 INPUT(0x10)/SPEAKERS_UPDATE(0x11)/skip。全部在单线程主循环串行调用（无并发问题），框架不感知 torch。
+- **`streaming.py`（moss 推理后端瘦入口）**：保留模型/音频/torch 运行时函数 + `synthesize_one`（签名不变）；`MossTTSBackend(StreamingModelBackend)`：`prepare` = 加载模型/codec + voice-clone prompt 预编码（`_prompt_cache: dict[refAudioPath, tokens]` 增量复用，`refText` 不参与编码）+ 建 `_speakers_by_name`；`apply_speakers_update` = `_rebuild_speakers`（空表/双 trained -> None 保旧表；缺 name/refAudioPath 或编码异常的 speaker 剔除；trained 直接入表）；`synthesize` 包 `torch.inference_mode()` 调 `synthesize_one`。`main()` = torch 配置 -> `run_streaming_session(params, MossTTSBackend(params))`——Rust 调用契约（`--script-path streaming.py --params-file ...`）不变。
+
 ## Socket 帧编解码（`service/pipeline/streaming_transport.rs`）
 
-纯函数、无 I/O：`encode_frame(kind, payload)`（`[u32 LE len(kind+payload)][kind u8][payload]`）、`encode_control_frame`/`encode_input_frame`（JSON）、`encode_chunk_frame(context_id, bytes)`（`[u16 LE idLen][contextId UTF-8][音频字节]`）、`decode_frame_header`、`parse_chunk_payload`、`parse_auth_payload`、`generate_session_token`（rand 32 字节 hex）。常量 `FRAME_KIND_AUTH=0x01 / CONTROL=0x02 / CHUNK=0x03 / INPUT=0x10`、`MAX_FRAME_PAYLOAD=16MB`。
+纯函数、无 I/O：`encode_frame(kind, payload)`（`[u32 LE len(kind+payload)][kind u8][payload]`）、`encode_control_frame`/`encode_input_frame`（JSON）、`encode_chunk_frame(context_id, bytes)`（`[u16 LE idLen][contextId UTF-8][音频字节]`）、`encode_speakers_update_frame`（JSON）、`decode_frame_header`、`parse_chunk_payload`、`parse_auth_payload`、`generate_session_token`（rand 32 字节 hex）。常量 `FRAME_KIND_AUTH=0x01 / CONTROL=0x02 / CHUNK=0x03 / INPUT=0x10 / SPEAKERS_UPDATE=0x11`、`MAX_FRAME_PAYLOAD=16MB`。
 
 ## 帧协议 / 传输（环回 Socket 二进制协议）
 
@@ -60,6 +69,7 @@ metadata:
 - **CHUNK 0x03**（Python→Rust）：payload = `contextId 长度前缀 + contextId + 音频裸字节`，首 chunk 前置 44 字节 WAV 哨兵头（data size=0xFFFFFFFF，浏览器按实际到达数据解码、支持半截播放），后续 chunk 为裸 PCM16——**无 base64、无 JSON 包裹**。
 - **CONTROL 0x02**（Python→Rust）：payload 为 JSON `{type:"started"|"finished"|"error"|"session_ready", contextId, message?}`（低频小体积保留可读性）；Rust `parse_streaming_frame` 解析、`frame_to_event` 映射为 `InvokeResponseBody` 下发前端（`session_ready` 不下发）。
 - **INPUT 0x10**（Rust→Python）：payload 为 JSON `{contextId, speakerName, text, audioPath}`；`send_streaming_message_impl` 经 `StreamingSessionExtra::send_input_frame` 推送（`mpsc` 容量 128，`try_send`）。Python 主循环阻塞 `read_frame`，非 INPUT 帧 skip，EOF 退出。
+- **SPEAKERS_UPDATE 0x11**（Rust→Python）：payload 为全量说话人快照 JSON `{"speakers":[...]}`（字段同 `StreamingSpeakerInput` camelCase）。全量而非增量：幂等、丢帧可自愈、与写盘同源。`update_streaming_speakers_impl` 落盘 context.json 后经 `send_input_frame`（复用 input_tx，writer task 字节直写无 kind 过滤，runner 零改动）推送；Python 通用主循环分发到 `backend.apply_speakers_update`。处理期间主循环阻塞（prompt 编码数百 ms~秒级），消息排队——与合成排队语义一致。
 - `contextId` 由前端生成，多路复用同一会话进程。
 
 **Rust → 前端**：`Channel<InvokeResponseBody>`，控制事件 Json、chunk Raw（>1024 字节走 Tauri fetch 快速路径），JS 收 ArrayBuffer。
@@ -81,31 +91,35 @@ metadata:
 
 `StreamingSpeechView`（ChatUI，消息行由 `StreamingMessageItem` 渲染，见上「说话人头像与消息侧别」）+ `StreamingConfigDrawer` + `StreamingSpeakerForm` + `StreamableAudioPlayer`(mode='stream') + `useStreamableAudioPlayer`。`stores/streamingSpeech.ts`：首条消息 `invoke create_streaming_speech_task` 拿 taskId 回填，后续 `invoke send_streaming_message`（带 Channel），取消 `invoke cancel_streaming_task`；防连点产生僵尸会话。**chunk 接收路径**：`Channel` 的 `onmessage` 收到 **ArrayBuffer**（Chunk Raw 路径）时以 `new Uint8Array(message)` 引用追加进 `audioBuffers: Map<messageId, Uint8Array[]>`（无逐 chunk 拷贝）；`getAudioUrl` 用 `new Blob(chunks, {type:'audio/wav'})` 聚合（Blob 接受分块数组，无需拼接单缓冲），URL 缓存按 `chunks.length` 失效，`length === -1` 表示历史文件 URL。`StreamingSpeakerCategory` 现支持 `voice-clone`（前端本地，ref 音频+台词）与 `trained`（经 `StreamingSpeakerForm` 从 `list_speaker_infos`(status=Ready) 按 baseModel 过滤选择，存 `speakerDirName=speaker.id`）两类；payload speakers 携带 `category` + `speakerDirName`。
 
+**说话人全量持久化与运行中热更新（`toSpeakerPayload` + `persistSpeakers`）**：`addSpeaker`/`updateSpeaker`/`removeSpeaker` 三操作统一「乐观更新 -> `invoke update_streaming_speakers`（`activeTaskId ?? replayTaskId` 定位任务，回放中编辑也落盘）-> 失败回滚快照 + notifyError -> `clearAvatarUrls` 失效头像缓存」；`updateSpeaker` 忽略 `patch.name`（name 即身份）。`persistingSpeakers` ref 标记写入中。**抽屉锁定**：`isSessionLocked = activeTaskId !== null || replayTaskId !== null`——基础配置 4 个 Listbox 与模型参数面板禁用（参数面板锁定时替换为提示）；**抽屉 5 个 options/normalize watch 每个首行加 `if (isSessionLocked.value) return` guard**，否则锁定时 watch 会悄悄重置 sessionConfig 并在下次创建时持久化错误配置。说话人面板 locked 时保持可用（副标题提示「修改将即时生效」）。`StreamingSpeakerForm`：编辑态 name 禁改（提示改名需删后重加）；`sessionLocked` 时 category 选项过滤掉 trained（模型已随启动加载）；既有 trained 的 speakerDirName 禁换。
+
 历史会话由 `get_streaming_replay_snapshot(historyId)` 恢复消息和配置。历史消息的音频播放与另存为统一使用 `GeneratedAudioSource::StreamingSpeech { historyId, messageId }`：前端调用 `get_generated_audio` 取得字节、创建 Blob URL 并缓存到组件卸载；下载调用 `save_generated_audio_as`。该回放路径按持久化的历史和消息 ID 读取文件，不依赖已退出的长期会话进程或 WebView 本地文件 URL。
 
 ## 说话人头像与消息侧别（v0.12.2）
 
-- **存储**：创建任务时把头像原图复制进任务 sample 目录，命名 `avatar_{idx}_{speakerName}.{ext}`，序列化路径写入 context.json 说话人条目（`avatar_path`/`avatar_name`）；`StreamingSpeakerInput`/`StreamingSpeaker`（context.json）均含 `side`/`avatar_path`/`avatar_name`。扩展名白名单 `STREAMING_AVATAR_IMAGE_EXTENSIONS`（png/jpg/jpeg/webp/gif，与前端 `IMAGE_FILE_EXTENSIONS` 对齐）；content-type 由扩展名推断。
-- **读取**：`read_streaming_speaker_avatar(historyId, speakerName)` -> `StreamingSpeakerAvatarAsset { historyId, speakerName, fileName, contentType, bytes }`（图片字节资产，语义为图片，不复用音频资产类型）。替换：`update_streaming_speaker_avatar(historyId, speakerName, avatarPath?, avatarName?)` 复制新图入 sample 目录、更新 context.json、清理旧头像文件（无参传入即清除头像）。
-- **前端**：`stores/streamingSpeech.ts` 维护 `avatarUrls: Map<taskId:speakerName, Blob URL>` 缓存与 `avatarCacheVersion`（`clearAvatarUrls` 递增，驱动头像组件 watch 重载）；`ensureSpeakerAvatar` 失败或无头像缓存空串（组件回退首字占位）。说话人改头像时 invoke `update_streaming_speaker_avatar` 后清缓存。
+- **存储**：创建任务时把头像原图复制进任务 sample 目录，命名 `avatar_{idx}_{speakerName}.{ext}`，序列化路径写入 context.json 说话人条目（`avatar_path`/`avatar_name`）；`StreamingSpeakerInput`/`StreamingSpeaker`（context.json）均含 `side`/`avatar_path`/`avatar_name`。扩展名白名单 `STREAMING_AVATAR_IMAGE_EXTENSIONS`（png/jpg/jpeg/webp/gif，与前端 `IMAGE_FILE_EXTENSIONS` 对齐）；content-type 由扩展名推断。运行中/回放中改头像走 `update_streaming_speakers` 全量命令统一 ingest（原单说话人 `update_streaming_speaker_avatar` 命令已删除，避免与全量写双写覆盖）。
+- **读取**：`read_streaming_speaker_avatar(historyId, speakerName)` -> `StreamingSpeakerAvatarAsset { historyId, speakerName, fileName, contentType, bytes }`（图片字节资产，语义为图片，不复用音频资产类型）。
+- **前端**：`stores/streamingSpeech.ts` 维护 `avatarUrls: Map<taskId:speakerName, Blob URL>` 缓存与 `avatarCacheVersion`（`clearAvatarUrls` 递增，驱动头像组件 watch 重载）；`ensureSpeakerAvatar` 失败或无头像缓存空串（组件回退首字占位）。`persistSpeakers` 成功后统一 `clearAvatarUrls` 重载。
 - **展示**：消息行由 `StreamingMessageItem` 渲染（头像 `StreamingMessageAvatar`（Blob URL + 首字占位回退）/ 昵称 / 状态标签 `StreamingMessageStatusPill` / 气泡 / 播放器），列表 `<TransitionGroup name="message-stack">` 进出场动画（transform+opacity，不动画高度）；`compact` prop 隐藏状态标签与播放/下载区。
 
 ## trained 说话人回接（moss_tts_realtime 首例）
 
 - **moss_tts_realtime 是首个实现会话级 `streaming.py` 契约的适配器**（此前流式功能 Rust+前端就绪但无模型实现该契约，流式下拉为空、端到端未跑通）。当前契约为环回 Socket 二进制帧：`connect_session_socket`（模型加载前连接+AUTH）→ `session_ready` → 阻塞 `read_frame` 收 INPUT 帧 → `emit_chunk`/`emit_frame` 回传；帧编解码函数与 Rust `streaming_transport.rs` 布局逐字节对齐（Python 测试 `tests/test_wav_frames.py`/`test_streaming_error_logging.py` 覆盖）。
 - trained 说话人经 `speakerStore` 体系回接：微调产出 `<model_root_path>/<speaker_dir_name>/checkpoint_final/`，streaming.py 启动时扫 speakers，存在 `category=="trained"` -> 加载该 checkpoint（否则基座）。**约束：一会话至多一个 trained 说话人**（`create_streaming_speech_task_impl` 校验；trained 须有 speakerDirName，voice-clone 须有 refAudioPath）。
+- **运行中热更新语义**：checkpoint 随进程启动加载定死——运行中新增/更换 trained 被 `validate_streaming_speakers_hot_update` 拒绝（前端 Form 亦禁选/禁换），删除放行；voice-clone 可运行中增/删/改（Python 按新快照重建表 + 增量编码 prompt，编码失败的 speaker 剔除后报 unknown speaker）。进程不在（回放/已结束会话）时仅落盘，下次会话启动生效。
 - voice-clone 说话人仍纯前端本地，不接 speakerStore；仅 trained 走 speakerStore。
 - Remote 模式流式本就不支持，trained 回接仅 Local。
 
 ## 测试（`src-tauri/tests/`）
 
 - `streaming_frames.rs`：控制帧解析与 `frame_to_event` 映射（Json/Raw）、context.json 往返、input entry 序列化，12 用例。
-- `streaming_transport.rs`：Socket 帧编解码（长度前缀布局、往返、截断/超限拒绝、多字节 contextId、auth payload、token 唯一性），13 用例。
+- `streaming_transport.rs`：Socket 帧编解码（长度前缀布局、往返、截断/超限拒绝、多字节 contextId、auth payload、token 唯一性、0x11 speakers_update 帧布局），15 用例。
+- `streaming_speakers.rs`：`validate_streaming_speakers` 各拒绝路径、`validate_streaming_speakers_hot_update`（加/换 trained 拒、删放行）、`update_streaming_speakers_impl` 持久化集成（context.json RMW + messages 不动 + 旧头像清理 + 进程不在 `applied_to_session=false` + 发送失败不回滚 + 拒绝时不改写 + type/输入校验），19 用例。
 - `streaming_schema.rs`：`streaming_tasks` 表 14 列存在性 + `StreamingSpeech.as_str()`/`storage_dir()`。
 - `streaming_contract.rs`：`StreamingArgs`/`StreamingSpeakerArg`/`StreamingSpeaker` serde 往返（含 `model_root_path`/`streaming_socket_addr`/`streaming_socket_token`/`model_params_json`/`category`/`speaker_dir_name` 字段，及缺省回填）。
 - `streaming_service.rs`：启动清扫--残留 Running 流式会话标 Cancelled，且不误伤非 streaming Running 任务。
 - `streaming_hooks.rs`：`AudioStreamEvent` serde 协议（tag/camelCase）单测。
-- Python `src-model/moss_tts_realtime/tests/`：`test_wav_frames.py`（WAV 哨兵头/emit_chunk 帧布局/encode_frame/read_frame 含 socketpair 分次到达）+ `test_streaming_error_logging.py`（error 控制帧 + SocketFrameSink 长度前缀）。
+- Python `src-model/moss_tts_realtime/tests/`（56 用例）：`test_wav_frames.py`（WAV 哨兵头/emit_chunk 帧布局/encode_frame/read_frame 含 socketpair 分次到达）+ `test_streaming_error_logging.py`（error 控制帧 + SocketFrameSink 长度前缀）+ `test_streaming_session_dispatch.py`（fake backend + socketpair 后台线程跑 `run_streaming_session`：INPUT/0x11 分发、unknown speaker error 帧、坏帧 skip、EOF 退出；settle 哨兵同步）+ `test_streaming_speakers_update.py`（`_rebuild_speakers`/`apply_speakers_update`：prompt 缓存按 refAudioPath 复用、refText 变更不重编码、trained 跳编码、缺音频/编码失败剔除、空表/双 trained 保旧表）。
 
 ## 关联记忆
 

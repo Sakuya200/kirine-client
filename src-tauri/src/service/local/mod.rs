@@ -3,8 +3,8 @@ pub(crate) mod entity;
 mod history;
 mod model_info;
 mod speaker;
-mod streaming;
-mod supported_models;
+pub(crate) mod streaming;
+pub(crate) mod supported_models;
 mod training;
 mod tts;
 mod voice_clone;
@@ -41,7 +41,8 @@ use crate::{
             PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
             SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
             StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneTaskResult, VoiceDesignTaskResult,
+            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -244,20 +245,12 @@ impl Service for LocalService {
             .await
     }
 
-    async fn update_streaming_speaker_avatar(
+    async fn update_streaming_speakers(
         &self,
-        history_id: i64,
-        speaker_name: String,
-        avatar_path: Option<String>,
-        avatar_name: Option<String>,
-    ) -> Result<()> {
-        self.update_streaming_speaker_avatar_impl(
-            history_id,
-            &speaker_name,
-            avatar_path,
-            avatar_name,
-        )
-        .await
+        payload: UpdateStreamingSpeakersPayload,
+    ) -> Result<UpdateStreamingSpeakersResult> {
+        self.update_streaming_speakers_impl(payload.history_id, &payload.speakers)
+            .await
     }
 }
 

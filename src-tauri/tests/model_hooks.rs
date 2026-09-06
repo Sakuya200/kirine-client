@@ -172,35 +172,66 @@ async fn model_downloaded_flag_round_trips_in_db() -> Result<()> {
 }
 
 #[tokio::test]
-async fn sync_backfills_current_device_for_single_device_models() -> Result<()> {
-    // sync_supported_models 的回填契约：
-    // - 单设备模型：current_device 自动回填为唯一设备（如 gpt_sovits_cpufast -> cpu）
-    // - 多设备模型：current_device 留空（要求用户先选）
-    // 覆盖 upsert insert 分支的 resolve_current_device_value(None, ...)。
-    let harness = LocalServiceHarness::new("model-current-device-backfill").await?;
+async fn sync_keeps_current_device_nullable_and_preserves_user_choice() -> Result<()> {
+    // sync_supported_models 的 current_device 契约（23a13dc 起生效）：
+    // - 同步一律不写默认设备（单设备模型也不自动回填），保持可空；
+    //   空值由任务执行前的设备探测流程（ensure_model_current_device_resolved_impl）回填。
+    // - 已有有效用户选择跨 sync 保留；失效值（不在 supported_devices 内）被清理。
+    let harness = LocalServiceHarness::new("model-current-device-sync").await?;
     let models = harness.list_model_infos().await?;
+    assert!(!models.is_empty(), "sync 应产出模型列表");
 
-    let mut seen_single = false;
+    // 初始：不写任何默认设备（含单设备模型）
     for m in &models {
-        if m.supported_devices.len() == 1 {
-            seen_single = true;
-            assert_eq!(
-                m.current_device,
-                Some(m.supported_devices[0]),
-                "单设备模型 {} 的 current_device 应被回填",
-                m.base_model
-            );
-        } else {
-            assert!(
-                m.current_device.is_none(),
-                "多设备模型 {} 初始 current_device 应为 None",
-                m.base_model
-            );
-        }
+        assert!(
+            m.current_device.is_none(),
+            "模型 {} 初始 current_device 应为 None（sync 不写默认设备）",
+            m.base_model
+        );
     }
+
+    // 有效用户选择跨 sync 保留
+    let target = &models[0];
+    let device = target.supported_devices[0];
+    harness
+        .service()
+        .set_model_current_device(target.id, device)
+        .await?;
+    harness.resync_supported_models().await?;
+    let reloaded = harness.list_model_infos().await?;
+    let reloaded_target = reloaded
+        .iter()
+        .find(|m| m.id == target.id)
+        .expect("模型应存在");
+    assert_eq!(
+        reloaded_target.current_device,
+        Some(device),
+        "有效用户选择应跨 sync 保留"
+    );
+
+    // 失效值（不在 supported_devices 内）被 sync 清理为 None
+    let single = models
+        .iter()
+        .find(|m| m.supported_devices.len() == 1)
+        .expect("需要至少一个单设备模型");
+    let only = single.supported_devices[0];
+    let other = if only == HardwareType::Cpu {
+        HardwareType::Cuda
+    } else {
+        HardwareType::Cpu
+    };
+    harness
+        .set_model_current_device_raw(single.id, Some(other.as_str()))
+        .await?;
+    harness.resync_supported_models().await?;
+    let reloaded = harness.list_model_infos().await?;
+    let reloaded_single = reloaded
+        .iter()
+        .find(|m| m.id == single.id)
+        .expect("模型应存在");
     assert!(
-        seen_single,
-        "测试需要至少一个单设备模型以验证回填（检查 src-model 配置）"
+        reloaded_single.current_device.is_none(),
+        "失效 current_device 应被 sync 清理"
     );
 
     harness.shutdown().await
@@ -242,6 +273,8 @@ async fn set_model_current_device_valid_updates_and_persists() -> Result<()> {
 #[tokio::test]
 async fn set_model_current_device_rejects_unsupported_device() -> Result<()> {
     // 非法设备：单设备模型写入其不支持的另一设备 -> Err（不触达脚本，仅 DB 校验）。
+    // sync 不再自动回填 current_device（初始为 None），先显式写入合法值，
+    // 再验证非法写入不破坏原值。
     let harness = LocalServiceHarness::new("model-set-device-invalid").await?;
     let models = harness.list_model_infos().await?;
 
@@ -250,6 +283,17 @@ async fn set_model_current_device_rejects_unsupported_device() -> Result<()> {
         .find(|m| m.supported_devices.len() == 1)
         .expect("需要至少一个单设备模型");
     let only = target.supported_devices[0];
+    assert!(
+        target.current_device.is_none(),
+        "初始 current_device 应为 None（sync 不写默认设备）"
+    );
+
+    // 先写入合法设备，作为「原值」
+    harness
+        .service()
+        .set_model_current_device(target.id, only)
+        .await?;
+
     let other = if only == HardwareType::Cpu {
         HardwareType::Cuda
     } else {

@@ -36,7 +36,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         streaming::cancel_streaming_task,
         streaming::get_streaming_replay_snapshot,
         streaming::get_streaming_speaker_avatar,
-        streaming::update_streaming_speaker_avatar,
+        streaming::update_streaming_speakers,
         settings::get_settings_config,
         settings::get_ui_config,
         settings::save_settings_config

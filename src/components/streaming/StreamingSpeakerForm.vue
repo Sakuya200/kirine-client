@@ -20,9 +20,11 @@ import type { SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 interface Props {
   open: boolean;
   speaker?: StreamingSpeakerConfig | null;
+  /** 会话运行中或历史回放中：模型已加载，运行中不支持新增已训练说话人。 */
+  sessionLocked?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), { speaker: null });
+const props = withDefaults(defineProps<Props>(), { speaker: null, sessionLocked: false });
 const emit = defineEmits<{ close: []; submit: [payload: StreamingSpeakerInput] }>();
 
 const modelStore = useModelStore();
@@ -32,10 +34,17 @@ const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
 );
 
-const categoryOptions = [
-  { label: '语音克隆', value: 'voice-clone' },
-  { label: '已训练', value: 'trained' }
-];
+const categoryOptions = computed(() => {
+  const options = [
+    { label: '语音克隆', value: 'voice-clone' },
+    { label: '已训练', value: 'trained' }
+  ];
+  // 会话锁定时 trained 的 checkpoint 已随进程启动固化，不支持运行中新增已训练说话人
+  if (props.sessionLocked && form.value.category !== 'trained') {
+    return options.filter(option => option.value !== 'trained');
+  }
+  return options;
+});
 
 const sideOptions = [
   { label: '右侧', value: 'right' },
@@ -65,6 +74,8 @@ let isHydrating = false;
 const isEditing = computed(() => Boolean(props.speaker));
 const isTrained = computed(() => form.value.category === 'trained');
 const needsRefText = computed(() => requiresRefText(form.value.baseModel));
+// 编辑既有 trained 说话人时禁止更换 checkpoint（换 dir 相当于运行中换 trained，后端会拒绝）
+const isTrainedDirLocked = computed(() => isEditing.value && isTrained.value);
 
 const trainedSpeakerOptions = computed(() =>
   trainedSpeakers.value.filter(s => s.baseModel === form.value.baseModel).map(s => ({ label: s.speakerName, value: String(s.id) }))
@@ -262,11 +273,22 @@ const submit = () => {
 </script>
 
 <template>
-  <BaseDialog :open="props.open" :title="isEditing ? '编辑说话人' : '新增说话人'" @close="emit('close')">
+  <BaseDialog
+    :open="props.open"
+    :title="isEditing ? '编辑说话人' : '新增说话人'"
+    content-class="max-h-[65vh] overflow-y-auto pr-2"
+    @close="emit('close')"
+  >
     <div class="space-y-4">
       <label class="block text-sm text-slate-700">
         <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
-        <input v-model="form.name" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="为该说话人起个名字" />
+        <input
+          v-model="form.name"
+          :disabled="isEditing"
+          class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2 disabled:cursor-not-allowed disabled:bg-stone-50 disabled:text-stone-400"
+          placeholder="为该说话人起个名字"
+        />
+        <span v-if="isEditing" class="mt-1 block text-xs text-stone-400">会话内不支持修改说话人名称，如需改名请删除后重新添加。</span>
       </label>
 
       <BaseListbox v-model="form.baseModel" label="对应模型" :options="modelOptions" :disabled="modelOptions.length === 0" />
@@ -294,9 +316,10 @@ const submit = () => {
           v-model="form.speakerDirName"
           label="已训练说话人"
           :options="trainedSpeakerOptions"
-          :disabled="trainedSpeakerOptions.length === 0"
+          :disabled="isTrainedDirLocked || trainedSpeakerOptions.length === 0"
         />
-        <p v-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">当前模型暂无可用已训练说话人，请先在模型微调页完成一次微调。</p>
+        <p v-if="isTrainedDirLocked" class="text-xs text-stone-400">模型已在会话启动时加载，运行中不支持更换已训练说话人。</p>
+        <p v-else-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">当前模型暂无可用已训练说话人，请先在模型微调页完成一次微调。</p>
       </template>
 
       <template v-else>

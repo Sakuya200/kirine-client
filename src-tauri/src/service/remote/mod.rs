@@ -13,7 +13,8 @@ use crate::{
             PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
             SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
             StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateTaskStatusPayload, VoiceCloneTaskResult, VoiceDesignTaskResult,
+            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
+            VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
     },
@@ -256,13 +257,10 @@ impl Service for RemoteService {
         anyhow::bail!("远程存储模式暂不支持流式语音说话人头像")
     }
 
-    async fn update_streaming_speaker_avatar(
+    async fn update_streaming_speakers(
         &self,
-        _history_id: i64,
-        _speaker_name: String,
-        _avatar_path: Option<String>,
-        _avatar_name: Option<String>,
-    ) -> Result<()> {
-        anyhow::bail!("远程存储模式暂不支持更新流式语音说话人头像")
+        _payload: UpdateStreamingSpeakersPayload,
+    ) -> Result<UpdateStreamingSpeakersResult> {
+        anyhow::bail!("远程存储模式暂不支持更新流式语音说话人")
     }
 }

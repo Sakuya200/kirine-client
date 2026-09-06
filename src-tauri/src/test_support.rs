@@ -29,8 +29,13 @@ pub use crate::service::pipeline::streaming::{
 };
 pub use crate::service::pipeline::streaming_transport::{
     decode_frame_header, encode_chunk_frame, encode_control_frame, encode_frame,
-    encode_input_frame, generate_session_token, parse_auth_payload, parse_chunk_payload,
-    FRAME_HEADER_LEN, FRAME_KIND_AUTH, FRAME_KIND_CHUNK, FRAME_KIND_CONTROL, FRAME_KIND_INPUT,
+    encode_input_frame, encode_speakers_update_frame, generate_session_token, parse_auth_payload,
+    parse_chunk_payload, FRAME_HEADER_LEN, FRAME_KIND_AUTH, FRAME_KIND_CHUNK, FRAME_KIND_CONTROL,
+    FRAME_KIND_INPUT, FRAME_KIND_SPEAKERS_UPDATE,
+};
+pub use crate::service::local::streaming::{
+    ingest_streaming_speaker_avatars, validate_streaming_speakers,
+    validate_streaming_speakers_hot_update,
 };
 pub use crate::service::{LocalService, Service};
 
@@ -173,6 +178,45 @@ impl LocalServiceHarness {
         self.service.sweep_stale_streaming_sessions_impl().await
     }
 
+    // ---- 流式说话人热更新（update_streaming_speakers_impl 持久化测试） ----
+
+    /// 注册流式会话运行句柄（无真实进程）：使 `streaming_session_extra` 返回 Some，
+    /// 覆盖热更新校验与 0x11 帧发送路径（通道无接收端时 send 失败 → applied=false）。
+    pub fn register_streaming_session(&self, task_id: i64) {
+        self.service.register_streaming_session(task_id);
+    }
+
+    /// 调用真实 `LocalService::update_streaming_speakers_impl`。
+    pub async fn update_streaming_speakers(
+        &self,
+        history_id: i64,
+        speakers: &[crate::service::models::StreamingSpeakerInput],
+    ) -> Result<crate::service::models::UpdateStreamingSpeakersResult> {
+        self.service
+            .update_streaming_speakers_impl(history_id, speakers)
+            .await
+    }
+
+    /// 插入一条 `streaming_tasks` 详情行（context/input/audio 路径由测试指定）。
+    pub async fn seed_streaming_detail(&self, history_id: i64, context_file_path: &str) -> Result<()> {
+        self.seed_detail(
+            "streaming_tasks",
+            history_id,
+            &[
+                ("base_model", Some("moss_tts_realtime")),
+                ("model_version", Some("v1")),
+                ("language", Some("chinese")),
+                ("device", Some("cpu")),
+                ("model_params_json", Some("{}")),
+                ("context_file_path", Some(context_file_path)),
+                ("input_cache_file_path", Some("%DATA_DIR_PATH%/tasks/streaming/input.jsonl")),
+                ("output_audio_dir", Some("%DATA_DIR_PATH%/tasks/streaming/audio")),
+            ],
+            vec![("message_count", "0")],
+        )
+        .await
+    }
+
     pub fn src_model_root(&self) -> PathBuf {
         self.root_dir.join("src-model")
     }
@@ -214,6 +258,23 @@ impl LocalServiceHarness {
         self.service
             .set_model_downloaded_impl(base_model, model_version, downloaded)
             .await
+    }
+
+    /// 再次执行 `supported_models::sync_supported_models`（模拟下次启动的表同步）。
+    pub async fn resync_supported_models(&self) -> Result<()> {
+        crate::service::local::supported_models::sync_supported_models(self.service.orm()).await
+    }
+
+    /// 绕过业务校验直接写 `model_info.current_device`（模拟历史脏数据，验证 sync 清理）。
+    pub async fn set_model_current_device_raw(&self, model_id: i64, value: Option<&str>) -> Result<()> {
+        let pool = open_sqlite_pool(&self.data_dir.join("app.db")).await?;
+        sqlx::query("UPDATE model_info SET current_device = ? WHERE id = ?")
+            .bind(value)
+            .bind(model_id)
+            .execute(&pool)
+            .await?;
+        pool.close().await;
+        Ok(())
     }
 
     // ---- 历史记录种子（直接 SQL 插入，避免触发 create_*_task 的后台 pipeline） ----

@@ -3,7 +3,8 @@ use tauri::State;
 use crate::service::{
     models::{
         CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
-        StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult,
+        StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult, UpdateStreamingSpeakersPayload,
+        UpdateStreamingSpeakersResult,
     },
     ServiceState,
 };
@@ -91,18 +92,15 @@ pub async fn get_streaming_speaker_avatar(
 }
 
 #[tauri::command]
-pub async fn update_streaming_speaker_avatar(
-    history_id: i64,
-    speaker_name: String,
-    avatar_path: Option<String>,
-    avatar_name: Option<String>,
+pub async fn update_streaming_speakers(
+    payload: UpdateStreamingSpeakersPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<UpdateStreamingSpeakersResult, String> {
     state
         .0
         .service()
         .map_err(|err| err.to_string())?
-        .update_streaming_speaker_avatar(history_id, speaker_name, avatar_path, avatar_name)
+        .update_streaming_speakers(payload)
         .await
         .map_err(|err| err.to_string())
 }

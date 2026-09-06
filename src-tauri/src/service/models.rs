@@ -778,6 +778,20 @@ pub struct SendStreamingMessagePayload {
     pub text: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStreamingSpeakersPayload {
+    pub history_id: i64,
+    pub speakers: Vec<StreamingSpeakerInput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStreamingSpeakersResult {
+    /// 是否成功送达运行中的会话进程（进程不在/通道关闭时为 false，仅落盘）。
+    pub applied_to_session: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum GeneratedAudioSource {
