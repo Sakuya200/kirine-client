@@ -1,12 +1,14 @@
 # Kirine Client 项目记忆索引
 
-> 状态截至 2026-09-01 · 分支 `v.0.12.0`。记忆只记当前状态，不记版本更新/功能优化的变更过程。
+> 状态截至 2026-09-06 · 分支 `v0.12.2`（应用版本 0.12.2）。记忆只记当前状态，不记版本更新/功能优化的变更过程。
 
 ## 当前项目上下文快照
+
 - 当前仓库是基于 Tauri 2 + Vue 3 + Rust 的桌面端 AI 语音合成客户端，重点能力已覆盖 TTS / Voice Clone / Voice Design / Model Training / Streaming Speech。
 - Local 模式下流式语音会话已落地：会话级长期进程、`contextId` 多路分发、环回 TCP Socket 二进制帧协议（Python↔Rust 裸 PCM 直传，无 base64/JSON 编码）、实时音频回传（Tauri Channel Raw 路径，前端收 ArrayBuffer）及历史会话回放均已就绪；Remote 模式仍处于占位，当前不可用。
 - 模型体系仍由 `src-model/` 下 7 个独立 adapter 子模块驱动，`moss_tts_realtime` 是首个实现会话级 `streaming.py` 契约的适配器。
 - 所有生成音频统一由 `GeneratedAudioSource` 定位：`get_generated_audio` 读取字节供前端构造 Blob URL 播放，`save_generated_audio_as` 使用同一来源另存为；流式消息以 `historyId + messageId` 精确索引，不依赖活动会话。
+- 流式说话人支持消息侧别（`side`，left/right）与头像：头像原图在创建任务时复制进任务 sample 目录并序列化路径入 context.json，经 `get_streaming_speaker_avatar` / `update_streaming_speaker_avatar` 读取与替换；前端 `StreamingMessageItem` 渲染整行消息（头像/状态/气泡，TransitionGroup 进出场动画），头像是 Blob URL + 首字占位回退。
 
 - [Project Overview](project-overview.md) - 项目全貌、技术栈、核心功能、存储模式（Local/Remote）概览
 - [Frontend Architecture](tech-stack-frontend.md) - Vue 3 前端目录结构、配置驱动参数表单、UI 组件体系

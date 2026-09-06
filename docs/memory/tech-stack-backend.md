@@ -9,7 +9,7 @@ metadata:
 
 # 后端架构 (Tauri 2 / Rust)
 
-> 状态截至 2026-09-01 · 分支 `v.0.12.0`
+> 状态截至 2026-09-06 · 分支 `v0.12.2`
 
 ## 目录结构
 ```
@@ -39,7 +39,7 @@ src-tauri/src/
 │   ├── model_info.rs              # list_model_infos, get_device_type, install_model, uninstall_model, set_model_current_device
 │   ├── speaker_info.rs            # create_speaker_info, import_model_as_speaker, list/update/delete
 │   ├── task_history.rs            # 任务创建/查询/取消 + 统一生成音频读取/导出/删除
-│   ├── streaming.rs               # 流式语音命令（create/send/cancel）+ AudioStreamEvent 协议
+│   ├── streaming.rs               # 流式语音命令（create/send/cancel/replay/头像读写）+ AudioStreamEvent 协议
 │   └── settings.rs                # get_settings_config, save_settings_config, get_ui_config
 │
 ├── migration/                     # 数据库迁移 (SeaORM Migration)
@@ -59,7 +59,7 @@ src-tauri/src/
 │
 ├── service/
 │   ├── mod.rs                     # Service trait (25 业务方法) + ServiceImpl(Local/Remote) 分发
-│   ├── models.rs                  # 所有业务模型枚举与结构体统一定义 (含流式 payload/result)
+│   ├── models.rs                  # 所有业务模型枚举与结构体统一定义 (含流式 payload/result/头像资产)
 │   ├── local/                     # 本地业务逻辑层
 │   │   ├── mod.rs                 # LocalService 定义 + impl Service 委托 + 通用任务句柄方法
 │   │   ├── db.rs                  # DB 连接管理
@@ -80,7 +80,7 @@ src-tauri/src/
 │   │   ├── voice_clone.rs         # 声音克隆任务创建 + start_voice_clone_inference
 │   │   ├── voice_design.rs        # 音色设计任务创建 + start_voice_design_inference
 │   │   ├── training.rs            # 微调任务创建 + start_training
-│   │   └── streaming.rs           # 流式会话 LocalService 层 (create/send/cancel + 会话句柄 + sweep)
+│   │   └── streaming.rs           # 流式会话 LocalService 层 (create/send/cancel/replay/头像 + 会话句柄 + sweep)
 │   ├── remote/                    # 远程服务层 (开发中)
 │   │   └── mod.rs                 # RemoteService 实现 Service trait, 委托 ApiClient; 流式三方法 bail 不支持
 │   └── pipeline/                  # 任务执行管线
@@ -116,7 +116,7 @@ src-tauri/src/
 | `config/ui_config.rs` | JSON 参数配置 -> 配置驱动的参数表单 |
 
 ### 业务模型统一
-`service/models.rs` 集中定义所有枚举（`AppLanguage`, `HistoryTaskType`(含 StreamingSpeech), `TaskStatus`, `SpeakerStatus`, `SpeakerSource`, `ModelDownloadType`, `ModelTrainingSampleType`, `ModelTrainingFileKind`, `TextToSpeechFormat`）和结构体（`ModelInfo`, `SpeakerInfo`, `HistoryRecord`, 各 TaskDetail/Payload/Result，流式 `CreateStreamingSpeechTaskPayload`/`SendStreamingMessagePayload`/`StreamingSpeechTaskResult`/`StreamingSpeakerInput`）。`GeneratedAudioSource` 是 TTS、克隆、设计和流式消息的统一音频索引；`GeneratedAudioAsset { file_name, content_type, bytes }` 是统一读取结果。
+`service/models.rs` 集中定义所有枚举（`AppLanguage`, `HistoryTaskType`(含 StreamingSpeech), `TaskStatus`, `SpeakerStatus`, `SpeakerSource`, `ModelDownloadType`, `ModelTrainingSampleType`, `ModelTrainingFileKind`, `TextToSpeechFormat`）和结构体（`ModelInfo`, `SpeakerInfo`, `HistoryRecord`, 各 TaskDetail/Payload/Result，流式 `CreateStreamingSpeechTaskPayload`/`SendStreamingMessagePayload`/`StreamingSpeechTaskResult`/`StreamingSpeakerInput`/`StreamingReplaySnapshot`/`StreamingSpeakerAvatarAsset`）。`GeneratedAudioSource` 是 TTS、克隆、设计和流式消息的统一音频索引；`GeneratedAudioAsset { file_name, content_type, bytes }` 是统一读取结果。
 
 分页类型：`PageRequest<T>` (含 `Default`)、`Page<T>` (含 `::new()`)、`SpeakerFilter` / `ModelFilter` / `HistoryFilter`、`SpeakerPageResult` (分页 + 统计)。`list_model_infos` / `list_speaker_infos` / `list_history_records` 三个 service 方法与对应 hooks 命令均接收 `PageRequest<TFilter>`、返回 `Page<T>` / `SpeakerPageResult`；`list_history_records` 仅返回 `HistoryRecordSummary`（不含 detail/taskLog）。
 
@@ -148,7 +148,7 @@ Pipeline 通过 shell 脚本包装器 `begin_llm_task` 执行 Python 脚本（�
 ### 远程存储模式 (RemoteService / ApiClient) - 开发中
 后端第二种存储后端 `RemoteService`，与 `LocalService` 并列实现同一 `Service` trait。
 
-- **`Service` trait** (`service/mod.rs`)：25 个业务方法 + `new`/`close` 生命周期（含流式 3 方法：`create_streaming_speech_task`/`send_streaming_message`/`cancel_streaming_task`；含模型当前设备 `set_model_current_device`）。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
+- **`Service` trait** (`service/mod.rs`)：27 个业务方法 + `new`/`close` 生命周期（含流式 6 方法：`create_streaming_speech_task`/`send_streaming_message`/`cancel_streaming_task`/`get_streaming_replay_snapshot`/`read_streaming_speaker_avatar`/`update_streaming_speaker_avatar`；含模型当前设备 `set_model_current_device`）。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
 - **`client::ApiClient`** (`client/mod.rs`)：持有 `api_url` + 可选 `api_token`，方法签名与 `Service` trait 业务方法一一对应。**当前为占位实现**--`placeholder()` 打印 method/url/params 后 `bail!("client HTTP 调用尚未接入")`，即 Remote 模式当前会报错，不可用。
 - **`client::paths`** / **`client::entity`**：远端 API 路径常量 + `CommonResponse<T>`/分页响应边界转换。
 - **`utils::HttpClient`** (`utils/http.rs`)：封装 `reqwest::Client`（30s 超时 + Bearer Token），`#[allow(dead_code)]` 前瞻基础设施。
@@ -169,7 +169,7 @@ DB 列 `model_info.current_device TEXT`（可空，schema 29，migration `m20260
 ### 流式语音生成 (StreamingSpeech)
 会话级长期进程的实时流式语音合成，区别于一次性脚本的 TTS/克隆/设计。完整架构（任务类型/DB/hooks/Service/LocalService 会话层/Pipeline runner/帧协议/并发模型/清扫/测试）见 [[streaming-speech-architecture]]。要点：
 - 新表 `streaming_tasks` + migration `m20260718_000011`（schema 27->28）；`HistoryTaskType::StreamingSpeech`（`"streaming-speech"` / 目录 `"streaming"`）。
-- `hooks/streaming.rs`：`AudioStreamEvent` 协议（started/finished/error 控制事件，经 `Channel<InvokeResponseBody>` Json 下发；chunk 走 Raw 二进制）+ 3 命令（create/send/cancel）。
+- `hooks/streaming.rs`：`AudioStreamEvent` 协议（started/finished/error 控制事件，经 `Channel<InvokeResponseBody>` Json 下发；chunk 走 Raw 二进制）+ 6 命令（create/send/cancel/replay snapshot/头像读写）。
 - `service/local/streaming.rs`：会话创建/发消息/取消/清扫 + 会话句柄管理（`ActiveTaskControl.streaming_extra`）。
 - `service/pipeline/streaming.rs`：帧解析纯函数 + `run_streaming_session` 长期 runner（环回 TCP Socket bind/accept/AUTH + reader/writer task 分帧读写，按 contextId 分发、cancel kill、状态机 Running->Cancelled/Failed）；`service/pipeline/streaming_transport.rs`：二进制帧编解码纯函数。
 - Remote 模式不支持（bail）。

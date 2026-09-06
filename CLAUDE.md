@@ -10,10 +10,10 @@ Claude 上下文记忆统一存放于 **`docs/memory/`**（纳入 git 管理）�
 - 各主题记忆（架构、数据流、规则等）见索引链接
 - 记忆只记**当前状态**，不记版本更新/功能优化的变更过程；每条记忆顶部带「状态截至 日期 · 分支」锚点
 
-### 当前项目上下文快照（2026-07-30）
+### 当前项目上下文快照（2026-09-06）
 
-- 本仓库是 Tauri 2 + Vue 3 + Rust 的桌面端 AI 语音合成客户端，当前分支为 `v.0.12.0`，打包版本为 `0.12.0`。
-- 重点能力已覆盖 TTS / Voice Clone / Voice Design / Model Training / Streaming Speech；其中 Streaming Speech 在 Local 模式下已实现会话级长期进程与实时音频流。
+- 本仓库是 Tauri 2 + Vue 3 + Rust 的桌面端 AI 语音合成客户端，当前分支为 `v0.12.2`，打包版本为 `0.12.2`。
+- 重点能力已覆盖 TTS / Voice Clone / Voice Design / Model Training / Streaming Speech；其中 Streaming Speech 在 Local 模式下已实现会话级长期进程、环回 Socket 二进制帧协议实时音频流，以及说话人头像与消息侧别展示。
 - 模型体系由 `src-model/` 下 7 个独立 adapter 子模块驱动，`moss_tts_realtime` 是首个实现会话级 `streaming.py` 契约的适配器。
 - 远程存储模式仍处于占位阶段，当前实际可用路径仍是 Local 模式；后续改动请优先参考 `docs/memory/` 里的记忆文档。
 
