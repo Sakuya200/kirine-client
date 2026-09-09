@@ -14,7 +14,7 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 2. **Git**：用于部分模型的资源获取流程，特别是 GPT-SoVITS-CPUFast。
 3. **Conda（可选）**：Miniconda 或 Anaconda。若系统 PATH 中可检测到 `conda` 命令，应用会优先为每个模型创建独立的 conda 环境（`<模型目录>/conda_env`），否则回退到标准 `venv`。不安装 Conda 也能正常使用全部功能。
 
-> 国内用户建议先阅读第 9 节《国内网络环境配置建议》，为 pip / conda / git 配置镜像源与代理，可显著提升依赖安装与模型资源下载的成功率与速度。
+> 国内用户建议先阅读第 8 节《国内网络环境配置建议》，为 pip / conda / git 配置镜像源与代理，可显著提升依赖安装与模型资源下载的成功率与速度。
 
 ## 2. 使用前须知
 
@@ -36,7 +36,7 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 | MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
 | MOSS-TTS Realtime | 1.7B | — | — | — | — | ✓ | CPU / CUDA |
 | GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | — | CPU |
-| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓（实验） | ✓（实验） | — | — | — | CPU |
+| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
 
 ## 4. 快速上手
 
@@ -80,36 +80,7 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 
 流式语音采用会话级长期进程：一条会话可连续发送多条消息，按 `contextId` 分发音频流。页面支持参考音频语音克隆与已训练说话人（从 Ready 说话人选择）两类输入。历史会话会恢复消息和配置，单条消息的试听与导出均通过历史任务及消息 ID 定位对应的已生成音频。
 
-## 6. GPT-SoVITS-CPUFast 特别说明
-
-当前默认仅保障 V1 使用体验。若要使用 V2 / V2Pro / V2ProPlus，找到以下文件：
-
-```
-src-model\base-models\gpt_sovits_cpufast\GPT_SoVITS\text\chinese2.py
-```
-
-将 `g2pw` 的导入和实例化改为 `onnx_api`：
-
-```python
-if is_g2pw:
-    # print("当前使用g2pw进行拼音推理")
-    # from text.g2pw.torch_api import G2PWTorchConverter --这一行改成下面的代码，修改原因是原作者未来考虑使用torch_api来实现相关推理流程，但是目前模型下载到的G2PW依旧是onnx实现，不改的话V2及以上版本执行任务时会因为找不到pth格式的权重报错，目前临时切回onnx_api可以解决这个问题，随着项目推进，未来可能会直接兼容
-    from text.g2pw.onnx_api import G2PWOnnxConverter
-    from text.g2pw.pronunciation import correct_pronunciation, get_phrase_pronunciation
-
-    parent_directory = os.path.dirname(current_file_path)
-    # g2pw = G2PWTorchConverter( --这一行改成下面的代码
-    g2pw = G2PWOnnxConverter(
-        model_dir="GPT_SoVITS/text/G2PWModel",
-        style="pinyin",
-        model_source=os.environ.get("bert_path", "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"),
-        enable_non_tradional_chinese=True,
-    )
-```
-
-这是对上游实验版本的临时兼容方案，后续可能随项目演进而调整。
-
-## 7. 已支持模型项目指引
+## 6. 已支持模型项目指引
 
 1. Irodori-TTS-V3
    - 项目入口（GitHub）：https://github.com/Aratako/Irodori-TTS
@@ -130,7 +101,7 @@ if is_g2pw:
 7. GPT-SoVITS-CPUFast
    - 项目仓库（GitHub）：https://github.com/baicai-1145/GPT-SoVITS-CPUFast
 
-## 8. 常见问题
+## 7. 常见问题
 
 **首次运行慢**：首次调用模型时会自动创建 Python 虚拟环境并安装依赖，属于正常现象，后续调用不会重复这个过程。
 
@@ -140,13 +111,13 @@ if is_g2pw:
 
 **切到 Remote 模式后报错**：当前版本 Remote 模式尚未接通真实 API 调用，建议继续使用 Local 模式。
 
-## 9. 国内网络环境配置建议
+## 8. 国内网络环境配置建议
 
 Kirine Client 在首次安装模型、首次推理时会从 PyPI 下载 Python 依赖，从 GitHub 克隆部分模型源码，从 Hugging Face 下载模型权重。这些资源在国内网络下经常出现超时或失败，建议提前为 **pip**、**conda**、**git** 配置国内镜像源，必要时再为 GitHub / Hugging Face 配置代理。
 
 > 以下配置在终端中执行一次即可全局生效（写入用户配置文件）。命令行中的 `#` 注释无需输入。
 
-### 9.1 pip 镜像源
+### 8.1 pip 镜像源
 
 将 pip 默认源切换为清华 TUNA 镜像，并提升可信主机超时时间：
 
@@ -163,7 +134,7 @@ pip config set global.timeout 120
 - 中科大：`https://pypi.mirrors.ustc.edu.cn/simple/`
 - 腾讯云：`https://mirrors.cloud.tencent.com/pypi/simple/`
 
-### 9.2 conda 镜像源
+### 8.2 conda 镜像源
 
 若使用 Conda 管理环境，建议配置清华镜像。执行后会在 `~/.condarc`（Windows 为 `C:\Users\<用户名>\.condarc`）中写入配置：
 
@@ -177,7 +148,7 @@ conda config --set show_channel_urls yes
 
 如需恢复官方源：`conda config --remove-key channels`（或直接删除 `.condarc`）。
 
-### 9.3 git 镜像与代理
+### 8.3 git 镜像与代理
 
 GitHub 克隆速度慢或失败时，有两种常用方案。
 
@@ -207,7 +178,7 @@ git config --global --unset http.proxy
 git config --global --unset https.proxy
 ```
 
-### 9.4 Hugging Face 下载加速
+### 8.4 Hugging Face 下载加速
 
 模型权重通过 `huggingface_hub` 下载，国内可通过 `hf-mirror.com` 镜像加速。在启动 Kirine Client **之前**设置环境变量，应用及其子进程会继承该变量：
 
