@@ -260,6 +260,18 @@ npm run tauri build
 
 会先执行 `vue-tsc --noEmit` 类型检查，再通过 Vite 构建前端产物，最终由 Tauri 打包为 NSIS 安装包。产物输出到 `src-tauri/target/release/bundle/`。
 
+### D5.1 构建绿色免安装包
+
+除 NSIS 安装包外，还支持产出免安装 zip 绿色包（用户解压即用，不写注册表、不在用户机上执行安装脚本，可规避部分杀软对"安装后释放文件"的误报）：
+
+```bash
+powershell -ExecutionPolicy Bypass -File src-tauri/scripts/make-portable.ps1
+```
+
+默认先执行 `npm run tauri build` 再打包；迭代打包可加 `-SkipBuild` 复用现有产物。输出到 `src-tauri/target/portable/kirine-client-<版本>-portable-x64.zip`。
+
+包内布局与 NSIS 安装钩子的目标布局一致（exe + config.toml 在根，`lib\sox-14-4-2`、`lib\ffmpeg-8.1.2`、`lib\src-model`）；运行时由 Rust 侧为子进程注入 app-local PATH 前缀（`src-tauri/src/utils/process.rs` 的 `bundled_tool_path_prefix`），因此绿色包无需写系统 PATH。注意：脚本含中文，必须保存为带 BOM 的 UTF-8（Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解析会乱码报错）。
+
 ### D6. 仅验证编译
 
 如果只需要检查代码是否编译通过而不需要完整启动：

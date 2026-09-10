@@ -1,4 +1,11 @@
-use std::{fs::OpenOptions, io::Write, path::Path, process::Stdio};
+use std::{
+    ffi::OsString,
+    fs::OpenOptions,
+    io::Write,
+    path::Path,
+    process::Stdio,
+    sync::OnceLock,
+};
 
 use anyhow::{bail, Context};
 use tokio::{
@@ -38,6 +45,33 @@ fn prepare_command(program: &Path, args: &[String], current_dir: &Path) -> Comma
     )
 }
 
+/// 子进程 PATH 前缀：指向 exe 同级 `lib\` 下随应用分发的工具目录（ffmpeg/sox），
+/// 使绿色包（不写 HKCU PATH）也能让脚本端按名解析这些工具。
+/// 目录不存在时返回 None（开发模式 target/debug 下无 lib，保持现状不注入）。
+fn bundled_tool_path_prefix() -> Option<&'static OsString> {
+    static PREFIX: OnceLock<Option<OsString>> = OnceLock::new();
+    PREFIX
+        .get_or_init(|| {
+            let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+            let candidates = [
+                exe_dir.join("lib").join("ffmpeg-8.1.2").join("bin"),
+                exe_dir.join("lib").join("sox-14-4-2"),
+            ];
+            let existing = std::env::var_os("PATH")?;
+            let mut parts: Vec<OsString> = candidates
+                .into_iter()
+                .filter(|p| p.is_dir())
+                .map(|p| p.into_os_string())
+                .collect();
+            if parts.is_empty() {
+                return None;
+            }
+            parts.push(existing);
+            std::env::join_paths(&parts).ok()
+        })
+        .as_ref()
+}
+
 fn prepare_command_with_stdio(
     program: &Path,
     args: &[String],
@@ -58,6 +92,10 @@ fn prepare_command_with_stdio(
         .stdin(stdin)
         .stdout(stdout)
         .stderr(stderr);
+
+    if let Some(prefix) = bundled_tool_path_prefix() {
+        command.env("PATH", prefix);
+    }
 
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);

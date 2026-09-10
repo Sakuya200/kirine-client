@@ -23,4 +23,5 @@
 - [Retain Future-Use Fields](retain-future-use-fields.md) - 勿为消警告删预留待用字段（如 ResolvedStreamingPaths 的 base_model/model_version）
 - [src-tauri Not rustfmt-clean](src-tauri-not-rustfmt-clean.md) - src-tauri HEAD 非 rustfmt-1.8.0 干净；全局 cargo fmt 会改 30 个无关文件，勿用
 - [Tests Dir Over Inline](tests-dir-over-inline.md) - 单测放 tests/ 经 test_support 桥接，不用内联 #[cfg(test)]；pub(crate) 项先提 pub 再重导出
-- [FFmpeg Bundling](ffmpeg-bundling.md) - ffmpeg shared build 打包/解压（src-model 同级）/PATH 注销重注册 + moss_tts_realtime DLL 注册
+- [FFmpeg Bundling](ffmpeg-bundling.md) - ffmpeg shared build 打包/解压（src-model 同级，无系统 PATH 注册）+ moss_tts_realtime DLL 注册
+- [Portable Packaging](portable-packaging.md) - 绿色免安装 zip 包：make-portable.ps1、布局常量对齐表、子进程 PATH 前缀注入、WebView2 检测、杀软误报缓解

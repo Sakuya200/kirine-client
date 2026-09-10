@@ -29,6 +29,18 @@ pub use service::models::HistoryTaskType;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebView2 Runtime 缺失时 builder.build 会失败并走 eprintln 静默退出，
+    // 绿色包场景没有安装器的 downloadBootstrapper 兜底安装，用户视角即“闪退”。
+    // 启动最前面先行检测，缺失时以原生弹窗明确提示。
+    if tauri::webview_version().is_err() {
+        show_error_dialog(
+            "未检测到 Microsoft Edge WebView2 Runtime，Kirine Client 无法启动。\n\n\
+             请从 https://developer.microsoft.com/microsoft-edge/webview2/ 安装 \
+             Evergreen Runtime 后重试。",
+        );
+        return;
+    }
+
     // 安装版以 NSIS 安装完成页“打开应用”等方式启动时，进程工作目录可能不是安装目录，
     // 而启动期的配置/src-model/本地服务路径均按相对路径解析，会导致找不到文件而闪退。
     // 发布构建下将工作目录锚定到可执行文件所在目录，保证相对路径解析与开发期一致。
@@ -74,6 +86,39 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(windows)]
+fn show_error_dialog(message: &str) {
+    use std::{
+        ffi::OsStr,
+        iter::once,
+        os::windows::ffi::OsStrExt,
+    };
+
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND,
+    };
+
+    fn to_wide(value: &str) -> Vec<u16> {
+        OsStr::new(value).encode_wide().chain(once(0)).collect()
+    }
+
+    let text = to_wide(message);
+    let caption = to_wide("Kirine Client");
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_error_dialog(message: &str) {
+    eprintln!("{message}");
 }
 
 async fn init(app: &mut tauri::App) -> Result<()> {
