@@ -69,13 +69,15 @@ const refreshModels = async () => {
 
 const installStatusOf = (item: ModelInfo): ModelInstallStatus => modelStore.installStatusOf(item);
 
-// 单设备模型只读展示（后端已自动回填 currentDevice）；多设备需用户主动选择。
+// 单设备模型选择器只读（无可选余地），展示回退到唯一支持设备；
+// 后端 sync 不写默认设备，currentDevice 由用户选择或任务执行前探测回填。多设备需用户主动选择。
 const deviceSelectDisabled = (item: ModelInfo) => isMutating.value || deviceUpdatingId.value === item.id || item.supportedDevices.length <= 1;
 
 const deviceOptions = (item: ModelInfo) =>
   item.supportedDevices.map(device => ({ label: HARDWARE_TYPE_TEXT[device] ?? device.toUpperCase(), value: device }));
 
-const effectiveInstallDevice = (item: ModelInfo): HardwareType | null => {
+// 展示与安装共用的生效设备：优先用户已选的 currentDevice，单设备模型回退到唯一支持设备。
+const effectiveDevice = (item: ModelInfo): HardwareType | null => {
   if (item.currentDevice !== null) {
     return item.currentDevice;
   }
@@ -97,7 +99,7 @@ const handleDeviceChange = async (item: ModelInfo, device: HardwareType) => {
 
 const handleInstall = async (modelId: number) => {
   const target = modelStore.items.find(item => item.id === modelId);
-  const device = target ? effectiveInstallDevice(target) : null;
+  const device = target ? effectiveDevice(target) : null;
   // 多设备模型未选设备时按钮已禁用；此处兜底，避免空设备进入安装。
   if (!target || device === null) {
     return;
@@ -227,7 +229,7 @@ onMounted(async () => {
               <td class="py-3 align-middle">
                 <div class="w-44">
                   <BaseListbox
-                    :model-value="item.currentDevice"
+                    :model-value="effectiveDevice(item)"
                     :options="deviceOptions(item)"
                     :disabled="deviceSelectDisabled(item)"
                     placeholder="请选择设备"
@@ -247,8 +249,8 @@ onMounted(async () => {
                     tone="ghost"
                     size="sm"
                     :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
-                    :disabled="isMutating || effectiveInstallDevice(item) === null"
-                    :title="effectiveInstallDevice(item) === null ? '请先选择当前设备' : ''"
+                    :disabled="isMutating || effectiveDevice(item) === null"
+                    :title="effectiveDevice(item) === null ? '请先选择当前设备' : ''"
                     @click="handleInstall(item.id)"
                   >
                     <ArrowDownTrayIcon
