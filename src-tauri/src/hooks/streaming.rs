@@ -2,8 +2,9 @@ use tauri::State;
 
 use crate::service::{
     models::{
-        CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload,
-        StreamingReplaySnapshot, StreamingSpeechTaskResult,
+        CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
+        StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult, UpdateStreamingSpeakersPayload,
+        UpdateStreamingSpeakersResult,
     },
     ServiceState,
 };
@@ -71,6 +72,35 @@ pub async fn get_streaming_replay_snapshot(
         .service()
         .map_err(|err| err.to_string())?
         .get_streaming_replay_snapshot(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_streaming_speaker_avatar(
+    history_id: i64,
+    speaker_name: String,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<StreamingSpeakerAvatarAsset, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .read_streaming_speaker_avatar(history_id, speaker_name)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn update_streaming_speakers(
+    payload: UpdateStreamingSpeakersPayload,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<UpdateStreamingSpeakersResult, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .update_streaming_speakers(payload)
         .await
         .map_err(|err| err.to_string())
 }

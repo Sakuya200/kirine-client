@@ -11,8 +11,9 @@ use crate::{
             HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
             ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
             PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
-            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeechTaskResult,
-            TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateTaskStatusPayload,
+            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
+            StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
+            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
             VoiceCloneTaskResult, VoiceDesignTaskResult,
         },
         Service,
@@ -246,5 +247,20 @@ impl Service for RemoteService {
         _history_id: i64,
     ) -> Result<StreamingReplaySnapshot> {
         anyhow::bail!("远程存储模式暂不支持流式语音历史重放")
+    }
+
+    async fn read_streaming_speaker_avatar(
+        &self,
+        _history_id: i64,
+        _speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarAsset> {
+        anyhow::bail!("远程存储模式暂不支持流式语音说话人头像")
+    }
+
+    async fn update_streaming_speakers(
+        &self,
+        _payload: UpdateStreamingSpeakersPayload,
+    ) -> Result<UpdateStreamingSpeakersResult> {
+        anyhow::bail!("远程存储模式暂不支持更新流式语音说话人")
     }
 }

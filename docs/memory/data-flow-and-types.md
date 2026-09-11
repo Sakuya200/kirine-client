@@ -9,7 +9,7 @@ metadata:
 
 # 数据流与类型体系
 
-> 状态截至 2026-09-01 · 分支 `v.0.12.0`
+> 状态截至 2026-09-06 · 分支 `v0.12.2`
 
 ## 前后端通信
 前端通过 `@tauri-apps/api/core` 的 `invoke<T>(command, payload)` 调用后端 Tauri 命令。所有数据经过 serde 自动序列化/反序列化（后端用 `camelCase`，前端一致）。流式语音额外用 Tauri 2 `Channel<InvokeResponseBody>` 下发实时事件（控制事件 Json、音频 chunk Raw 二进制，前端收 ArrayBuffer）。
@@ -41,6 +41,9 @@ metadata:
 | `create_streaming_speech_task` | streaming | -> | 创建流式语音会话（`CreateStreamingSpeechTaskPayload` -> `StreamingSpeechTaskResult`，建 task_history+streaming_tasks 记录 + 拉起长期进程） |
 | `send_streaming_message` | streaming | -> | 发送一条流式消息（`SendStreamingMessagePayload` + `on_event: Channel<InvokeResponseBody>`，等终帧或 300s 超时） |
 | `cancel_streaming_task` | streaming | -> | 取消流式会话（`taskId` -> `bool`，kill 子进程） |
+| `get_streaming_replay_snapshot` | streaming | -> | 历史流式会话回放快照（`historyId` -> 消息与配置恢复，不依赖活动会话进程） |
+| `get_streaming_speaker_avatar` | streaming | -> | 读取流式说话人头像字节（`historyId + speakerName` -> `StreamingSpeakerAvatarAsset`，前端构造 Blob URL 展示） |
+| `update_streaming_speaker_avatar` | streaming | -> | 替换/清除流式说话人头像（`historyId + speakerName + avatarPath?/avatarName?`；复制进 sample 目录并更新 context.json） |
 | `get_settings_config` | settings | -> | 获取配置 |
 | `save_settings_config` | settings | -> | 保存配置 |
 | `get_ui_config` | settings | -> | 获取 UI 参数配置 |
@@ -110,10 +113,12 @@ runner (run_streaming_session, 长期存活):
 | `ModelTrainingTaskDetail` | `ModelTrainingTaskDetail` | 微调任务详情 (含 samples 数组) |
 | `ModelTrainingSampleDetail` | `ModelTrainingSampleInput` | 训练样本 (含 primaryFile/secondaryFile) |
 | `ModelTrainingFileDetail` | `ModelTrainingFileInput` | 训练文件 (fileName/fileKind/filePath) |
-| `StreamingSpeakerInput` | `StreamingSpeakerInput` | 流式说话人 (name/baseModel/refAudio*/refText) |
+| `StreamingSpeakerInput` | `StreamingSpeakerInput` | 流式说话人 (name/baseModel/refAudio*/refText + category/speakerDirName/side/avatarPath/avatarName) |
 | `CreateStreamingSpeechTaskPayload` | `CreateStreamingSpeechTaskPayload` | 创建流式会话请求 (baseModel/device/language/modelParams/speakers) |
 | `SendStreamingMessagePayload` | `SendStreamingMessagePayload` | 发送流式消息 (taskId/contextId/speakerName/text) |
 | `StreamingSpeechTaskResult` | `StreamingSpeechTaskResult` | 创建会话响应 (taskId + context/input/audio 路径 + status) |
+| `StreamingReplaySnapshot` | `StreamingReplaySnapshot` | 历史流式会话回放快照 (historyId -> 消息+配置) |
+| `StreamingSpeakerAvatarAsset` | `StreamingSpeakerAvatarAsset` | 说话人头像字节资产 ({ historyId, speakerName, fileName, contentType, bytes }) |
 
 ## 枚举对应
 | TS 枚举/类型 | Rust 枚举 | 值 |
@@ -189,7 +194,7 @@ runner (run_streaming_session, 长期存活):
 ## speakers 字段 speakerName + 远程存储模式
 
 - **speaker 字段**：`SpeakerProfile.speakerName`（对齐后端 `SpeakerInfo.speaker_name`）。create/update/import 三处 `invoke` payload key 统一为 `speakerName`。
-- **远程存储模式**：后端 `Service` trait 含 `RemoteService` 实现，`StorageMode::Remote` 时启用，经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`Service` trait 共 **25 业务方法** + `new`/`close`（含流式 3 方法）。`ApiClient` 当前为占位实现，Remote 模式不可用；流式三方法直接 bail 不支持。`set_model_current_device` 对应远端 `PUT /api/models/{id}/current-device`。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
+- **远程存储模式**：后端 `Service` trait 含 `RemoteService` 实现，`StorageMode::Remote` 时启用，经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`Service` trait 共 **27 业务方法** + `new`/`close`（含流式 6 方法：create/send/cancel/replay snapshot/头像读写）。`ApiClient` 当前为占位实现，Remote 模式不可用；流式各方法直接 bail 不支持。`set_model_current_device` 对应远端 `PUT /api/models/{id}/current-device`。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
 
 ## UI 配置类型
 
@@ -209,8 +214,8 @@ runner (run_streaming_session, 长期存活):
 完整架构见 [[streaming-speech-architecture]]。
 
 **前端类型**（`types/streaming.ts`）：
-- `StreamingSpeakerConfig`：流式说话人配置（id/name/category/baseModel/refAudioPath/refAudioName/refText）。`voice-clone` 使用前端本地参考音频与台词；`trained` 从 Ready 说话人按基础模型选择并携带 `speakerDirName`；`preset` 仍为预留。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
-- `StreamingChatMessage`：聊天消息（role/text/synthText/speakerId/taskId/contextId/status）；assistant 消息挂 `StreamableAudioPlayer(mode='stream')`。
+- `StreamingSpeakerConfig`：流式说话人配置（id/name/category/baseModel/refAudioPath/refAudioName/refText + `side`/`avatarPath`/`avatarName`）。`voice-clone` 使用前端本地参考音频与台词；`trained` 从 Ready 说话人按基础模型选择并携带 `speakerDirName`；`preset` 仍为预留。时间字段后端生成、前端只读（见 [[time-field-naming-rule]]）。
+- `StreamingChatMessage`：聊天消息（id/text/speakerId/speakerName/taskId/contextId/status）；**每个说话人即用户本身，每次发送只产生一条消息**，`contextId` 即消息 id（后端以 `contextId` 命名 `audio/<contextId>.wav`）；无 role/synthText 字段（v0.12.2 起移除）。
 - `StreamingSessionConfig`：会话级配置（baseModel/modelVersion/device/language/modelParams），抽屉编辑、聊天页消费；提交后端 payload 不含时间。
 
 **前后端契约类型**（`domain.ts` ↔ `service/models.rs` + `hooks/streaming.rs`）：`StreamingSpeakerInput` / `CreateStreamingSpeechTaskPayload` / `SendStreamingMessagePayload` / `StreamingSpeechTaskResult` / `AudioStreamEvent`（serde `tag="type"` + `rename_all="camelCase"`：`started` / `finished` / `error{message}`，仅控制事件；chunk 不在枚举中，以 `InvokeResponseBody::Raw` 二进制直接下发）。`on_event` 为 `Channel<InvokeResponseBody>`，前端 `onmessage` 收到 ArrayBuffer（chunk）或 JSON 对象（控制事件）。

@@ -119,22 +119,6 @@ function Get-ExternalCommandOutput {
     }
 }
 
-function Get-CommandOutput {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Command,
-
-        [string[]]$Arguments = @()
-    )
-
-    $resolved = Get-Command $Command -ErrorAction SilentlyContinue
-    if ($null -eq $resolved) {
-        return $null
-    }
-
-    return Get-ExternalCommandOutput -Command $resolved.Source -Arguments $Arguments
-}
-
 function Get-TorchRuntimeMetadataArguments {
     return @(
         '-c',
@@ -184,22 +168,82 @@ function Convert-TorchCudaVersionToTag {
     return $null
 }
 
+function Get-NvidiaToolAbsolutePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command
+    )
+
+    # Resolve well-known NVIDIA tool locations by absolute path first: PATH
+    # resolution inside app-spawned processes proved unreliable on some machines
+    # (the cmd.exe / nvidia-smi resolution incidents). PATH-based lookup remains
+    # as the fallback for non-standard installs.
+    $candidates = @()
+    if ($Command -eq 'nvidia-smi') {
+        $candidates += @(
+            (Join-Path ([Environment]::SystemDirectory) 'nvidia-smi.exe'),
+            (Join-Path $env:ProgramFiles 'NVIDIA Corporation\NVSMI\nvidia-smi.exe')
+        )
+    }
+    elseif ($Command -eq 'nvcc') {
+        if (-not [string]::IsNullOrWhiteSpace($env:CUDA_PATH)) {
+            $candidates += (Join-Path $env:CUDA_PATH 'bin\nvcc.exe')
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Get-CudaVersionFromOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Output
+    )
+
+    if ($Output -match 'CUDA.*?Version:\s*([0-9]+)\.([0-9]+)') {
+        return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2] }
+    }
+
+    if ($Output -match 'release\s+([0-9]+)\.([0-9]+)') {
+        return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2] }
+    }
+
+    return $null
+}
+
 function Get-CudaVersion {
     foreach ($commandSpec in @(
             @{ Command = 'nvidia-smi'; Arguments = @() },
             @{ Command = 'nvcc'; Arguments = @('--version') }
         )) {
-        $output = Get-CommandOutput -Command $commandSpec.Command -Arguments $commandSpec.Arguments
-        if ([string]::IsNullOrWhiteSpace($output)) {
-            continue
+        $resolvedPaths = @()
+
+        $absolutePath = Get-NvidiaToolAbsolutePath -Command $commandSpec.Command
+        if ($null -ne $absolutePath) {
+            $resolvedPaths += $absolutePath
         }
 
-        if ($output -match 'CUDA.*?Version:\s*([0-9]+)\.([0-9]+)') {
-            return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2] }
+        $pathResolved = Get-Command $commandSpec.Command -ErrorAction SilentlyContinue
+        if ($null -ne $pathResolved) {
+            $resolvedPaths += $pathResolved.Source
         }
 
-        if ($output -match 'release\s+([0-9]+)\.([0-9]+)') {
-            return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2] }
+        foreach ($toolPath in $resolvedPaths) {
+            $output = Get-ExternalCommandOutput -Command $toolPath -Arguments $commandSpec.Arguments
+            if ([string]::IsNullOrWhiteSpace($output)) {
+                continue
+            }
+
+            $version = Get-CudaVersionFromOutput -Output $output
+            if ($null -ne $version) {
+                return $version
+            }
         }
     }
 

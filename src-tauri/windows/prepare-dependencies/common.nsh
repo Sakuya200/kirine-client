@@ -1,8 +1,6 @@
 !include "LogicLib.nsh"
 !include "StrFunc.nsh"
-!include "WinMessages.nsh"
 
-${StrStr}
 ${StrRep}
 
 !define POWERSHELL_EXE "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
@@ -23,77 +21,6 @@ Function RunHiddenCommandWait
 
   Pop $2
   Pop $1
-FunctionEnd
-
-Function BroadcastEnvironmentChange
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-FunctionEnd
-
-Function AddToUserPathIfMissing
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-
-  ReadRegStr $1 HKCU "Environment" "Path"
-
-  ${If} $1 == ""
-    WriteRegExpandStr HKCU "Environment" "Path" "$0"
-    Call BroadcastEnvironmentChange
-    Goto done
-  ${EndIf}
-
-  StrCpy $2 ";$1;"
-  StrCpy $3 ";$0;"
-  ${StrStr} $2 $2 $3
-
-  ${If} $2 == ""
-    WriteRegExpandStr HKCU "Environment" "Path" "$1;$0"
-    Call BroadcastEnvironmentChange
-  ${EndIf}
-
-done:
-  Pop $3
-  Pop $2
-  Pop $1
-  Pop $0
-FunctionEnd
-
-Function RemoveFromUserPath
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-  Push $4
-
-  ReadRegStr $1 HKCU "Environment" "Path"
-  ${If} $1 == ""
-    Goto remove_done
-  ${EndIf}
-
-  ; 用分号包裹以精确匹配首/尾元素（避免前缀误匹配），替换 ";entry;" -> ";"。
-  StrCpy $2 ";$1;"
-  StrCpy $3 ";$0;"
-  ${StrRep} $4 $2 $3 ";"
-
-  ; 去掉首尾的分号还原为标准 PATH 形态。
-  StrCpy $2 $4 "" 1
-  StrLen $3 $2
-  IntOp $3 $3 - 1
-  ${If} $3 > 0
-    StrCpy $1 $2 $3
-  ${Else}
-    StrCpy $1 ""
-  ${EndIf}
-  WriteRegExpandStr HKCU "Environment" "Path" "$1"
-  Call BroadcastEnvironmentChange
-
-remove_done:
-  Pop $4
-  Pop $3
-  Pop $2
-  Pop $1
-  Pop $0
 FunctionEnd
 
 Function ExtractBundledZipArchive

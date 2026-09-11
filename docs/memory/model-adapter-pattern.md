@@ -24,7 +24,7 @@ metadata:
 | **vox_cpm2** | 2B | `src-model/vox_cpm2` | ✅ | ✅ | ✅ | ✅ | CPU/CUDA | 支持音色设计 (Voice Design) |
 | **moss_tts_local** | 1.7B | `src-model/moss_tts_local` | ✅ | ✅ | ✅ | ❌ | CPU/CUDA | MOSS-TTS Local，标准脚本调用模式（`tts.py`/`voice_clone.py`/`training.py` + `--params-file`） |
 | **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ❌ | ❌ | CUDA/CPU | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech`），上游 OpenMOSS/MOSS-TTS |
-| **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，V2+ 为实验性 |
+| **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，固定上游 main `d3e5875`（G2PW pth 权重已纳入下载清单） |
 
 > 特性矩阵、设备支持与支持语言以各子模块 `configs/model-config.json` 的 `supportedFeatureList` / `supportedDevices` / `supportedLanguages` 为准（应用启动时扫描）。
 

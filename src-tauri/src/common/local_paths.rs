@@ -27,6 +27,11 @@ pub(crate) fn serialize_task_path(data_dir: &Path, path: &Path) -> String {
         .unwrap_or_else(|| normalize_path_string(path))
 }
 
+/// 判断路径值是否为带 `%DATA_DIR_PATH%` 占位符的序列化路径（任务 sample 目录内产物）。
+pub(crate) fn is_serialized_task_path(value: &str) -> bool {
+    value.trim().contains(DATA_DIR_PATH_PLACEHOLDER)
+}
+
 pub(crate) fn resolve_task_path(data_dir: &Path, value: &str) -> PathBuf {
     let trimmed = value.trim();
     // 如果路径中不包含占位符，直接返回原始路径，避免不必要的字符串处理和路径拼接

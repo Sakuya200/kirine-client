@@ -27,6 +27,8 @@ interface Props {
   showDownload?: boolean;
   downloadLabel?: string;
   pendingMessage?: string;
+  failedMessage?: string;
+  cancelledMessage?: string;
   downloadTone?: 'solid' | 'ghost' | 'quiet';
 }
 
@@ -34,6 +36,8 @@ const props = withDefaults(defineProps<Props>(), {
   showDownload: true,
   downloadLabel: '下载音频',
   pendingMessage: '任务仍在执行中，音频结果会在状态变为“已完成”后显示。',
+  failedMessage: '任务执行失败，无音频结果。可在历史任务详情中查看「任务日志」了解失败原因。',
+  cancelledMessage: '任务已终止，无音频结果。',
   downloadTone: 'ghost'
 });
 
@@ -56,6 +60,24 @@ const { isPlaying, playbackProgress, currentPlaybackSeconds, playbackTotalSecond
 
 const playbackActionLabel = computed(() => (isPlaying.value ? '暂停播放' : '播放音频'));
 const resolvedTotalSeconds = computed(() => playbackTotalSeconds.value);
+
+// 非完成态的占位提示按状态区分：失败/终止属于终态，不能再提示"仍在执行中"。
+const statusMessage = computed(() => {
+  if (props.task?.status === TaskStatus.Failed) {
+    return props.failedMessage;
+  }
+  if (props.task?.status === TaskStatus.Cancelled) {
+    return props.cancelledMessage;
+  }
+  return props.pendingMessage;
+});
+
+const statusMessageTone = computed(() => {
+  if (props.task?.status === TaskStatus.Failed) {
+    return 'border-rose-200 bg-rose-50/60 text-rose-600';
+  }
+  return 'border-brand-200 bg-white/85 text-stone-600';
+});
 
 const handleTogglePlayback = () => {
   if (!props.task) {
@@ -131,7 +153,7 @@ watch(
     </div>
   </div>
 
-  <div v-else class="rounded-2xl border border-brand-200 bg-white/85 p-4 text-sm leading-6 text-stone-600">
-    {{ pendingMessage }}
+  <div v-else class="rounded-2xl border p-4 text-sm leading-6" :class="statusMessageTone">
+    {{ statusMessage }}
   </div>
 </template>

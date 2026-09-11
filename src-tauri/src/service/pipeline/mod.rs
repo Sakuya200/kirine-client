@@ -17,10 +17,10 @@ use anyhow::{bail, Ok};
 use async_trait::async_trait;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::sync::watch;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
-    common::task_paths::task_log_file_path,
+    common::{local_paths::resolve_local_log_dir, task_paths::task_log_file_path},
     config::{EnvConfig, HardwareType},
     service::{
         local::{entity::task_history as task_history_entity, LocalService},
@@ -29,7 +29,8 @@ use crate::{
     utils::{
         file_ops::remove_file_if_exists,
         process::{
-            run_logged_shell_script, run_logged_shell_script_cancellable, LoggedCommandResult,
+            append_task_log_text, run_logged_shell_script, run_logged_shell_script_cancellable,
+            LoggedCommandResult,
         },
     },
     Result,
@@ -322,6 +323,48 @@ fn ensure_required_path_exists(path: &Path, label: &str) -> Result<()> {
     }
 
     bail!("缺少{}: {}", label, path.display())
+}
+
+/// 尽力把 pipeline 失败原因追加进任务日志文件（文件不存在时自动创建）。
+///
+/// 早期校验失败（如模型未安装、脚本缺失）发生在任何脚本执行之前，此时任务日志
+/// 文件尚不存在，失败任务在历史详情里既无错误提示也无日志可查，用户只能看到
+/// 「失败」状态却无从得知原因。统一在这里把失败原因落进任务日志，经
+/// `get_history_record` 的 taskLog 读取，在历史详情「任务日志」面板展示。
+/// 日志目录解析或写文件失败时只记 tracing，不影响原有的失败状态上报。
+pub fn write_task_failure_log(
+    log_dir: &Path,
+    task_kind: HistoryTaskType,
+    task_id: i64,
+    base_model: &str,
+    err: &anyhow::Error,
+) -> Result<()> {
+    let task_log_path = task_log_file_path(log_dir, task_kind, task_id);
+    append_task_log_text(
+        &task_log_path,
+        &format!("[pipeline] 任务执行失败 (base_model={base_model}): {err:#}"),
+    )
+}
+
+pub fn record_task_failure_log(
+    service: &LocalService,
+    task_kind: HistoryTaskType,
+    task_id: i64,
+    base_model: &str,
+    err: &anyhow::Error,
+) {
+    let log_result = service
+        .runtime_config()
+        .and_then(|config| resolve_local_log_dir(&config))
+        .and_then(|log_dir| write_task_failure_log(&log_dir, task_kind, task_id, base_model, err));
+    if let Err(log_err) = log_result {
+        error!(
+            task_id,
+            task_type = %task_kind.as_str(),
+            error = %log_err,
+            "failed to record pipeline failure into task log"
+        );
+    }
 }
 
 pub(crate) fn resolve_model_task_pipeline(

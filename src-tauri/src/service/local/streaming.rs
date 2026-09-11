@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io, path::Path};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait,
     EntityTrait, QueryFilter, TransactionTrait,
@@ -14,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     common::{
-        local_paths::{resolve_task_path, serialize_task_path},
+        local_paths::{is_serialized_task_path, resolve_task_path, serialize_task_path},
         task_paths::{
             ensure_task_sample_dir, streaming_context_json_path, streaming_input_cache_path,
             streaming_message_audio_path, streaming_output_audio_dir,
@@ -27,13 +28,15 @@ use crate::{
         },
         models::{
             CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
-            StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeechTaskResult, TaskStatus,
-            UpdateTaskStatusPayload,
+            StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
+            StreamingSpeakerInput, StreamingSpeechTaskResult, TaskStatus,
+            UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
         },
         pipeline::streaming::{
             serialize_input_entry, MessageChannel, StreamingContextBasic, StreamingContextJson,
             StreamingMessageEntry, StreamingSpeaker,
         },
+        pipeline::streaming_transport::encode_speakers_update_frame,
         LocalService,
     },
     utils::time::now_string,
@@ -46,6 +49,158 @@ use crate::{
 const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
 /// 新建流式会话时，等模型加载/voice prompt 编码完成、发出 `session_ready` 后才算建立成功。
 const STREAMING_SESSION_READY_TIMEOUT: Duration = Duration::from_secs(900);
+/// 说话人头像图片扩展名白名单（与前端 IMAGE_FILE_EXTENSIONS 对齐）。
+const STREAMING_AVATAR_IMAGE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
+
+/// 校验头像源文件扩展名并生成 sample 目录内的目标文件名。
+/// 下标前缀保证多说话人（含名字清洗后相同）互不覆盖。
+fn streaming_avatar_target_file_name(
+    idx: usize,
+    speaker_name: &str,
+    source_path: &Path,
+) -> Result<String> {
+    let ext = source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !STREAMING_AVATAR_IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        bail!(
+            "说话人头像仅支持 {:?} 格式: {}",
+            STREAMING_AVATAR_IMAGE_EXTENSIONS,
+            source_path.display()
+        );
+    }
+    Ok(format!(
+        "avatar_{}_{}.{}",
+        idx + 1,
+        super::sanitize_path_segment(speaker_name),
+        ext
+    ))
+}
+
+/// 头像复制进任务 sample 目录（同 voice-clone 参考音频模式）；未配置头像跳过。
+///
+/// 新会话可能复用历史会话的说话人：此时 `avatarPath` 已是 `%DATA_DIR_PATH%` 序列化
+/// 路径，先解析回真实文件再复制进本任务 sample 目录。序列化源文件已不存在（如原
+/// 任务被删除）时，头像为可选装饰，跳过而不阻断会话创建；用户手选的绝对路径复制
+/// 失败仍报错。返回与 speakers 等长的序列化目标路径列表（未配置/跳过为 None）。
+pub fn ingest_streaming_speaker_avatars(
+    data_dir: &Path,
+    sample_dir: &Path,
+    speakers: &[StreamingSpeakerInput],
+) -> Result<Vec<Option<String>>> {
+    let mut avatar_paths: Vec<Option<String>> = Vec::with_capacity(speakers.len());
+    for (idx, s) in speakers.iter().enumerate() {
+        let serialized = match s.avatar_path.as_deref().map(str::trim) {
+            Some(p) if !p.is_empty() => {
+                let source = resolve_task_path(data_dir, p);
+                let target_path =
+                    sample_dir.join(streaming_avatar_target_file_name(idx, &s.name, &source)?);
+                match std::fs::copy(&source, &target_path) {
+                    Ok(_) => Some(serialize_task_path(data_dir, &target_path)),
+                    Err(err) if is_serialized_task_path(p) => {
+                        warn!(
+                            "speaker avatar source missing, skip: {} ({err})",
+                            source.display()
+                        );
+                        None
+                    }
+                    Err(err) => {
+                        return Err(err).with_context(|| {
+                            format!(
+                                "failed to copy speaker avatar from {} to {}",
+                                source.display(),
+                                target_path.display()
+                            )
+                        });
+                    }
+                }
+            }
+            _ => None,
+        };
+        avatar_paths.push(serialized);
+    }
+    Ok(avatar_paths)
+}
+
+/// 按头像文件扩展名映射响应 content type。
+fn streaming_avatar_content_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => "application/octet-stream",
+    }
+}
+
+/// 流式说话人基础校验（创建任务与运行中热更新共用）：非空、name 非空且唯一、
+/// trained 至多一个且须有 speakerDirName、voice-clone 须有参考音频。
+pub fn validate_streaming_speakers(speakers: &[StreamingSpeakerInput]) -> Result<()> {
+    if speakers.is_empty() {
+        bail!("流式语音会话至少需要一个说话人");
+    }
+    let mut seen_names: HashSet<String> = HashSet::new();
+    let mut trained_count = 0usize;
+    for s in speakers {
+        let name = s.name.trim();
+        if name.is_empty() {
+            bail!("说话人名称不能为空");
+        }
+        if !seen_names.insert(name.to_string()) {
+            bail!("说话人名称重复: {name}");
+        }
+        if s.category == "trained" {
+            trained_count += 1;
+            if s.speaker_dir_name
+                .as_deref()
+                .map(str::is_empty)
+                .unwrap_or(true)
+            {
+                bail!("已训练说话人必须提供 speakerDirName");
+            }
+        } else if s.ref_audio_path.trim().is_empty() {
+            bail!("语音克隆说话人必须提供参考音频");
+        }
+    }
+    if trained_count > 1 {
+        bail!("流式会话至多支持一个已训练说话人");
+    }
+    Ok(())
+}
+
+/// 运行中热更新专属校验：新列表中的 trained 说话人必须是旧列表已有 trained 的保留
+/// （模型 checkpoint 在会话启动时加载定死，运行中不支持新增/更换 trained）。
+pub fn validate_streaming_speakers_hot_update(
+    old: &[StreamingSpeaker],
+    new: &[StreamingSpeakerInput],
+) -> Result<()> {
+    let old_trained: HashSet<&str> = old
+        .iter()
+        .filter(|s| s.category == "trained")
+        .filter_map(|s| s.speaker_dir_name.as_deref())
+        .collect();
+    for s in new.iter().filter(|s| s.category == "trained") {
+        let dir = s
+            .speaker_dir_name
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        if dir.is_empty() {
+            bail!("已训练说话人必须提供 speakerDirName");
+        }
+        if !old_trained.contains(dir) {
+            bail!("模型已在会话启动时加载，运行中不支持新增或更换已训练说话人");
+        }
+    }
+    Ok(())
+}
 
 impl LocalService {
     pub(crate) async fn get_streaming_replay_snapshot_impl(
@@ -102,6 +257,9 @@ impl LocalService {
                 description: speaker.description,
                 speaker_dir_name: speaker.speaker_dir_name,
                 category: speaker.category,
+                side: speaker.side,
+                avatar_path: speaker.avatar_path,
+                avatar_name: speaker.avatar_name,
             })
             .collect::<Vec<_>>();
 
@@ -150,32 +308,8 @@ impl LocalService {
                 selected_model_info.supported_devices
             );
         }
-        if payload.speakers.is_empty() {
-            bail!("流式语音会话至少需要一个说话人");
-        }
-        // trained 说话人校验：一会话至多一个 trained，且必须提供 speakerDirName；
-        // voice-clone（category 缺省视为 voice-clone）须有参考音频。
-        let trained_count = payload
-            .speakers
-            .iter()
-            .filter(|s| s.category == "trained")
-            .count();
-        if trained_count > 1 {
-            bail!("流式会话至多支持一个已训练说话人");
-        }
-        for s in &payload.speakers {
-            if s.category == "trained" {
-                if s.speaker_dir_name
-                    .as_deref()
-                    .map(str::is_empty)
-                    .unwrap_or(true)
-                {
-                    bail!("已训练说话人必须提供 speakerDirName");
-                }
-            } else if s.ref_audio_path.trim().is_empty() {
-                bail!("语音克隆说话人必须提供参考音频");
-            }
-        }
+        // 说话人基础校验（创建与热更新共用）：非空、trained 约束、参考音频约束。
+        validate_streaming_speakers(&payload.speakers)?;
 
         let mut model_params = payload.model_params.clone();
         let title = super::build_task_title("流式语音", None, &create_time);
@@ -204,6 +338,12 @@ impl LocalService {
             HistoryTaskType::StreamingSpeech,
             task_id,
         )?;
+        // 头像复制进任务 sample 目录（同 voice-clone 参考音频模式）；未配置头像跳过。
+        let speaker_avatar_paths = ingest_streaming_speaker_avatars(
+            Path::new(self.data_dir()),
+            &sample_dir,
+            &payload.speakers,
+        )?;
         super::copy_model_param_files(
             &base_model,
             HistoryTaskType::StreamingSpeech,
@@ -228,7 +368,8 @@ impl LocalService {
                 speakers: payload
                     .speakers
                     .iter()
-                    .map(|s| StreamingSpeaker {
+                    .enumerate()
+                    .map(|(idx, s)| StreamingSpeaker {
                         id: s.name.clone(),
                         name: s.name.clone(),
                         base_model: s.base_model.trim().to_string(),
@@ -239,6 +380,9 @@ impl LocalService {
                         description: s.description.clone(),
                         speaker_dir_name: s.speaker_dir_name.clone(),
                         category: s.category.clone(),
+                        side: s.side.clone(),
+                        avatar_path: speaker_avatar_paths[idx].clone(),
+                        avatar_name: s.avatar_name.clone(),
                     })
                     .collect(),
             },
@@ -448,9 +592,11 @@ impl LocalService {
                 // 若 runner 已先行 remove（终帧已到），则不下发，避免成功后误报错误。
                 if let Ok(mut guard) = extra.message_channels.write() {
                     if let Some(mc) = guard.remove(&context_id) {
-                        let _ = mc.on_event.send(
-                            crate::service::pipeline::streaming::error_event("流式生成超时".into()),
-                        );
+                        let _ = mc
+                            .on_event
+                            .send(crate::service::pipeline::streaming::error_event(
+                                "流式生成超时".into(),
+                            ));
                     }
                 }
                 bail!("流式生成超时（contextId={context_id}）");
@@ -480,6 +626,238 @@ impl LocalService {
     pub(crate) async fn cancel_streaming_task_impl(&self, task_id: i64) -> Result<bool> {
         // 复用既有取消信号路径（watch::Sender -> runner kill child）
         self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)
+    }
+
+    /// 读取说话人头像字节（前端 Blob URL 显示用）。头像文件在任务创建时已复制进
+    /// sample 目录，路径以 %DATA_DIR_PATH% 序列化形式存于 context.json 的 speaker 条目。
+    pub(crate) async fn read_streaming_speaker_avatar_impl(
+        &self,
+        history_id: i64,
+        speaker_name: &str,
+    ) -> Result<StreamingSpeakerAvatarAsset> {
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {history_id}"))?;
+
+        let data_dir = Path::new(self.data_dir());
+        let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
+        let context: StreamingContextJson =
+            serde_json::from_str(&std::fs::read_to_string(context_json_path)?)?;
+        let speaker = context
+            .basic
+            .speakers
+            .into_iter()
+            .find(|s| s.name == speaker_name)
+            .ok_or_else(|| anyhow::anyhow!("说话人不存在: {speaker_name}"))?;
+        let avatar_path = speaker
+            .avatar_path
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("说话人 {speaker_name} 未配置头像"))?;
+
+        let resolved_avatar_path = resolve_task_path(data_dir, &avatar_path);
+        let bytes = tokio::fs::read(&resolved_avatar_path)
+            .await
+            .map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("读取说话人头像失败: {}", resolved_avatar_path.display()),
+                )
+            })?;
+        let file_name = speaker.avatar_name.unwrap_or_else(|| {
+            resolved_avatar_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "avatar".to_string())
+        });
+
+        Ok(StreamingSpeakerAvatarAsset {
+            history_id,
+            speaker_name: speaker_name.to_string(),
+            file_name,
+            content_type: streaming_avatar_content_type(&resolved_avatar_path).to_string(),
+            bytes,
+        })
+    }
+
+    /// 更新流式会话说话人列表（前端全量提交）：写回 context.json；会话进程运行中时
+    /// 经 0x11 speakers_update 帧通知 Python 热重建说话人表（含增量编码 voice prompt）。
+    /// 返回是否成功送达运行中会话（进程不在/通道关闭时仅落盘，下次会话启动生效）。
+    pub(crate) async fn update_streaming_speakers_impl(
+        &self,
+        history_id: i64,
+        speakers: &[StreamingSpeakerInput],
+    ) -> Result<UpdateStreamingSpeakersResult> {
+        let history = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到历史任务: {history_id}"))?;
+        if history.task_type != HistoryTaskType::StreamingSpeech.as_str() {
+            bail!("任务 {history_id} 不是流式语音会话");
+        }
+        validate_streaming_speakers(speakers)?;
+
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {history_id}"))?;
+
+        let data_dir = Path::new(self.data_dir());
+        let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
+        let sample_dir = context_json_path
+            .parent()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "无法定位流式会话 sample 目录: {}",
+                    context_json_path.display()
+                )
+            })?
+            .to_path_buf();
+
+        let extra = self.streaming_session_extra(history_id)?;
+        // 与 send_streaming_message 相同的 read-modify-write 串行化：会话运行中避免
+        // 对 context.json 的并发写入互相覆盖。
+        let context_lock = extra.as_ref().map(|extra| extra.context_lock.clone());
+        // Arc 需绑定到外层：guard 借用其内部 Mutex，不能让 Arc 在 guard 存活期间被释放
+        let _context_lock = context_lock;
+        let _guard = match _context_lock.as_ref() {
+            Some(lock) => Some(lock.lock().await),
+            None => None,
+        };
+
+        let mut context: StreamingContextJson =
+            serde_json::from_str(&std::fs::read_to_string(&context_json_path)?)?;
+
+        // 运行中会话的模型 checkpoint 已在启动时定死：新增/更换 trained 拒绝；
+        // 进程不在（历史回放/已结束会话）时仅落盘，下次会话启动重新选择模型。
+        if extra.is_some() {
+            validate_streaming_speakers_hot_update(&context.basic.speakers, speakers)?;
+        }
+
+        // 逐说话人 ingest 头像：
+        // - 已序列化路径（%DATA_DIR_PATH% 前缀，任务 sample 内）原样保留（未变更的常见路径）；
+        // - 新选文件（绝对路径）复制进 sample 目录并清理被替换的旧头像；
+        // - 清空时删除旧头像文件。
+        let mut new_speakers = Vec::with_capacity(speakers.len());
+        for (idx, input) in speakers.iter().enumerate() {
+            let old_avatar = context
+                .basic
+                .speakers
+                .iter()
+                .find(|s| s.name == input.name)
+                .and_then(|s| s.avatar_path.clone())
+                .filter(|p| !p.trim().is_empty());
+
+            let (avatar_path, avatar_name) =
+                match input
+                    .avatar_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    Some(raw) if is_serialized_task_path(raw) => {
+                        (input.avatar_path.clone(), input.avatar_name.clone())
+                    }
+                    Some(raw) => {
+                        let source = Path::new(raw);
+                        let target_name =
+                            streaming_avatar_target_file_name(idx, &input.name, source)?;
+                        let target = sample_dir.join(&target_name);
+                        std::fs::copy(source, &target).with_context(|| {
+                            format!(
+                                "复制说话人头像失败: {} -> {}",
+                                source.display(),
+                                target.display()
+                            )
+                        })?;
+                        if let Some(old) = old_avatar.as_deref() {
+                            let old_resolved = resolve_task_path(data_dir, old);
+                            if old_resolved != target {
+                                let _ = std::fs::remove_file(&old_resolved);
+                            }
+                        }
+                        let display_name = input
+                            .avatar_name
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| {
+                                source
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| target_name.clone())
+                            });
+                        (
+                            Some(serialize_task_path(data_dir, &target)),
+                            Some(display_name),
+                        )
+                    }
+                    // 头像被清空：删除旧文件（不存在则静默跳过）。
+                    None => {
+                        if let Some(old) = old_avatar.as_deref() {
+                            let _ = std::fs::remove_file(resolve_task_path(data_dir, old));
+                        }
+                        (None, None)
+                    }
+                };
+
+            new_speakers.push(StreamingSpeaker {
+                id: input.name.clone(),
+                name: input.name.clone(),
+                base_model: input.base_model.trim().to_string(),
+                model_version: input.model_version.clone(),
+                ref_audio_path: input.ref_audio_path.clone(),
+                ref_audio_name: input.ref_audio_name.clone(),
+                ref_text: input.ref_text.clone(),
+                description: input.description.clone(),
+                speaker_dir_name: input.speaker_dir_name.clone(),
+                category: input.category.clone(),
+                side: input.side.clone(),
+                avatar_path: avatar_path.clone(),
+                avatar_name: avatar_name.clone(),
+            });
+        }
+
+        // 被移除的说话人：尽力清理其旧头像文件（不存在则静默跳过）。
+        for old in &context.basic.speakers {
+            if !speakers.iter().any(|s| s.name == old.name) {
+                if let Some(old_avatar) = old
+                    .avatar_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    let _ = std::fs::remove_file(resolve_task_path(data_dir, old_avatar));
+                }
+            }
+        }
+
+        context.basic.speakers = new_speakers;
+        std::fs::write(&context_json_path, serde_json::to_vec_pretty(&context)?)?;
+
+        // 通知运行中的 Python 会话热重建说话人表（0x11 全量快照）。通道关闭
+        // （进程刚退出/会话刚结束）时仅落盘：context.json 是事实源，下次启动生效。
+        let mut applied_to_session = false;
+        if let Some(extra) = extra.as_ref() {
+            let frame_payload = serde_json::json!({ "speakers": speakers });
+            match extra.send_input_frame(encode_speakers_update_frame(&frame_payload.to_string()))
+            {
+                Ok(()) => applied_to_session = true,
+                Err(err) => warn!(
+                    "流式会话 {history_id} speakers_update 帧发送失败（仅落盘）: {err:#}"
+                ),
+            }
+        }
+
+        Ok(UpdateStreamingSpeakersResult {
+            applied_to_session,
+        })
     }
 
     /// 启动清扫：将上次应用退出后残留的 Running 流式会话标记为 Cancelled。
@@ -547,6 +925,9 @@ impl LocalService {
                 description: s.description,
                 speaker_dir_name: s.speaker_dir_name,
                 category: s.category,
+                side: s.side,
+                avatar_path: s.avatar_path,
+                avatar_name: s.avatar_name,
             })
             .collect();
 

@@ -103,6 +103,15 @@ pub struct StreamingSpeaker {
     /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
     #[serde(default)]
     pub category: String,
+    /// 消息展示侧："left" | "right"；空串/缺省视为 "right"。
+    #[serde(default)]
+    pub side: String,
+    /// 头像路径（任务创建时复制进 sample 目录后的 %DATA_DIR_PATH% 序列化路径）。
+    #[serde(default)]
+    pub avatar_path: Option<String>,
+    /// 头像原始文件名（展示用）。
+    #[serde(default)]
+    pub avatar_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

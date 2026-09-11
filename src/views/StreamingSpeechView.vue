@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Cog6ToothIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
+import { Cog6ToothIcon, EyeIcon, EyeSlashIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
@@ -7,7 +7,7 @@ import { useRoute, useRouter } from 'vue-router';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
-import StreamableAudioPlayer from '@/components/common/StreamableAudioPlayer.vue';
+import StreamingMessageItem from '@/components/streaming/StreamingMessageItem.vue';
 import StreamingConfigDrawer from '@/components/streaming/StreamingConfigDrawer.vue';
 import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY } from '@/enums/task';
@@ -18,6 +18,7 @@ import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { StreamingReplaySnapshot } from '@/types/domain';
+import type { StreamingSpeakerConfig } from '@/types/streaming';
 
 const store = useStreamingSpeechStore();
 const modelStore = useModelStore();
@@ -39,6 +40,8 @@ const selectedSpeakerId = ref<string | null>(null);
 const inputText = ref('');
 const messagesContainerRef = ref<HTMLElement | null>(null);
 const isStartSessionRequested = ref(false);
+/** 简洁展示模式：隐藏消息内的状态标签与播放/下载按钮，仅保留头像、昵称与文本。 */
+const compactMessages = ref(false);
 
 const canSend = computed(
   () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && store.activeTaskId !== null && !store.isStartingSession
@@ -47,7 +50,7 @@ const hasSpeakers = computed(() => store.speakers.length > 0);
 const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? '未选择');
 
 watch(
-  () => store.speakers,
+  () => store.speakers as StreamingSpeakerConfig[],
   speakers => {
     if (selectedSpeakerId.value !== null && speakers.some(speaker => speaker.id === selectedSpeakerId.value)) {
       return;
@@ -57,6 +60,8 @@ watch(
   { immediate: true, deep: true }
 );
 
+// 进出场动画只用 transform/opacity（不动画 height/margin），元素插入时 scrollHeight 即最终值，
+// nextTick 后直接滚到底部即可精确落点。
 const scrollToBottom = () => {
   nextTick(() => {
     const el = messagesContainerRef.value;
@@ -194,6 +199,16 @@ onMounted(async () => {
           <TrashIcon class="h-4 w-4" aria-hidden="true" />
           <span>清空对话</span>
         </BaseButton>
+        <BaseButton
+          tone="ghost"
+          size="sm"
+          :title="compactMessages ? '显示功能内容' : '隐藏功能内容'"
+          :aria-label="compactMessages ? '显示功能内容' : '隐藏功能内容'"
+          @click="compactMessages = !compactMessages"
+        >
+          <component :is="compactMessages ? EyeIcon : EyeSlashIcon" class="h-4 w-4" aria-hidden="true" />
+          <span>{{ compactMessages ? '显示功能' : '隐藏功能' }}</span>
+        </BaseButton>
         <BaseButton tone="ghost" size="sm" @click="store.openDrawer">
           <Cog6ToothIcon class="h-4 w-4" aria-hidden="true" />
           <span>配置</span>
@@ -202,7 +217,7 @@ onMounted(async () => {
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-brand-100/70 bg-white/88 shadow-soft backdrop-blur-sm">
-      <div ref="messagesContainerRef" class="flex-1 space-y-4 overflow-y-auto p-5">
+      <div ref="messagesContainerRef" class="relative flex-1 overflow-y-auto p-5">
         <div v-if="store.messages.length === 0" class="flex h-full items-center justify-center">
           <div class="text-center text-sm text-stone-500">
             <p class="text-base font-medium text-slate-700">开始流式语音对话</p>
@@ -211,40 +226,9 @@ onMounted(async () => {
           </div>
         </div>
 
-        <template v-else>
-          <div v-for="message in store.messages.filter(item => item.role === 'assistant')" :key="message.id" class="flex justify-end">
-            <div class="flex w-fit max-w-[92%] flex-col items-end sm:max-w-[82%]">
-              <div class="mb-1.5 flex items-center justify-end gap-2 text-[11px] text-stone-500">
-                <span class="truncate font-medium text-slate-600">{{ message.speakerName || '默认说话人' }}</span>
-                <span class="h-1 w-1 rounded-full bg-stone-300" />
-                <span
-                  class="shrink-0 rounded-full border px-2 py-0.5"
-                  :class="
-                    message.status === 'completed'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : message.status === 'error'
-                        ? 'border-rose-200 bg-rose-50 text-rose-700'
-                        : 'border-amber-200 bg-amber-50 text-amber-700'
-                  "
-                >
-                  {{ message.status === 'completed' ? '已完成' : message.status === 'error' ? '异常' : '生成中' }}
-                </span>
-              </div>
-
-              <div
-                class="relative max-w-full rounded-[18px] rounded-br-[8px] border border-sky-200/80 bg-sky-50/70 px-4 py-3 shadow-[0_10px_24px_rgba(14,116,144,0.08)]"
-              >
-                <p class="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{{ message.synthText || message.text }}</p>
-              </div>
-
-              <div class="mt-2 flex justify-end self-end">
-                <div class="max-w-[28rem]">
-                  <StreamableAudioPlayer mode="stream" :message-id="message.id" :audio-path="message.audioPath" :speaker-name="message.speakerName" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
+        <TransitionGroup tag="div" name="message-stack" class="space-y-4">
+          <StreamingMessageItem v-for="message in store.messages" :key="message.id" :message="message" :compact="compactMessages" />
+        </TransitionGroup>
       </div>
 
       <div class="border-t border-brand-100 p-4">
@@ -291,3 +275,31 @@ onMounted(async () => {
     />
   </div>
 </template>
+
+<style scoped>
+.message-stack-enter-active {
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+.message-stack-leave-active {
+  transition: opacity 160ms ease-in, transform 160ms ease-in;
+  /* 退场元素脱离文档流，避免回放重建时新旧列表高度叠加导致滚动跳动 */
+  position: absolute;
+  left: 1.25rem;
+  right: 1.25rem;
+}
+
+.message-stack-move {
+  transition: transform 200ms ease;
+}
+
+.message-stack-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.message-stack-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+</style>

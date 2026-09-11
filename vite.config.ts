@@ -34,7 +34,7 @@ export default defineConfig(async () => ({
       //    `src-model` contains Python venvs and downloaded model weights that can
       //    create tens of thousands of files during runtime initialisation, causing
       //    the chokidar watcher to exhaust the Node.js / V8 heap (OOM / Full GC).
-      ignored: ['**/src-tauri/**', '**/src-model/**']
+      ignored: ['**/src-tauri/**', '**/src-model/**', '**/ffmpeg-8.1.2/**']
     }
   }
 }));

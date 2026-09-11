@@ -6,7 +6,13 @@ import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
 import { useUiStore } from '@/stores/ui';
 import type { StreamingReplaySnapshot, StreamingSpeechTaskResult } from '@/types/domain';
-import type { StreamingChatMessage, StreamingSessionConfig, StreamingSpeakerCategory, StreamingSpeakerConfig } from '@/types/streaming';
+import type {
+  StreamingChatMessage,
+  StreamingSessionConfig,
+  StreamingSpeakerCategory,
+  StreamingSpeakerConfig,
+  StreamingSpeakerSide
+} from '@/types/streaming';
 
 /**
  * 需要参考文本的模型集合（对齐 TextToSpeechView 的 DYNAMIC_REFERENCE_BASE_MODELS）。
@@ -28,6 +34,12 @@ export interface StreamingSpeakerInput {
   category?: StreamingSpeakerCategory;
   /** trained 说话人 = speaker_id；voice-clone 无。 */
   speakerDirName?: string;
+  /** 消息展示侧，缺省视为 right。 */
+  side?: StreamingSpeakerSide;
+  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  avatarPath?: string;
+  /** 头像原始文件名（展示用）。 */
+  avatarName?: string;
 }
 
 interface AudioState {
@@ -41,16 +53,28 @@ interface AudioState {
  * 流式音频事件：chunk 为二进制载荷（ArrayBuffer，Tauri Channel Raw 路径），
  * started/finished/error 为 JSON 控制事件。
  */
-type AudioStreamEvent =
-  | { type: 'started' }
-  | { type: 'finished' }
-  | { type: 'error'; message: string }
-  | ArrayBuffer;
+type AudioStreamEvent = { type: 'started' } | { type: 'finished' } | { type: 'error'; message: string } | ArrayBuffer;
 
 let speakerSeed = 0;
 let messageSeed = 0;
 const nextSpeakerId = () => `spk-${++speakerSeed}`;
 const nextMessageId = () => `msg-${++messageSeed}`;
+
+/** 说话人配置 → 后端 StreamingSpeakerInput 映射（startSession 与 persistSpeakers 共用）。 */
+const toSpeakerPayload = (s: StreamingSpeakerConfig) => ({
+  name: s.name,
+  baseModel: s.baseModel,
+  modelVersion: s.modelVersion,
+  refAudioPath: s.refAudioPath,
+  refAudioName: s.refAudioName,
+  refText: s.refText,
+  description: s.description,
+  category: s.category,
+  speakerDirName: s.speakerDirName,
+  side: s.side,
+  avatarPath: s.avatarPath,
+  avatarName: s.avatarName
+});
 
 export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const uiStore = useUiStore();
@@ -58,6 +82,10 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const messages = ref<StreamingChatMessage[]>([]);
   const isDrawerOpen = ref(false);
   const activeTaskId = ref<number | null>(null);
+  /** 回放模式下的历史任务 id（回放不占用 activeTaskId，但头像同步仍需定位任务）。 */
+  const replayTaskId = ref<number | null>(null);
+  /** 头像缓存版本：clearAvatarUrls 递增，驱动已挂载的头像组件 watch 重载（替代旧的 messagesVersion 整列表重挂载）。 */
+  const avatarCacheVersion = ref(0);
   const isStartingSession = ref(false);
   const sessionConfig = reactive<StreamingSessionConfig>({
     baseModel: '',
@@ -128,7 +156,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     }
     revokeAudioUrl(messageId);
     // Blob 直接接受分块数组聚合，无需先拼接成单个缓冲
-    const blob = new Blob(chunks, { type: 'audio/wav' });
+    const blob = new Blob(chunks as BlobPart[], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
     audioUrls.value.set(messageId, { url, length: chunks.length });
     return url;
@@ -154,6 +182,73 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     audioUrls.value.set(messageId, { url: convertFileSrc(audioPath), length: -1 });
   };
 
+  /** 说话人头像 Blob URL 缓存：key 为 `${taskId}::${speakerName}`，值空串表示已确认无头像/加载失败。 */
+  const avatarUrls = ref(new Map<string, string>());
+
+  const clearAvatarUrls = () => {
+    for (const url of avatarUrls.value.values()) {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    }
+    avatarUrls.value.clear();
+    // 缓存已整体失效，递增版本号让已挂载的头像组件 watch 重载
+    avatarCacheVersion.value += 1;
+  };
+
+  const ensureSpeakerAvatar = async (taskId: number, speakerName: string): Promise<string | null> => {
+    const key = `${taskId}::${speakerName}`;
+    const cached = avatarUrls.value.get(key);
+    if (cached !== undefined) {
+      return cached || null;
+    }
+    try {
+      const asset = await invoke<{ fileName: string; contentType: string; bytes: number[] }>('get_streaming_speaker_avatar', {
+        historyId: taskId,
+        speakerName
+      });
+      const blob = new Blob([Uint8Array.from(asset.bytes)], { type: asset.contentType });
+      const url = URL.createObjectURL(blob);
+      avatarUrls.value.set(key, url);
+      return url;
+    } catch {
+      // 失败缓存空串，避免多消息场景下重复 invoke
+      avatarUrls.value.set(key, '');
+      return null;
+    }
+  };
+
+  /** 说话人列表持久化进行中标记（乐观更新已生效、后端写入未完成）。 */
+  const persistingSpeakers = ref(false);
+
+  /**
+   * 将当前说话人列表全量写入任务 context.json；会话运行中（activeTaskId）时后端
+   * 还会经 0x11 帧通知 Python 进程热重建说话人表，实现运行中即时生效。
+   * 乐观更新由调用方先行完成，这里在失败时回滚到调用前快照。
+   */
+  const persistSpeakers = async (snapshot: StreamingSpeakerConfig[]) => {
+    const taskId = activeTaskId.value ?? replayTaskId.value;
+    if (taskId === null) {
+      return;
+    }
+    persistingSpeakers.value = true;
+    try {
+      await invoke('update_streaming_speakers', {
+        payload: {
+          historyId: taskId,
+          speakers: speakers.value.map(toSpeakerPayload)
+        }
+      });
+      // 头像可能被替换/清空：失效缓存让已挂载头像组件重载（version 驱动 watch）
+      clearAvatarUrls();
+    } catch (error) {
+      speakers.value = snapshot;
+      uiStore.notifyError(`同步说话人配置失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      persistingSpeakers.value = false;
+    }
+  };
+
   const addSpeaker = (payload: StreamingSpeakerInput): StreamingSpeakerConfig => {
     const speaker: StreamingSpeakerConfig = {
       id: nextSpeakerId(),
@@ -165,27 +260,38 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       refAudioPath: payload.refAudioPath,
       refAudioName: payload.refAudioName,
       refText: payload.refText,
-      description: payload.description
+      description: payload.description,
+      side: payload.side ?? 'right',
+      avatarPath: payload.avatarPath,
+      avatarName: payload.avatarName
     };
+    const snapshot = speakers.value;
     speakers.value = [...speakers.value, speaker];
+    void persistSpeakers(snapshot);
     return speaker;
   };
 
   const updateSpeaker = (id: string, patch: Partial<StreamingSpeakerInput>) => {
+    const snapshot = speakers.value;
     speakers.value = speakers.value.map(item =>
       item.id === id
         ? {
             ...item,
+            // name 即说话人身份（context.json id = name），不支持改名
             ...patch,
+            name: item.name,
             id: item.id,
             category: item.category
           }
         : item
     );
+    void persistSpeakers(snapshot);
   };
 
   const removeSpeaker = (id: string) => {
+    const snapshot = speakers.value;
     speakers.value = speakers.value.filter(item => item.id !== id);
+    void persistSpeakers(snapshot);
   };
 
   const openDrawer = () => {
@@ -221,17 +327,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           device: sessionConfig.device,
           language: sessionConfig.language,
           modelParams: sessionConfig.modelParams,
-          speakers: speakers.value.map(s => ({
-            name: s.name,
-            baseModel: s.baseModel,
-            modelVersion: s.modelVersion,
-            refAudioPath: s.refAudioPath,
-            refAudioName: s.refAudioName,
-            refText: s.refText,
-            description: s.description,
-            category: s.category,
-            speakerDirName: s.speakerDirName
-          }))
+          speakers: speakers.value.map(toSpeakerPayload)
         }
       });
       activeTaskId.value = result.taskId;
@@ -255,40 +351,27 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       return;
     }
 
-    const userMessage: StreamingChatMessage = {
-      id: nextMessageId(),
-      role: 'user',
+    // 每个说话人即用户本身：每次发送只产生一条消息，contextId 即消息 id
+    // （后端以其命名 audio/<contextId>.wav）。
+    const messageId = nextMessageId();
+    const message: StreamingChatMessage = {
+      id: messageId,
       text: trimmed,
-      synthText: trimmed,
       speakerId,
       speakerName: speaker?.name,
       taskId,
-      contextId: '',
-      status: 'completed'
-    };
-    messages.value = [...messages.value, userMessage];
-
-    const assistantId = nextMessageId();
-    const assistantMessage: StreamingChatMessage = {
-      id: assistantId,
-      role: 'assistant',
-      text: '',
-      synthText: trimmed,
-      speakerId,
-      speakerName: speaker?.name,
-      taskId,
-      contextId: assistantId,
+      contextId: messageId,
       status: 'streaming'
     };
-    messages.value = [...messages.value, assistantMessage];
+    messages.value = [...messages.value, message];
 
-    const state = ensureAudioState(assistantId);
+    const state = ensureAudioState(messageId);
     state.isStreaming = true;
     state.hasData = false;
     state.streamComplete = false;
     state.errorMessage = null;
-    audioBuffers.value.delete(assistantId);
-    revokeAudioUrl(assistantId);
+    audioBuffers.value.delete(messageId);
+    revokeAudioUrl(messageId);
 
     const channel = new Channel<AudioStreamEvent>();
     channel.onmessage = (message: AudioStreamEvent) => {
@@ -296,10 +379,10 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       if (message instanceof ArrayBuffer) {
         state.isStreaming = true;
         state.hasData = true;
-        let chunks = audioBuffers.value.get(assistantId);
+        let chunks = audioBuffers.value.get(messageId);
         if (!chunks) {
           chunks = [];
-          audioBuffers.value.set(assistantId, chunks);
+          audioBuffers.value.set(messageId, chunks);
         }
         chunks.push(new Uint8Array(message));
         return;
@@ -311,14 +394,14 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
         case 'finished': {
           state.isStreaming = false;
           state.streamComplete = true;
-          updateMessageStatus(assistantId, 'completed');
+          updateMessageStatus(messageId, 'completed');
           break;
         }
         case 'error': {
           state.isStreaming = false;
           state.streamComplete = false;
           state.errorMessage = message.message;
-          updateMessageStatus(assistantId, 'error');
+          updateMessageStatus(messageId, 'error');
           uiStore.notifyError(`音频流式接收失败：${message.message}`);
           break;
         }
@@ -327,14 +410,14 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
 
     try {
       await invoke('send_streaming_message', {
-        payload: { taskId, contextId: assistantId, speakerName: speaker?.name ?? '', text: trimmed },
+        payload: { taskId, contextId: messageId, speakerName: speaker?.name ?? '', text: trimmed },
         onEvent: channel
       });
     } catch (error) {
       state.isStreaming = false;
       state.streamComplete = false;
       state.errorMessage = error instanceof Error ? error.message : String(error);
-      updateMessageStatus(assistantId, 'error');
+      updateMessageStatus(messageId, 'error');
       uiStore.notifyError(error instanceof Error ? error.message : String(error));
     }
   };
@@ -360,27 +443,37 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     for (const message of messages.value) {
       clearAudioForMessage(message.id);
     }
+    clearAvatarUrls();
     messages.value = [];
     activeTaskId.value = null;
+    replayTaskId.value = null;
   };
 
   const restoreFromReplaySnapshot = (snapshot: StreamingReplaySnapshot) => {
     for (const message of messages.value) {
       clearAudioForMessage(message.id);
     }
+    clearAvatarUrls();
+    replayTaskId.value = snapshot.taskId;
 
-    speakers.value = snapshot.speakers.map(speaker => ({
-      id: nextSpeakerId(),
-      category: speaker.category ?? 'voice-clone',
-      speakerDirName: speaker.speakerDirName,
-      name: speaker.name,
-      baseModel: speaker.baseModel,
-      modelVersion: speaker.modelVersion,
-      refAudioPath: speaker.refAudioPath,
-      refAudioName: speaker.refAudioName,
-      refText: speaker.refText,
-      description: speaker.description
-    }));
+    speakers.value = snapshot.speakers.map(
+      speaker =>
+        ({
+          id: nextSpeakerId(),
+          category: speaker.category ?? 'voice-clone',
+          speakerDirName: speaker.speakerDirName,
+          name: speaker.name,
+          baseModel: speaker.baseModel,
+          modelVersion: speaker.modelVersion,
+          refAudioPath: speaker.refAudioPath,
+          refAudioName: speaker.refAudioName,
+          refText: speaker.refText,
+          description: speaker.description,
+          side: speaker.side ?? 'right',
+          avatarPath: speaker.avatarPath,
+          avatarName: speaker.avatarName
+        }) as StreamingSpeakerConfig
+    );
 
     setSessionConfig({
       baseModel: snapshot.baseModel,
@@ -392,35 +485,22 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
 
     messages.value = [];
     for (const entry of snapshot.messages) {
-      const assistantMessageId = entry.messageId ?? entry.contextId;
+      const messageId = entry.messageId ?? entry.contextId;
       const matchedSpeaker = speakers.value.find(speaker => speaker.name === entry.speakerName) ?? null;
 
-      const userMessage: StreamingChatMessage = {
-        id: nextMessageId(),
-        role: 'user',
+      const message: StreamingChatMessage = {
+        id: messageId,
         text: entry.text,
-        synthText: entry.text,
         speakerId: matchedSpeaker?.id ?? null,
         speakerName: entry.speakerName,
         taskId: snapshot.taskId,
-        contextId: `${assistantMessageId}-user`,
-        status: 'completed'
-      };
-      const assistantMessage: StreamingChatMessage = {
-        id: assistantMessageId,
-        role: 'assistant',
-        text: '',
-        synthText: entry.text,
-        speakerId: matchedSpeaker?.id ?? null,
-        speakerName: entry.speakerName,
-        taskId: snapshot.taskId,
-        contextId: assistantMessageId,
+        contextId: messageId,
         audioPath: entry.audioPath,
         status: 'completed'
       };
 
-      messages.value.push(userMessage, assistantMessage);
-      setAudioPathForMessage(assistantMessageId, entry.audioPath ?? null);
+      messages.value.push(message);
+      setAudioPathForMessage(messageId, entry.audioPath ?? null);
     }
   };
 
@@ -429,6 +509,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     messages,
     isDrawerOpen,
     activeTaskId,
+    replayTaskId,
     isStartingSession,
     sessionConfig,
     audioStates,
@@ -438,6 +519,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     addSpeaker,
     updateSpeaker,
     removeSpeaker,
+    persistingSpeakers,
     openDrawer,
     closeDrawer,
     toggleDrawer,
@@ -449,6 +531,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     updateMessageStatus,
     clearMessages,
     getAudioUrl,
-    setAudioPathForMessage
+    setAudioPathForMessage,
+    ensureSpeakerAvatar,
+    avatarCacheVersion
   };
 });

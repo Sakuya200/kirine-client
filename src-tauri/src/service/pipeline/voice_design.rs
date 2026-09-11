@@ -242,6 +242,13 @@ pub(crate) async fn run_common_voice_design_pipeline(
 
     if let Err(err) = result {
         let duration_seconds = started_at.elapsed().as_secs() as i64;
+        super::record_task_failure_log(
+            service,
+            HistoryTaskType::VoiceDesign,
+            task_id,
+            base_model,
+            &err,
+        );
         if let Err(update_err) =
             mark_voice_design_failed_state(service, task_id, duration_seconds).await
         {
