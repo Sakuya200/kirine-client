@@ -21,7 +21,7 @@ pub use crate::service::pipeline::api::{
     PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
     VoiceCloneArgs, VoiceDesignArgs,
 };
-pub use crate::service::pipeline::build_llm_task_script_args;
+pub use crate::service::pipeline::{build_llm_task_script_args, record_task_failure_log};
 pub use crate::service::pipeline::streaming::{
     error_event, frame_to_event, parse_streaming_frame, serialize_input_entry,
     StreamingContextBasic, StreamingContextJson, StreamingFrame, StreamingFramePayload,
@@ -56,6 +56,30 @@ impl LocalServiceHarness {
         let model_dir = root_dir.join("models");
         let service =
             LocalService::from_paths(root_dir.clone(), data_dir.clone(), model_dir.clone()).await?;
+
+        Ok(Self {
+            root_dir,
+            data_dir,
+            model_dir,
+            service,
+        })
+    }
+
+    /// 以显式日志目录构造服务（默认构造的 `EnvConfig` 无 log_dir，会回退到
+    /// `current_exe` 相对路径，测试无法对日志落盘位置做确定性断言）。
+    pub async fn new_with_log_dir(label: &str, log_dir: &std::path::Path) -> Result<Self> {
+        let root_dir = test_root(label);
+        let data_dir = root_dir.join("data");
+        let model_dir = root_dir.join("models");
+        let mut runtime_config = crate::config::EnvConfig::default();
+        runtime_config.basic.log_dir = Some(log_dir.to_string_lossy().to_string());
+        let service = LocalService::from_paths_with_config(
+            root_dir.clone(),
+            data_dir.clone(),
+            model_dir.clone(),
+            runtime_config,
+        )
+        .await?;
 
         Ok(Self {
             root_dir,

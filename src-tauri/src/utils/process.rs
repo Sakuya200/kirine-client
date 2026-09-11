@@ -67,9 +67,28 @@ fn bundled_tool_path_prefix() -> Option<&'static OsString> {
                 return None;
             }
             parts.push(existing);
-            std::env::join_paths(&parts).ok()
+            Some(join_path_entries(&parts))
         })
         .as_ref()
+}
+
+/// 以 `;` 拼接 PATH 条目。
+///
+/// NOTE: 故意不用 `std::env::join_paths`——它在 Windows 上会给含 `;` 的组件包上
+/// 双引号（继承而来的完整 PATH 必然含 `;`），产出形如
+/// `D:\tools;"C:\Windows\system32;..."` 的值。子进程按 `;` 朴素切分且不剥引号，
+/// 首尾条目会变成 `"C:\Windows\system32` 这类带引号的非法路径，曾导致子脚本中
+/// cmd.exe / nvidia-smi 解析失败。PATH 环境变量值从不做引号解析，直接拼接才是
+/// 正确语义。
+pub fn join_path_entries(parts: &[OsString]) -> OsString {
+    let mut joined = OsString::new();
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            joined.push(";");
+        }
+        joined.push(part);
+    }
+    joined
 }
 
 fn prepare_command_with_stdio(

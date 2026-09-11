@@ -93,22 +93,85 @@ function Invoke-LoggedCommand {
     }
 }
 
-function Convert-ToCmdArgument {
+function Initialize-VisualStudioEnvironment {
+    # VsDevCmd.bat's batch parsing is sensitive to the inherited environment:
+    # on some machines a PATH entry (e.g. legacy NVIDIA PhysX with parentheses
+    # and spaces) makes the cmd parser die with "\X was unexpected at this
+    # time." inside Microsoft's own scripts, which no quoting on our side can
+    # avoid. Use the standard "clean-environment capture" technique (as
+    # CMake/conda-build do): run VsDevCmd once against a minimal, guaranteed
+    # batch-parse-safe system PATH, capture its `set` output, then merge the
+    # VS environment into the real session. Application PATH entries therefore
+    # never reach the batch parser, while python still gets the full VS env.
+    #
+    # Returns $true when the VS environment has been merged into this session
+    # (caller then invokes python directly); $false on setup failure (caller
+    # falls back to invoking python without the VS environment).
     param(
-        [Parameter(Mandatory = $false)]
-        [AllowNull()]
-        [string]$Value
+        [Parameter(Mandatory = $true)]
+        [string]$VsDevCmdPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$CmdExe
     )
 
-    if ($null -eq $Value) {
-        return '""'
+    $savedPath = $env:PATH
+    $setupPath = @(
+        [Environment]::SystemDirectory,
+        (Join-Path $env:SystemRoot 'System32\Wbem'),
+        (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')
+    ) -join ';'
+
+    $setupOutput = $null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $env:PATH = $setupPath
+        $ErrorActionPreference = 'Continue'
+        # /s: let cmd strip only the outermost quotes and keep the inner
+        # quotes around the VsDevCmd path. stderr is merged into the success
+        # stream purely for log visibility; the parser below filters by
+        # [string] type, so error records are skipped safely.
+        $setupOutput = & $CmdExe /d /s /c ('call "{0}" -arch=x64 -no_logo && set' -f $VsDevCmdPath) 2>&1
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        $env:PATH = $savedPath
     }
 
-    if ($Value -match '[\s"&|<>^]') {
-        return '"' + $Value.Replace('"', '\"') + '"'
+    if ($LASTEXITCODE -ne 0) {
+        return $false
     }
 
-    return $Value
+    $setupVars = @{}
+    foreach ($line in @($setupOutput)) {
+        if ($line -isnot [string]) {
+            continue
+        }
+        $separatorIndex = $line.IndexOf('=')
+        if ($separatorIndex -gt 0) {
+            $setupVars[$line.Substring(0, $separatorIndex)] = $line.Substring($separatorIndex + 1)
+        }
+    }
+
+    if (-not $setupVars.ContainsKey('PATH')) {
+        return $false
+    }
+
+    foreach ($key in @($setupVars.Keys)) {
+        if ($key -ieq 'PATH') {
+            continue
+        }
+        Set-Item -Path ("env:{0}" -f $key) -Value $setupVars[$key]
+    }
+
+    # VS dirs (including the clean system base) first, the original PATH (with
+    # the app-injected ffmpeg/sox dirs and machine entries) afterwards, so both
+    # stay available at runtime.
+    $env:PATH = $setupVars['PATH'] + ';' + $savedPath
+    return $true
 }
 
 function Invoke-LoggedPythonCommand {
@@ -120,15 +183,24 @@ function Invoke-LoggedPythonCommand {
         [string[]]$PythonArguments
     )
 
+    # Resolve cmd.exe via an absolute path: the app's subprocess PATH is not
+    # guaranteed to contain System32 (it depends on the environment the app
+    # itself was launched with), so a bare 'cmd.exe' token can fail command
+    # resolution even on a healthy Windows install. Mirrors the SystemRoot-based
+    # chcp.com lookup in common.ps1.
+    $cmdExe = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'
     $vsDevCmdPath = Get-VisualStudioDeveloperCommandPrompt
-    if (-not [string]::IsNullOrWhiteSpace($vsDevCmdPath)) {
-        $commandLine = 'call "{0}" -arch=x64 -no_logo && set VSCMD_ARG_TGT_ARCH=x64 && {1}' -f $vsDevCmdPath, (Convert-ToCmdArgument -Value $PythonExecutable)
-        foreach ($argument in $PythonArguments) {
-            $commandLine += ' ' + (Convert-ToCmdArgument -Value $argument)
+    if (-not [string]::IsNullOrWhiteSpace($vsDevCmdPath) -and (Test-Path -LiteralPath $cmdExe)) {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Initializing VS dev environment: $vsDevCmdPath"
+        if (Initialize-VisualStudioEnvironment -VsDevCmdPath $vsDevCmdPath -CmdExe $cmdExe) {
+            Invoke-LoggedCommand -Description 'Running Python command' -Command $PythonExecutable -Arguments $PythonArguments
+            return
         }
 
-        Invoke-LoggedCommand -Description 'Running Python command' -Command 'cmd.exe' -Arguments @('/d', '/c', $commandLine)
-        return
+        # VS environment setup is a best-effort enhancement and must never
+        # break the task: fall back to invoking python directly (the behavior
+        # before VS integration was introduced).
+        Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] VS dev environment setup failed, falling back to direct python invocation."
     }
 
     Invoke-LoggedCommand -Description 'Running Python command' -Command $PythonExecutable -Arguments $PythonArguments
