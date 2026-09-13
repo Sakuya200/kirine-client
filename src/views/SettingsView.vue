@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { CheckBadgeIcon, FolderIcon } from '@heroicons/vue/24/outline';
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/vue';
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
@@ -16,7 +17,9 @@ import { setUiLanguage } from '@/hooks/useUiLanguage';
 import { i18n } from '@/locales';
 import { useUiStore } from '@/stores/ui';
 
-const settingTabs = ['连接配置', '模型资源', '缓存配置'];
+const { t } = useI18n();
+
+const settingTabs = computed(() => [t('settings.tabs.connection'), t('settings.tabs.model'), t('settings.tabs.cache')]);
 
 interface SettingsForm {
   apiUrl: string;
@@ -43,6 +46,7 @@ const DEFAULT_SETTINGS_FORM: SettingsForm = {
 };
 
 const form = reactive<SettingsForm>({ ...DEFAULT_SETTINGS_FORM });
+// 注意力实现为技术术语（SDPA 等），语言无关，不走 i18n
 const attnImplementationOptions = Object.values(AttentionImplementation).map(value => ({
   label: ATTENTION_IMPLEMENTATION_TEXT[value],
   value
@@ -53,11 +57,11 @@ const isSaving = ref(false);
 const uiStore = useUiStore();
 const settingsBusyLabel = computed(() => {
   if (isSaving.value) {
-    return '正在保存配置与迁移目录，请稍候';
+    return t('settings.loading.saving');
   }
 
   if (isLoading.value) {
-    return '正在读取当前配置';
+    return t('settings.loading.reading');
   }
 
   return '';
@@ -66,6 +70,8 @@ const settingsBusyLabel = computed(() => {
 const canSaveConnection = computed(() => !isLoading.value && !isSaving.value);
 
 const currentLanguage = computed(() => i18n.global.locale.value as UiLanguage);
+
+const listSeparator = computed(() => (currentLanguage.value === UiLanguage.English ? '; ' : '；'));
 
 const onLanguageChange = async (value: UiLanguage | string | number | boolean | null | undefined) => {
   if (typeof value === 'string') {
@@ -92,9 +98,9 @@ const loadSettings = async () => {
   try {
     const payload = await invoke<SettingsResponse>('get_settings_config');
     applySettings(payload);
-    uiStore.notifySuccess('已加载当前配置。', 2400);
+    uiStore.notifySuccess(t('settings.notice.loaded'), 2400);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('读取配置失败，请检查 Rust 后端和配置文件', error));
+    uiStore.notifyError(formatErrorMessage(t('settings.notice.loadFailed'), error));
   } finally {
     isLoading.value = false;
   }
@@ -121,16 +127,18 @@ const saveSettings = async (section: 'connection' | 'model' | 'cache') => {
       }
     });
     applySettings(payload);
-    uiStore.notifySuccess(section === 'connection' ? '连接配置已保存。' : section === 'model' ? '模型资源配置已保存。' : '缓存配置已保存。');
+    uiStore.notifySuccess(
+      section === 'connection' ? t('settings.notice.savedConnection') : section === 'model' ? t('settings.notice.savedModel') : t('settings.notice.savedCache')
+    );
     if (payload.restartRequired && payload.migratedDirectories.length > 0) {
       const cleanupHint =
         payload.removableDirectories.length > 0
-          ? `旧目录内容仍保留，可在确认新目录正常后手动删除：${payload.removableDirectories.join('；')}`
-          : '模型旧目录内容已自动清理。';
-      uiStore.notifyWarning(`已迁移${payload.migratedDirectories.join('、')}，请重启应用以切换到新目录。${cleanupHint}`, 7600);
+          ? t('settings.notice.cleanupHint', { dirs: payload.removableDirectories.join(listSeparator.value) })
+          : t('settings.notice.cleanedHint');
+      uiStore.notifyWarning(t('settings.notice.migrated', { dirs: payload.migratedDirectories.join(listSeparator.value) }) + cleanupHint, 7600);
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('保存配置失败，请检查填写内容或后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('settings.notice.saveFailed'), error));
   } finally {
     isSaving.value = false;
   }
@@ -143,13 +151,13 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="设置" description="管理服务连接、模型资源与数据日志路径。" eyebrow="Settings" />
+    <PageHeader :title="t('settings.title')" :description="t('settings.description')" eyebrow="Settings" />
 
     <BaseLoadingBanner v-if="settingsBusyLabel" :label="settingsBusyLabel" />
 
-    <PanelCard title="系统设置">
+    <PanelCard :title="t('settings.panelTitle')">
       <div class="mb-4 flex items-center gap-3">
-        <span class="text-sm text-stone-600">界面语言</span>
+        <span class="text-sm text-stone-600">{{ t('settings.uiLanguage.label') }}</span>
         <div class="w-48">
           <BaseListbox
             :model-value="currentLanguage"
@@ -174,65 +182,65 @@ onMounted(async () => {
         <TabPanels>
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">Server URL</span>
-              <input v-model="form.apiUrl" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入服务地址" />
+              <span class="mb-1 block text-xs text-stone-500">{{ t('settings.connection.serverUrl') }}</span>
+              <input v-model="form.apiUrl" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" :placeholder="t('settings.connection.serverUrlPlaceholder')" />
             </label>
             <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">API Token</span>
-              <input v-model="form.apiToken" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入访问令牌" />
+              <span class="mb-1 block text-xs text-stone-500">{{ t('settings.connection.apiToken') }}</span>
+              <input v-model="form.apiToken" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" :placeholder="t('settings.connection.apiTokenPlaceholder')" />
             </label>
             <BaseButton :loading="isSaving" :disabled="!canSaveConnection" @click="saveSettings('connection')">
               <CheckBadgeIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isSaving ? '保存中...' : '保存连接配置' }}</span>
+              <span>{{ isSaving ? t('common.saving') : t('settings.connection.save') }}</span>
             </BaseButton>
           </TabPanel>
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <p class="rounded-xl border border-brand-100 bg-brand-50/70 px-3 py-2 text-xs leading-5 text-stone-600">
-              这里维护本地模型资源目录，以及统一的 Qwen 模型注意力实现。任务执行设备已经迁移到各任务页面与模型安装界面单独选择。
+              {{ t('settings.model.hint') }}
             </p>
             <label class="block">
-              <span class="mb-1 block text-xs text-stone-500">模型目录</span>
-              <input v-model="form.modelDir" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" placeholder="请输入模型目录" />
+              <span class="mb-1 block text-xs text-stone-500">{{ t('settings.model.modelDir') }}</span>
+              <input v-model="form.modelDir" class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2" :placeholder="t('settings.model.modelDirPlaceholder')" />
             </label>
             <BaseListbox
               v-model="form.attnImplementation"
               v-model:selected-option="selectedAttnImplementationOption"
-              label="注意力实现"
+              :label="t('settings.model.attnLabel')"
               :options="attnImplementationOptions"
             />
             <BaseButton tone="ghost" :loading="isSaving" :disabled="!canSaveModel" @click="saveSettings('model')">
               <FolderIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isSaving ? '保存中...' : '保存资源配置' }}</span>
+              <span>{{ isSaving ? t('common.saving') : t('settings.model.save') }}</span>
             </BaseButton>
           </TabPanel>
 
           <TabPanel class="space-y-3 text-sm text-slate-700">
             <section class="space-y-3 rounded-2xl border border-brand-100 bg-stone-50/80 p-4">
               <header class="space-y-1">
-                <h3 class="text-sm font-semibold text-stone-700">缓存配置</h3>
-                <p class="text-xs text-stone-500">数据目录同时作为训练缓存与本地业务数据根目录，日志目录单独配置。</p>
+                <h3 class="text-sm font-semibold text-stone-700">{{ t('settings.cache.header') }}</h3>
+                <p class="text-xs text-stone-500">{{ t('settings.cache.hint') }}</p>
               </header>
               <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">数据目录</span>
+                <span class="mb-1 block text-xs text-stone-500">{{ t('settings.cache.dataDir') }}</span>
                 <input
                   v-model="form.dataDir"
                   class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                  placeholder="请输入数据目录路径"
+                  :placeholder="t('settings.cache.dataDirPlaceholder')"
                 />
               </label>
               <label class="block">
-                <span class="mb-1 block text-xs text-stone-500">日志缓存路径</span>
+                <span class="mb-1 block text-xs text-stone-500">{{ t('settings.cache.logDir') }}</span>
                 <input
                   v-model="form.logCacheDir"
                   class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-                  placeholder="请输入日志缓存路径"
+                  :placeholder="t('settings.cache.logDirPlaceholder')"
                 />
               </label>
             </section>
             <BaseButton tone="ghost" :loading="isSaving" :disabled="!canSaveCache" @click="saveSettings('cache')">
               <FolderIcon v-if="!isSaving" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isSaving ? '保存中...' : '保存缓存配置' }}</span>
+              <span>{{ isSaving ? t('common.saving') : t('settings.cache.save') }}</span>
             </BaseButton>
           </TabPanel>
         </TabPanels>

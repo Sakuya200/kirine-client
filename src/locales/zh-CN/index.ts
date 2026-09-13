@@ -1,3 +1,4 @@
 import common from './common';
+import settings from './settings';
 
-export default { common };
+export default { common, settings };
