@@ -216,3 +216,42 @@ fn task_param_config_deserializes_component_props_variants() {
     );
     assert_eq!(param.component_props.nullable, Some(false));
 }
+
+#[test]
+fn language_persists_and_round_trips() {
+    let _lock = serial_lock();
+    let temp = TempCwd::new("language");
+    fs::write(temp.path.join("config.toml"), "# stub\n").expect("write stub config");
+    temp.enter();
+
+    let mut config = EnvConfig::default();
+    config.basic.language = Some("en-US".to_string());
+    save_configs(&config).expect("failed to save config with language");
+
+    let persisted =
+        fs::read_to_string(temp.path.join("config.toml")).expect("failed to read persisted config");
+    assert!(
+        persisted.contains("language = \"en-US\""),
+        "persisted: {persisted}"
+    );
+
+    let reloaded = load_configs().expect("failed to reload config");
+    assert_eq!(reloaded.basic.language.as_deref(), Some("en-US"));
+}
+
+#[test]
+fn missing_language_field_defaults_to_none() {
+    let _lock = serial_lock();
+    let temp = TempCwd::new("language-legacy");
+
+    // 旧版配置文件没有 language 字段，load 后应为 None（不报错）
+    fs::write(
+        temp.path.join("config.toml"),
+        "[basic]\nmode = \"local\"\n",
+    )
+    .expect("failed to write legacy config fixture");
+    temp.enter();
+
+    let config = load_configs().expect("failed to load legacy config");
+    assert!(config.basic.language.is_none());
+}

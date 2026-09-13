@@ -30,6 +30,8 @@ pub struct BasicConfig {
     pub data_dir: Option<String>,
     pub log_dir: Option<String>,
     pub model_dir: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
