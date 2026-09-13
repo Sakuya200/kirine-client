@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowDownTrayIcon, ArrowPathIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
@@ -9,8 +10,8 @@ import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
-import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT, ModelInstallStatus } from '@/enums/status';
+import { HISTORY_TASK_TYPE_TEXT_KEY, HistoryTaskType } from '@/enums/task';
+import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT_KEY, ModelInstallStatus } from '@/enums/status';
 import { HardwareType, HARDWARE_TYPE_TEXT } from '@/enums/settings';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useModelStore } from '@/stores/models';
@@ -55,13 +56,15 @@ const modelBusyLabel = computed(() => {
   return '';
 });
 
-const featureLabelMap: Record<string, string> = {
-  [HistoryTaskType.TextToSpeech]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.TextToSpeech],
-  [HistoryTaskType.VoiceClone]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceClone],
-  [HistoryTaskType.ModelTraining]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.ModelTraining],
-  [HistoryTaskType.VoiceDesign]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.VoiceDesign],
-  [HistoryTaskType.StreamingSpeech]: HISTORY_TASK_TYPE_TEXT[HistoryTaskType.StreamingSpeech]
-};
+const { t } = useI18n();
+
+const featureLabelMap = computed<Record<string, string>>(() => ({
+  [HistoryTaskType.TextToSpeech]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.TextToSpeech]),
+  [HistoryTaskType.VoiceClone]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.VoiceClone]),
+  [HistoryTaskType.ModelTraining]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.ModelTraining]),
+  [HistoryTaskType.VoiceDesign]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.VoiceDesign]),
+  [HistoryTaskType.StreamingSpeech]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.StreamingSpeech])
+}));
 
 const refreshModels = async () => {
   await modelStore.loadModels();
@@ -240,7 +243,7 @@ onMounted(async () => {
               </td>
               <td class="py-3 align-middle">
                 <span class="rounded-full border px-2 py-1 text-[11px] font-medium" :class="MODEL_INSTALL_STATUS_STYLES[installStatusOf(item)]">
-                  {{ MODEL_INSTALL_STATUS_TEXT[installStatusOf(item)] }}
+                  {{ t(MODEL_INSTALL_STATUS_TEXT_KEY[installStatusOf(item)]) }}
                 </span>
               </td>
               <td class="py-3 align-middle">

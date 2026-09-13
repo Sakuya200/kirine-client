@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -32,7 +33,7 @@ import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
   MODEL_TRAINING_ANNOTATION_FORMAT_TEXT,
   MODEL_TRAINING_AUDIO_FILE_EXTENSIONS,
-  MODEL_TRAINING_SAMPLE_TYPE_TEXT,
+  MODEL_TRAINING_SAMPLE_TYPE_TEXT_KEY,
   ModelTrainingAnnotationFormat,
   ModelTrainingSampleType,
   type ModelTrainingOption
@@ -113,6 +114,7 @@ const detailReloadToken = ref(0);
 const modelStore = useModelStore();
 const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -964,7 +966,7 @@ usePollingResume(() => {
                     <div class="flex items-center gap-2">
                       <p class="text-sm font-semibold text-slate-800">{{ sample.title }}</p>
                       <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">
-                        {{ MODEL_TRAINING_SAMPLE_TYPE_TEXT[sample.type] }}
+                        {{ t(MODEL_TRAINING_SAMPLE_TYPE_TEXT_KEY[sample.type]) }}
                       </span>
                     </div>
                     <p class="mt-1 text-xs text-stone-500">{{ sample.detail }}</p>

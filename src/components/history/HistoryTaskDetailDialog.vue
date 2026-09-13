@@ -2,9 +2,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { StopCircleIcon } from '@heroicons/vue/24/outline';
 
-import { HISTORY_TASK_REPLAY_QUERY_KEY, HISTORY_TASK_ROUTE_PATH, HISTORY_TASK_TYPE_TEXT, HistoryTaskType } from '@/enums/task';
+import { HISTORY_TASK_REPLAY_QUERY_KEY, HISTORY_TASK_ROUTE_PATH, HISTORY_TASK_TYPE_TEXT_KEY, HistoryTaskType } from '@/enums/task';
 import { TaskStatus } from '@/enums/status';
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
@@ -35,6 +36,7 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
+const { t } = useI18n();
 const uiStore = useUiStore();
 const record = ref<HistoryRecord | null>(null);
 const isLoading = ref(false);
@@ -78,7 +80,7 @@ const dialogTitle = computed(() => {
     return isLoading.value ? '任务详情加载中' : '任务详情';
   }
 
-  return `${HISTORY_TASK_TYPE_TEXT[record.value.taskType]}详情`;
+  return t('common.taskTypeDetail', { type: t(HISTORY_TASK_TYPE_TEXT_KEY[record.value.taskType]) });
 });
 
 const canReplay = computed(() => Boolean(router));

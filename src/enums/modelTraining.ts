@@ -16,9 +16,9 @@ export interface ModelTrainingOption {
   value: AppLanguage;
 }
 
-export const MODEL_TRAINING_SAMPLE_TYPE_TEXT: Record<ModelTrainingSampleType, string> = {
-  [ModelTrainingSampleType.Single]: '单样本',
-  [ModelTrainingSampleType.Dataset]: '样本集'
+export const MODEL_TRAINING_SAMPLE_TYPE_TEXT_KEY: Record<ModelTrainingSampleType, string> = {
+  [ModelTrainingSampleType.Single]: 'common.modelTraining.sampleType.single',
+  [ModelTrainingSampleType.Dataset]: 'common.modelTraining.sampleType.dataset'
 };
 
 export const MODEL_TRAINING_ANNOTATION_FORMAT_TEXT: Record<ModelTrainingAnnotationFormat, string> = {

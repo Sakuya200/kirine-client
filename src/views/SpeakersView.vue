@@ -2,6 +2,7 @@
 import { ArrowDownTrayIcon, ArrowPathIcon, EyeIcon, FolderOpenIcon, PencilSquareIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline';
 import { open } from '@tauri-apps/plugin-dialog';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -9,7 +10,7 @@ import BaseListbox from '@/components/common/BaseListbox.vue';
 import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
-import { SPEAKER_STATUS_STYLES, SPEAKER_STATUS_TEXT, SpeakerStatus } from '@/enums/status';
+import { SPEAKER_STATUS_STYLES, SPEAKER_STATUS_TEXT_KEY, SpeakerStatus } from '@/enums/status';
 import { HistoryTaskType } from '@/enums/task';
 import { useModelStore } from '@/stores/models';
 import { useSpeakerStore } from '@/stores/speakers';
@@ -17,20 +18,22 @@ import type { SpeakerProfile } from '@/types/domain';
 
 type StatusFilterValue = 'all' | SpeakerStatus;
 
+const { t } = useI18n();
+
 const speakerStore = useSpeakerStore();
 const modelStore = useModelStore();
 const selectedSpeakerId = ref<number | null>(null);
 const deleteTargetId = ref<number | null>(null);
 const searchKeyword = ref('');
 
-const statusOptions: Array<{ value: StatusFilterValue; label: string }> = [
-  { value: 'all', label: '全部状态' },
-  { value: SpeakerStatus.Ready, label: SPEAKER_STATUS_TEXT[SpeakerStatus.Ready] },
-  { value: SpeakerStatus.Training, label: SPEAKER_STATUS_TEXT[SpeakerStatus.Training] },
-  { value: SpeakerStatus.Disabled, label: SPEAKER_STATUS_TEXT[SpeakerStatus.Disabled] }
-];
+const statusOptions = computed<Array<{ value: StatusFilterValue; label: string }>>(() => [
+  { value: 'all', label: t('common.allStatuses') },
+  { value: SpeakerStatus.Ready, label: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Ready]) },
+  { value: SpeakerStatus.Training, label: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Training]) },
+  { value: SpeakerStatus.Disabled, label: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Disabled]) }
+]);
 
-const selectedStatus = ref<StatusFilterValue>(statusOptions[0].value);
+const selectedStatus = ref<StatusFilterValue>('all');
 const isEditDialogOpen = ref(false);
 const isImportDialogOpen = ref(false);
 const isDeleteDialogOpen = ref(false);
@@ -78,11 +81,11 @@ const onStatusChange = (value: StatusFilterValue) => {
   speakerStore.setFilter({ status: value === 'all' ? null : value });
 };
 
-const statusLabelMap: Record<SpeakerStatus, string> = {
-  [SpeakerStatus.Ready]: SPEAKER_STATUS_TEXT[SpeakerStatus.Ready],
-  [SpeakerStatus.Training]: SPEAKER_STATUS_TEXT[SpeakerStatus.Training],
-  [SpeakerStatus.Disabled]: SPEAKER_STATUS_TEXT[SpeakerStatus.Disabled]
-};
+const statusLabelMap = computed<Record<SpeakerStatus, string>>(() => ({
+  [SpeakerStatus.Ready]: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Ready]),
+  [SpeakerStatus.Training]: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Training]),
+  [SpeakerStatus.Disabled]: t(SPEAKER_STATUS_TEXT_KEY[SpeakerStatus.Disabled])
+}));
 
 const statusClassMap: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Ready]: SPEAKER_STATUS_STYLES[SpeakerStatus.Ready],

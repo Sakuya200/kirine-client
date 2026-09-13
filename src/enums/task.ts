@@ -27,10 +27,10 @@ export const getHistoryTaskReplayId = (value: string | null | Array<string | nul
   return Number.isSafeInteger(historyId) && historyId > 0 ? historyId : null;
 };
 
-export const HISTORY_TASK_TYPE_TEXT: Record<HistoryTaskType, string> = {
-  [HistoryTaskType.ModelTraining]: '模型微调',
-  [HistoryTaskType.TextToSpeech]: '文本转语音',
-  [HistoryTaskType.VoiceClone]: '声音克隆',
-  [HistoryTaskType.VoiceDesign]: '音色设计',
-  [HistoryTaskType.StreamingSpeech]: '流式语音'
+export const HISTORY_TASK_TYPE_TEXT_KEY: Record<HistoryTaskType, string> = {
+  [HistoryTaskType.ModelTraining]: 'common.historyTaskType.modelTraining',
+  [HistoryTaskType.TextToSpeech]: 'common.historyTaskType.textToSpeech',
+  [HistoryTaskType.VoiceClone]: 'common.historyTaskType.voiceClone',
+  [HistoryTaskType.VoiceDesign]: 'common.historyTaskType.voiceDesign',
+  [HistoryTaskType.StreamingSpeech]: 'common.historyTaskType.streamingSpeech'
 };
