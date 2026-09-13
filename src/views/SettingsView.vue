@@ -9,8 +9,11 @@ import BaseLoadingBanner from '@/components/common/BaseLoadingBanner.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
+import { UiLanguage, UI_LANGUAGE_OPTIONS } from '@/enums/uiLanguage';
 import { ATTENTION_IMPLEMENTATION_TEXT, AttentionImplementation } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { setUiLanguage } from '@/hooks/useUiLanguage';
+import { i18n } from '@/locales';
 import { useUiStore } from '@/stores/ui';
 
 const settingTabs = ['连接配置', '模型资源', '缓存配置'];
@@ -61,6 +64,14 @@ const settingsBusyLabel = computed(() => {
 });
 
 const canSaveConnection = computed(() => !isLoading.value && !isSaving.value);
+
+const currentLanguage = computed(() => i18n.global.locale.value as UiLanguage);
+
+const onLanguageChange = async (value: UiLanguage | string | number | boolean | null | undefined) => {
+  if (typeof value === 'string') {
+    await setUiLanguage(value as UiLanguage);
+  }
+};
 
 const canSaveModel = computed(() => !isLoading.value && !isSaving.value);
 
@@ -137,6 +148,17 @@ onMounted(async () => {
     <BaseLoadingBanner v-if="settingsBusyLabel" :label="settingsBusyLabel" />
 
     <PanelCard title="系统设置">
+      <div class="mb-4 flex items-center gap-3">
+        <span class="text-sm text-stone-600">界面语言</span>
+        <div class="w-48">
+          <BaseListbox
+            :model-value="currentLanguage"
+            :options="UI_LANGUAGE_OPTIONS"
+            @update:model-value="onLanguageChange"
+          />
+        </div>
+      </div>
+
       <TabGroup>
         <TabList class="mb-4 flex flex-wrap gap-2">
           <Tab v-for="tab in settingTabs" :key="tab" v-slot="{ selected }" as="template">

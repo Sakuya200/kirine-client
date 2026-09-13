@@ -17,6 +17,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router';
 
 import BaseTopNoticeBar from '@/components/common/BaseTopNoticeBar.vue';
 import { HistoryTaskType } from '@/enums/task';
+import { initUiLanguage } from '@/hooks/useUiLanguage';
 import { appRoutes } from '@/routers';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
@@ -41,6 +42,7 @@ const navIcons: Record<string, Component> = {
 
 onMounted(() => {
   void uiConfigStore.ensureLoaded();
+  void initUiLanguage();
 });
 </script>
 
