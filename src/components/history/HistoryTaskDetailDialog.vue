@@ -54,7 +54,7 @@ const loadDetailRecord = async () => {
     });
   } catch (error) {
     record.value = null;
-    uiStore.notifyError(formatErrorMessage('读取任务详情失败，请检查历史记录是否仍然存在', error));
+    uiStore.notifyError(formatErrorMessage(t('history.taskDetail.loadFailed'), error));
   } finally {
     isLoading.value = false;
   }
@@ -77,7 +77,7 @@ watch(
 
 const dialogTitle = computed(() => {
   if (!record.value) {
-    return isLoading.value ? '任务详情加载中' : '任务详情';
+    return isLoading.value ? t('history.taskDetail.loading') : t('history.taskDetail.title');
   }
 
   return t('common.taskTypeDetail', { type: t(HISTORY_TASK_TYPE_TEXT_KEY[record.value.taskType]) });
@@ -111,41 +111,41 @@ const requestCancel = (record: HistoryRecord | null) => {
 
 <template>
   <BaseDialog :open="open" :title="dialogTitle" panel-class="max-w-4xl" content-class="max-h-[60vh] overflow-y-auto pr-2" @close="emit('close')">
-    <div v-if="isLoading" class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-sm text-stone-600">正在加载任务详情...</div>
+    <div v-if="isLoading" class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 text-sm text-stone-600">{{ t('history.taskDetail.loadingText') }}</div>
     <div v-if="record" class="space-y-4 text-sm text-slate-600">
       <div class="grid gap-3 md:grid-cols-2">
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">任务 ID</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.taskId') }}</p>
           <p class="mt-1 font-mono font-semibold text-slate-800">{{ record.id }}</p>
         </article>
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">任务状态</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.taskStatus') }}</p>
           <div class="mt-2">
             <StatusPill :status="record.status" />
           </div>
         </article>
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">任务名称</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.taskName') }}</p>
           <p class="mt-1 font-semibold text-slate-800">{{ record.title }}</p>
         </article>
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">说话人</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.speaker') }}</p>
           <p class="mt-1 font-semibold text-slate-800">{{ record.speaker }}</p>
         </article>
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">创建时间</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.createTime') }}</p>
           <p class="mt-1 font-semibold text-slate-800">{{ record.createTime }}</p>
         </article>
         <article class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-xs text-stone-500">最近更新时间</p>
+          <p class="text-xs text-stone-500">{{ t('history.taskDetail.modifyTime') }}</p>
           <p class="mt-1 font-semibold text-slate-800">{{ record.modifyTime }}</p>
         </article>
       </div>
 
       <section class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
         <div class="flex items-center justify-between gap-3">
-          <p class="text-sm font-semibold text-slate-800">任务参数</p>
-          <span class="text-xs text-stone-500">耗时 {{ formatDurationClock(record.durationSeconds) }}</span>
+          <p class="text-sm font-semibold text-slate-800">{{ t('history.taskDetail.params') }}</p>
+          <span class="text-xs text-stone-500">{{ t('history.taskDetail.duration', { duration: formatDurationClock(record.durationSeconds) }) }}</span>
         </div>
         <div class="mt-4">
           <ModelTrainingTaskDetailForm v-if="record.taskType === HistoryTaskType.ModelTraining" :record="record" />
@@ -157,20 +157,20 @@ const requestCancel = (record: HistoryRecord | null) => {
       </section>
 
       <section class="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
-        <p class="text-sm font-semibold text-slate-800">任务日志</p>
+        <p class="text-sm font-semibold text-slate-800">{{ t('history.taskDetail.logs') }}</p>
         <div class="mt-3 max-h-[22rem] overflow-y-auto rounded-xl bg-white/85 px-3 py-3 text-sm leading-6 text-slate-700">
           <pre v-if="record.taskLog" class="whitespace-pre-wrap break-words font-sans">{{ record.taskLog }}</pre>
-          <p v-else class="text-sm text-stone-500">暂无任务日志。</p>
+          <p v-else class="text-sm text-stone-500">{{ t('history.taskDetail.noLogs') }}</p>
         </div>
       </section>
     </div>
     <template #footer>
       <BaseButton v-if="canCancel" tone="quiet" @click="requestCancel(record)">
         <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
-        <span>终止任务</span>
+        <span>{{ t('history.taskDetail.cancelTask') }}</span>
       </BaseButton>
-      <BaseButton :disabled="!record || !canReplay" @click="replayTask(record)">再次执行</BaseButton>
-      <BaseButton tone="ghost" @click="emit('close')">关闭</BaseButton>
+      <BaseButton :disabled="!record || !canReplay" @click="replayTask(record)">{{ t('history.taskDetail.replay') }}</BaseButton>
+      <BaseButton tone="ghost" @click="emit('close')">{{ t('history.taskDetail.close') }}</BaseButton>
     </template>
   </BaseDialog>
 </template>
