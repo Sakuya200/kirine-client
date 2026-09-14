@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::error::AppError;
 use crate::service::{
     models::{
         CreateSpeakerPayload, ImportModelAsSpeakerPayload, PageRequest, SpeakerFilter, SpeakerInfo,
@@ -12,14 +13,14 @@ use crate::service::{
 pub async fn create_speaker_info(
     payload: CreateSpeakerPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<SpeakerInfo, String> {
+) -> std::result::Result<SpeakerInfo, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_speaker_info(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
@@ -54,14 +55,14 @@ pub async fn import_model_as_speaker(
 pub async fn update_speaker_info(
     payload: UpdateSpeakerPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<SpeakerInfo, String> {
+) -> std::result::Result<SpeakerInfo, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .update_speaker_info(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]

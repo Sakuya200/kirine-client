@@ -13,6 +13,7 @@ use tracing::error;
 mod client;
 mod common;
 mod config;
+pub mod error;
 mod hooks;
 mod migration;
 mod service;

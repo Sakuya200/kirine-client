@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::error::AppError;
 use crate::service::{
     models::{
         CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
@@ -23,14 +24,14 @@ pub enum AudioStreamEvent {
 pub async fn create_streaming_speech_task(
     payload: CreateStreamingSpeechTaskPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<StreamingSpeechTaskResult, String> {
+) -> std::result::Result<StreamingSpeechTaskResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_streaming_speech_task(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
@@ -52,14 +53,14 @@ pub async fn send_streaming_message(
 pub async fn cancel_streaming_task(
     task_id: i64,
     state: State<'_, ServiceState>,
-) -> std::result::Result<bool, String> {
+) -> std::result::Result<bool, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .cancel_streaming_task(task_id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
@@ -95,12 +96,12 @@ pub async fn get_streaming_speaker_avatar(
 pub async fn update_streaming_speakers(
     payload: UpdateStreamingSpeakersPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<UpdateStreamingSpeakersResult, String> {
+) -> std::result::Result<UpdateStreamingSpeakersResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .update_streaming_speakers(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }

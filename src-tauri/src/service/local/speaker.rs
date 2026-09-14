@@ -11,6 +11,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
+use crate::error::{codes, AppError};
 use crate::{
     config::HardwareType,
     service::{
@@ -155,16 +156,16 @@ impl LocalService {
         let source_model_dir = PathBuf::from(payload.source_model_dir_path.trim());
 
         if name.is_empty() {
-            bail!("说话人名称不能为空");
+            return Err(AppError::coded(codes::VALIDATION_SPEAKER_NAME_REQUIRED, "说话人名称不能为空").into_anyhow());
         }
         if description.is_empty() {
-            bail!("说话人描述不能为空");
+            return Err(AppError::coded(codes::VALIDATION_SPEAKER_DESCRIPTION_REQUIRED, "说话人描述不能为空").into_anyhow());
         }
         if base_model.is_empty() {
-            bail!("基础模型类型不能为空");
+            return Err(AppError::coded(codes::VALIDATION_BASE_MODEL_TYPE_REQUIRED, "基础模型类型不能为空").into_anyhow());
         }
         if model_version.is_empty() {
-            bail!("模型版本不能为空");
+            return Err(AppError::coded(codes::VALIDATION_MODEL_VERSION_REQUIRED, "模型版本不能为空").into_anyhow());
         }
         if !source_model_dir.is_dir() {
             bail!("模型目录不存在或不是目录: {}", source_model_dir.display());
