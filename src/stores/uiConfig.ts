@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
+import { i18n } from '@/locales';
 import type { UiConfigCatalog, TaskParamConfig, ComponentProps, ParamDefinition, SelectOption, VisibleWhenRule } from '@/types/uiConfig';
 
 const EMPTY_CATALOG: UiConfigCatalog = {
@@ -137,7 +138,7 @@ export const useUiConfigStore = defineStore('ui-config', () => {
       catalog.value = normalizeUiConfigCatalog(payload);
     } catch (error) {
       catalog.value = EMPTY_CATALOG;
-      uiStore.notifyError(formatErrorMessage('加载界面参数配置失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.uiConfig.loadFailed'), error));
     } finally {
       initialized.value = true;
       isLoading.value = false;

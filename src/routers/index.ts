@@ -16,55 +16,55 @@ export const appRoutes = [
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.ModelTraining],
     name: HistoryTaskType.ModelTraining,
-    meta: { title: '模型微调' },
+    meta: { title: 'common.historyTaskType.modelTraining' },
     component: ModelTrainingView
   },
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.TextToSpeech],
     name: HistoryTaskType.TextToSpeech,
-    meta: { title: '文本转语音' },
+    meta: { title: 'common.historyTaskType.textToSpeech' },
     component: TextToSpeechView
   },
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.VoiceClone],
     name: HistoryTaskType.VoiceClone,
-    meta: { title: '声音克隆' },
+    meta: { title: 'common.historyTaskType.voiceClone' },
     component: VoiceCloneView
   },
   {
     path: HISTORY_TASK_ROUTE_PATH[HistoryTaskType.VoiceDesign],
     name: HistoryTaskType.VoiceDesign,
-    meta: { title: '音色设计' },
+    meta: { title: 'common.historyTaskType.voiceDesign' },
     component: VoiceDesignView
   },
   {
     path: '/streaming-speech',
     name: 'streaming-speech',
-    meta: { title: '流式语音' },
+    meta: { title: 'common.historyTaskType.streamingSpeech' },
     component: StreamingSpeechView
   },
   {
     path: '/models',
     name: 'models',
-    meta: { title: '模型管理' },
+    meta: { title: 'modelManage.title' },
     component: ModelManageView
   },
   {
     path: '/speakers',
     name: 'speakers',
-    meta: { title: '说话人管理' },
+    meta: { title: 'speakers.title' },
     component: SpeakersView
   },
   {
     path: '/history',
     name: 'history',
-    meta: { title: '历史任务' },
+    meta: { title: 'history.title' },
     component: HistoryView
   },
   {
     path: '/settings',
     name: 'settings',
-    meta: { title: '设置' },
+    meta: { title: 'settings.title' },
     component: SettingsView
   },
   {
@@ -74,7 +74,7 @@ export const appRoutes = [
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
-    meta: { title: '页面不存在' },
+    meta: { title: 'common.notFound.title' },
     component: NotFoundView
   }
 ];

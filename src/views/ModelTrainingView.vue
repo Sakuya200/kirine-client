@@ -27,7 +27,7 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
-import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
+import { AppLanguage, APP_LANGUAGE_SHORT_LABELS_KEY } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
@@ -164,7 +164,7 @@ const deviceOptions = computed(() =>
 const languageOptions = computed(() =>
   modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
     value: language,
-    label: APP_LANGUAGE_SHORT_LABELS[language] ?? language
+    label: t(APP_LANGUAGE_SHORT_LABELS_KEY[language]) ?? language
   }))
 );
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));

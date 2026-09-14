@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { i18n } from '@/locales';
 
 import { HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
@@ -84,7 +85,7 @@ export const useModelStore = defineStore('models', () => {
       items.value = rawItems.map(normalizeModelInfo);
     } catch (error) {
       items.value = [];
-      uiStore.notifyError(formatErrorMessage('加载模型列表失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.models.loadFailed'), error));
     } finally {
       initialized.value = true;
       isLoading.value = false;
@@ -115,11 +116,11 @@ export const useModelStore = defineStore('models', () => {
       };
       replaceModel(normalized.model);
       failedModelIds.value.delete(modelId);
-      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已安装。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.models.installed', { name: normalized.model.modelName, version: normalized.model.modelVersion }), 3200);
       return normalized;
     } catch (error) {
       failedModelIds.value.add(modelId);
-      uiStore.notifyError(formatErrorMessage('安装模型失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.models.installFailed'), error));
       return null;
     }
   };
@@ -133,10 +134,10 @@ export const useModelStore = defineStore('models', () => {
       };
       replaceModel(normalized.model);
       failedModelIds.value.delete(modelId);
-      uiStore.notifySuccess(`模型 ${normalized.model.modelName} ${normalized.model.modelVersion} 已卸载。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.models.uninstalled', { name: normalized.model.modelName, version: normalized.model.modelVersion }), 3200);
       return normalized;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('卸载模型失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.models.uninstallFailed'), error));
       return null;
     }
   };
@@ -144,13 +145,13 @@ export const useModelStore = defineStore('models', () => {
   const reinstallModel = async (modelId: number, device: HardwareType) => {
     const uninstalled = await uninstallModel(modelId);
     if (!uninstalled) {
-      uiStore.notifyWarning('模型卸载失败，无法继续重装，请重试卸载。', 4200);
+      uiStore.notifyWarning(i18n.global.t('common.store.models.reinstallAfterUninstallFailed'), 4200);
       return null;
     }
 
     const installed = await installModel(modelId, device);
     if (!installed) {
-      uiStore.notifyWarning('模型已卸载，但重装失败，请重试安装。', 4200);
+      uiStore.notifyWarning(i18n.global.t('common.store.models.reinstallAfterUninstall'), 4200);
       return null;
     }
 
@@ -171,7 +172,7 @@ export const useModelStore = defineStore('models', () => {
       replaceModel(normalized);
       return normalized;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('设置当前设备失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.models.setCurrentDeviceFailed'), error));
       return null;
     }
   };

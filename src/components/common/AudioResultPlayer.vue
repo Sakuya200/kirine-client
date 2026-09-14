@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowDownTrayIcon, PauseIcon, PlayIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import { TaskStatus } from '@/enums/status';
@@ -32,12 +33,14 @@ interface Props {
   downloadTone?: 'solid' | 'ghost' | 'quiet';
 }
 
+const { t } = useI18n();
+
 const props = withDefaults(defineProps<Props>(), {
   showDownload: true,
-  downloadLabel: '下载音频',
-  pendingMessage: '任务仍在执行中，音频结果会在状态变为“已完成”后显示。',
-  failedMessage: '任务执行失败，无音频结果。可在历史任务详情中查看「任务日志」了解失败原因。',
-  cancelledMessage: '任务已终止，无音频结果。',
+  downloadLabel: undefined,
+  pendingMessage: undefined,
+  failedMessage: undefined,
+  cancelledMessage: undefined,
   downloadTone: 'ghost'
 });
 
@@ -48,28 +51,28 @@ const { isPlaying, playbackProgress, currentPlaybackSeconds, playbackTotalSecond
   useTaskAudioPlayer<AudioPlayerTask>({
     loadAudioAsset: taskId => props.loadAudioAsset(taskId),
     onPlaybackEnded: () => {
-      uiStore.notifyInfo('音频播放结束。', 2200);
+      uiStore.notifyInfo(t('common.audio.ended'), 2200);
     },
     onPlaybackError: () => {
-      uiStore.notifyError('音频播放失败，请检查音频文件是否仍然可读。');
+      uiStore.notifyError(t('common.audio.playFailed'));
     },
     onPlayFailed: error => {
-      uiStore.notifyError(formatErrorMessage('音频播放失败，当前环境可能阻止了播放', error));
+      uiStore.notifyError(formatErrorMessage(t('common.audio.playBlocked'), error));
     }
   });
 
-const playbackActionLabel = computed(() => (isPlaying.value ? '暂停播放' : '播放音频'));
+const playbackActionLabel = computed(() => (isPlaying.value ? t('common.audio.pause') : t('common.audio.play')));
 const resolvedTotalSeconds = computed(() => playbackTotalSeconds.value);
 
 // 非完成态的占位提示按状态区分：失败/终止属于终态，不能再提示"仍在执行中"。
 const statusMessage = computed(() => {
   if (props.task?.status === TaskStatus.Failed) {
-    return props.failedMessage;
+    return props.failedMessage ?? t('common.audio.failedMessage');
   }
   if (props.task?.status === TaskStatus.Cancelled) {
-    return props.cancelledMessage;
+    return props.cancelledMessage ?? t('common.audio.cancelledMessage');
   }
-  return props.pendingMessage;
+  return props.pendingMessage ?? t('common.audio.pendingMessage');
 });
 
 const statusMessageTone = computed(() => {
@@ -81,29 +84,29 @@ const statusMessageTone = computed(() => {
 
 const handleTogglePlayback = () => {
   if (!props.task) {
-    uiStore.notifyWarning('当前还没有可播放的音频结果。');
+    uiStore.notifyWarning(t('common.audio.noResult'));
     return;
   }
 
   if (props.task.status !== TaskStatus.Completed) {
-    uiStore.notifyInfo('当前任务尚未完成，完成后才可播放音频。', 2600);
+    uiStore.notifyInfo(t('common.audio.notCompleted'), 2600);
     return;
   }
 
   const didStartPlayback = togglePlayback(props.task);
   if (!didStartPlayback && isPlaying.value === false) {
-    uiStore.notifyInfo('已暂停音频播放。', 2200);
+    uiStore.notifyInfo(t('common.audio.paused'), 2200);
   }
 };
 
 const handleDownload = async () => {
   if (!props.task || !props.downloadAudio) {
-    uiStore.notifyWarning('当前没有可下载的音频结果。');
+    uiStore.notifyWarning(t('common.audio.noDownload'));
     return;
   }
 
   if (props.task.status !== TaskStatus.Completed) {
-    uiStore.notifyInfo('当前任务尚未完成，请等待状态更新后再下载。', 3200);
+    uiStore.notifyInfo(t('common.audio.notCompletedDownload'), 3200);
     return;
   }
 
@@ -112,13 +115,13 @@ const handleDownload = async () => {
   try {
     const saved = await props.downloadAudio(props.task.taskId);
     if (!saved) {
-      uiStore.notifyInfo('已取消下载。', 2200);
+      uiStore.notifyInfo(t('common.audio.downloadCancelled'), 2200);
       return;
     }
 
-    uiStore.notifySuccess('音频已保存。', 3200);
+    uiStore.notifySuccess(t('common.audio.saved'), 3200);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('下载失败，请检查系统保存对话框权限和输出文件状态', error));
+    uiStore.notifyError(formatErrorMessage(t('common.audio.downloadFailed'), error));
   } finally {
     isDownloading.value = false;
   }
@@ -148,7 +151,7 @@ watch(
       </BaseButton>
       <BaseButton v-if="showDownload" :tone="downloadTone" :loading="isDownloading" :disabled="!downloadAudio" @click="handleDownload">
         <ArrowDownTrayIcon v-if="!isDownloading" class="h-4 w-4" aria-hidden="true" />
-        <span>{{ isDownloading ? '处理中...' : downloadLabel }}</span>
+        <span>{{ isDownloading ? t('common.loading') : (downloadLabel ?? t('common.audio.downloadLabel')) }}</span>
       </BaseButton>
     </div>
   </div>

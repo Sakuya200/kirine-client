@@ -128,5 +128,22 @@ export default {
     submitting: 'Creating the model training task.',
     created: 'Model training task created: {speaker}, task ID {taskId}, base model {model} {version}, {count} samples.',
     createFailed: 'Failed to create the model training task'
+  },
+  template: {
+    jsonlSaved: 'JSONL template saved.',
+    xlsxSaved: 'Excel template saved.',
+    saveFailed: 'Failed to save the template file',
+    jsonlDesc: 'One JSON object per line; suitable for scripted batch processing or version control.',
+    jsonlHint: "{'{'}\"audio\": \"speaker_001.wav\", \"text\": \"Enter the transcript here\"{'}'}",
+    xlsxDesc: 'File names in the first column, transcripts in the second; easy to edit directly in Excel.',
+    xlsxHint: 'Column 1 file name / Column 2 transcript',
+    dialogTitle: 'Download Annotation Templates',
+    downloading: 'Downloading...',
+    downloadXlsx: 'Download Excel Template',
+    downloadNamed: 'Download {title} Template',
+    oggHint: 'If the audio in the archive is OGG, the backend converts it to WAV before training and hands it to the model.',
+    dialogIntro: 'Choose a template format to download. The JSONL and Excel templates share the same data structure; the Excel import reads the file name from the first column and the transcript from the second.',
+    xlsxSupport: 'Excel import supports .xlsx and .xls.',
+    close: 'Close'
   }
 };

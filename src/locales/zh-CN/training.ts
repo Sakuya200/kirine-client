@@ -128,5 +128,22 @@ export default {
     submitting: '正在创建模型微调任务。',
     created: '模型微调任务已创建：{speaker}，任务 ID {taskId}，基础模型 {model} {version}，共 {count} 项样本。',
     createFailed: '模型微调任务创建失败'
+  },
+  template: {
+    jsonlSaved: 'JSONL 模板已保存。',
+    xlsxSaved: 'Excel 模板已保存。',
+    saveFailed: '保存模板文件失败',
+    jsonlDesc: '每行一个 JSON 对象，适合脚本批量处理或版本管理。',
+    jsonlHint: "{'{'}\"audio\": \"speaker_001.wav\", \"text\": \"这里填写台词\"{'}'}",
+    xlsxDesc: '首列填写文件名，第二列填写台词，适合直接用 Excel 编辑。',
+    xlsxHint: '第一列 文件名 / 第二列 台词',
+    dialogTitle: '下载数据标注模板',
+    downloading: '下载中...',
+    downloadXlsx: '下载Excel模板',
+    downloadNamed: '下载 {title} 模板',
+    oggHint: '如果压缩包中的音频是 OGG，后端会在训练前自动转成 WAV 后再交给模型处理。',
+    dialogIntro: '选择一种模板格式下载。JSONL 与 Excel 模板都使用相同的数据结构，Excel 导入时会读取第一列文件名与第二列台词。',
+    xlsxSupport: 'Excel 导入支持 .xlsx 与 .xls。',
+    close: '关闭'
   }
 };

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 interface Props {
   modelValue: boolean;
   label: string;
@@ -7,6 +8,8 @@ interface Props {
   textOn?: string;
   textOff?: string;
 }
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<Props>(), {
   description: '',
@@ -19,7 +22,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean];
 }>();
 
-const currentText = () => (props.modelValue ? props.textOn || props.text || '已启用' : props.textOff || props.text || '未启用');
+const currentText = () => (props.modelValue ? props.textOn || props.text || t('common.ui.enabled') : props.textOff || props.text || t('common.ui.disabled'));
 
 const onChange = (event: Event) => {
   emit('update:modelValue', (event.target as HTMLInputElement).checked);
