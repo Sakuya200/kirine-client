@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Cog6ToothIcon, EyeIcon, EyeSlashIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -21,6 +22,7 @@ import type { StreamingReplaySnapshot } from '@/types/domain';
 import type { StreamingSpeakerConfig } from '@/types/streaming';
 
 const store = useStreamingSpeechStore();
+const { t } = useI18n();
 const modelStore = useModelStore();
 const uiConfigStore = useUiConfigStore();
 const uiStore = useUiStore();
@@ -47,7 +49,7 @@ const canSend = computed(
   () => inputText.value.trim().length > 0 && selectedSpeakerId.value !== null && store.activeTaskId !== null && !store.isStartingSession
 );
 const hasSpeakers = computed(() => store.speakers.length > 0);
-const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? '未选择');
+const selectedSpeakerName = computed(() => store.getSpeaker(selectedSpeakerId.value)?.name ?? t('streaming.view.notSelected'));
 
 watch(
   () => store.speakers as StreamingSpeakerConfig[],
@@ -76,9 +78,9 @@ watch(() => store.messages.length, scrollToBottom);
 const send = async () => {
   if (!canSend.value) {
     if (!hasSpeakers.value) {
-      uiStore.notifyWarning('请先在配置抽屉中添加说话人。');
+      uiStore.notifyWarning(t('streaming.view.addSpeakerFirst'));
     } else if (store.activeTaskId === null) {
-      uiStore.notifyWarning('请先点击「开启会话」。');
+      uiStore.notifyWarning(t('streaming.view.startSessionFirst'));
     }
     return;
   }
@@ -132,7 +134,7 @@ const onSpeakerChange = (value: unknown) => {
 
 const clearMessages = () => {
   store.clearMessages();
-  uiStore.notifyInfo('已清空对话。', 2000);
+  uiStore.notifyInfo(t('streaming.view.cleared'), 2000);
 };
 
 const clearReplayTaskId = async () => {
@@ -158,9 +160,9 @@ const hydrateReplayTaskFromRoute = async () => {
     });
     store.restoreFromReplaySnapshot(snapshot);
 
-    uiStore.notifySuccess('已恢复流式会话配置、历史消息与音频片段。', 2600);
+    uiStore.notifySuccess(t('streaming.view.restored'), 2600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入流式语音历史会话失败，请检查任务记录是否仍然存在', error));
+    uiStore.notifyError(formatErrorMessage(t('streaming.view.restoreFailed'), error));
   } finally {
     await clearReplayTaskId();
   }
@@ -174,12 +176,12 @@ onMounted(async () => {
 
 <template>
   <div class="flex h-[calc(100vh-3.5rem)] flex-col gap-4">
-    <PageHeader title="流式语音" description="先开启会话，再输入文本生成实时语音。" eyebrow="Streaming Speech" />
+    <PageHeader :title="t('streaming.title')" :description="t('streaming.description')" eyebrow="Streaming Speech" />
 
     <div class="flex items-center justify-between gap-3">
       <p class="text-xs text-stone-500">
-        当前说话人：<span class="font-medium text-slate-700">{{ selectedSpeakerName }}</span>
-        · 回车发送，Shift+Enter 换行
+        <span class="text-stone-500">{{ t('streaming.view.currentSpeaker') }}</span><span class="font-medium text-slate-700">{{ selectedSpeakerName }}</span>
+        {{ t('streaming.view.inputHint') }}
       </p>
       <div class="flex gap-2">
         <BaseButton
@@ -189,29 +191,29 @@ onMounted(async () => {
           @click="startSession"
         >
           <PlayCircleIcon class="h-4 w-4" aria-hidden="true" />
-          <span>{{ store.isStartingSession || isStartSessionRequested ? '加载模型中…' : '开启会话' }}</span>
+          <span>{{ store.isStartingSession || isStartSessionRequested ? t('streaming.view.loadingModel') : t('streaming.view.startSession') }}</span>
         </BaseButton>
         <BaseButton tone="ghost" size="sm" :disabled="store.activeTaskId === null" @click="store.terminateSession">
           <StopCircleIcon class="h-4 w-4" aria-hidden="true" />
-          <span>终止会话</span>
+          <span>{{ t('streaming.view.stopSession') }}</span>
         </BaseButton>
         <BaseButton tone="ghost" size="sm" :disabled="store.messages.length === 0" @click="clearMessages">
           <TrashIcon class="h-4 w-4" aria-hidden="true" />
-          <span>清空对话</span>
+          <span>{{ t('streaming.view.clearMessages') }}</span>
         </BaseButton>
         <BaseButton
           tone="ghost"
           size="sm"
-          :title="compactMessages ? '显示功能内容' : '隐藏功能内容'"
-          :aria-label="compactMessages ? '显示功能内容' : '隐藏功能内容'"
+          :title="compactMessages ? t('streaming.view.showFeaturesTitle') : t('streaming.view.hideFeaturesTitle')"
+          :aria-label="compactMessages ? t('streaming.view.showFeaturesTitle') : t('streaming.view.hideFeaturesTitle')"
           @click="compactMessages = !compactMessages"
         >
           <component :is="compactMessages ? EyeIcon : EyeSlashIcon" class="h-4 w-4" aria-hidden="true" />
-          <span>{{ compactMessages ? '显示功能' : '隐藏功能' }}</span>
+          <span>{{ compactMessages ? t('streaming.view.showFeatures') : t('streaming.view.hideFeatures') }}</span>
         </BaseButton>
         <BaseButton tone="ghost" size="sm" @click="store.openDrawer">
           <Cog6ToothIcon class="h-4 w-4" aria-hidden="true" />
-          <span>配置</span>
+          <span>{{ t('streaming.view.settings') }}</span>
         </BaseButton>
       </div>
     </div>
@@ -220,9 +222,9 @@ onMounted(async () => {
       <div ref="messagesContainerRef" class="relative flex-1 overflow-y-auto p-5">
         <div v-if="store.messages.length === 0" class="flex h-full items-center justify-center">
           <div class="text-center text-sm text-stone-500">
-            <p class="text-base font-medium text-slate-700">开始流式语音对话</p>
-            <p class="mt-2">先点击「开启会话」，再输入文本即可生成实时语音。</p>
-            <p v-if="!hasSpeakers" class="mt-2 text-brand-700">尚未配置说话人，请先点击右上角「配置」添加。</p>
+            <p class="text-base font-medium text-slate-700">{{ t('streaming.view.emptyTitle') }}</p>
+            <p class="mt-2">{{ t('streaming.view.emptyHint') }}</p>
+            <p v-if="!hasSpeakers" class="mt-2 text-brand-700">{{ t('streaming.view.emptyNoSpeakers') }}</p>
           </div>
         </div>
 
@@ -237,15 +239,15 @@ onMounted(async () => {
             <BaseListbox
               :model-value="selectedSpeakerId"
               :options="store.speakerOptions"
-              label="说话人"
-              :placeholder="hasSpeakers ? '选择说话人' : '未配置说话人'"
+              :label="t('streaming.view.speaker')"
+              :placeholder="hasSpeakers ? t('streaming.view.speakerPlaceholderReady') : t('streaming.view.speakerPlaceholderNone')"
               :disabled="!hasSpeakers"
               @update:model-value="onSpeakerChange"
             />
           </div>
           <BaseButton class="w-20" :disabled="!canSend" @click="send">
             <PaperAirplaneIcon class="h-4 w-4" aria-hidden="true" />
-            <span>发送</span>
+            <span>{{ t('streaming.view.send') }}</span>
           </BaseButton>
         </div>
         <div>
@@ -253,7 +255,7 @@ onMounted(async () => {
             v-model="inputText"
             rows="2"
             class="min-h-[96px] w-full resize-none rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="输入要说的话，回车发送…"
+            :placeholder="t('streaming.view.inputPlaceholder')"
             @keydown="onTextareaKeydown"
           />
         </div>
@@ -267,8 +269,8 @@ onMounted(async () => {
       :title="deviceMismatchDialogTitle"
       :message="deviceMismatchDialogMessage"
       :details="deviceMismatchDialogDetails"
-      confirm-text="继续执行"
-      cancel-text="取消"
+      :confirm-text="t('streaming.view.confirmText')"
+      :cancel-text="t('common.cancel')"
       @confirm="confirmDeviceMismatchDialog"
       @cancel="closeDeviceMismatchDialog"
       @close="closeDeviceMismatchDialog"

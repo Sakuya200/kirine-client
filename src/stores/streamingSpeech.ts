@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { i18n } from '@/locales';
 
 import { AppLanguage } from '@/enums/language';
 import { HardwareType } from '@/enums/settings';
@@ -103,7 +104,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     speakers.value.map(speaker => ({
       label: speaker.name,
       value: speaker.id,
-      description: speaker.description || `参考音频：${speaker.refAudioName || '未设置'}`
+      description: speaker.description || i18n.global.t('streaming.store.speakerDescriptionFallback', { name: speaker.refAudioName || i18n.global.t('streaming.drawer.noRefAudio') })
     }))
   );
 
@@ -243,7 +244,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       clearAvatarUrls();
     } catch (error) {
       speakers.value = snapshot;
-      uiStore.notifyError(`同步说话人配置失败：${error instanceof Error ? error.message : String(error)}`);
+      uiStore.notifyError(i18n.global.t('streaming.store.syncSpeakersFailed', { message: error instanceof Error ? error.message : String(error) }));
     } finally {
       persistingSpeakers.value = false;
     }
@@ -313,10 +314,10 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       return;
     }
     if (speakers.value.length === 0) {
-      throw new Error('请先在配置抽屉中添加说话人。');
+      throw new Error(i18n.global.t('streaming.store.addSpeakerFirst'));
     }
     if (!sessionConfig.baseModel) {
-      throw new Error('请先选择模型。');
+      throw new Error(i18n.global.t('streaming.store.selectModelFirst'));
     }
     isStartingSession.value = true;
     try {
@@ -347,7 +348,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     const speaker = getSpeaker(speakerId);
     const taskId = activeTaskId.value;
     if (taskId === null) {
-      uiStore.notifyWarning('请先开启会话');
+      uiStore.notifyWarning(i18n.global.t('streaming.store.startSessionFirst'));
       return;
     }
 
@@ -402,7 +403,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           state.streamComplete = false;
           state.errorMessage = message.message;
           updateMessageStatus(messageId, 'error');
-          uiStore.notifyError(`音频流式接收失败：${message.message}`);
+          uiStore.notifyError(i18n.global.t('streaming.store.audioStreamFailed', { message: message.message }));
           break;
         }
       }
