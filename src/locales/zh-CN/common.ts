@@ -43,5 +43,12 @@ export default {
       single: '单样本',
       dataset: '样本集'
     }
+  },
+  textToSpeech: {
+    format: {
+      wav: 'WAV 无损',
+      mp3: 'MP3 压缩',
+      flac: 'FLAC 无损压缩'
+    }
   }
 };

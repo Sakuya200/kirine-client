@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -89,6 +90,7 @@ const normalizeVoiceDesignModelParams = (baseModel: string, modelParams: Record<
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -116,9 +118,9 @@ const form = reactive({
   modelParams: {} as Record<string, unknown>
 });
 
-const formatOptions = TEXT_TO_SPEECH_FORMATS;
+const formatOptions = computed(() => TEXT_TO_SPEECH_FORMATS.map(option => ({ ...option, label: t(option.label) })));
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
-const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions.value[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
@@ -296,7 +298,7 @@ watch(
 watch(
   () => form.format,
   next => {
-    selectedFormatOption.value = formatOptions.find(option => option.value === next) ?? null;
+    selectedFormatOption.value = formatOptions.value.find(option => option.value === next) ?? null;
   },
   { immediate: true }
 );
@@ -325,7 +327,7 @@ const mapResultPayload = (payload: VoiceDesignTaskResultPayload): VoiceDesignRes
   language: payload.language,
   languageLabel: APP_LANGUAGE_LABELS[payload.language] ?? payload.language,
   format: payload.format,
-  formatLabel: formatOptions.find(option => option.value === payload.format)?.label ?? payload.format,
+  formatLabel: t(TEXT_TO_SPEECH_FORMATS.find(option => option.value === payload.format)?.label ?? payload.format),
   exportAudioName: payload.exportAudioName,
   device: payload.device,
   durationSeconds: payload.durationSeconds,
@@ -350,7 +352,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceDesignResult | nu
     language: record.detail.language,
     languageLabel: APP_LANGUAGE_LABELS[record.detail.language] ?? record.detail.language,
     format: record.detail.format,
-    formatLabel: formatOptions.find(option => option.value === record.detail.format)?.label ?? record.detail.format,
+    formatLabel: t(TEXT_TO_SPEECH_FORMATS.find(option => option.value === record.detail.format)?.label ?? record.detail.format),
     exportAudioName: record.detail.exportAudioName,
     device: record.device,
     durationSeconds: record.durationSeconds,
@@ -637,7 +639,7 @@ const resetForm = () => {
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
@@ -646,7 +648,7 @@ onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });

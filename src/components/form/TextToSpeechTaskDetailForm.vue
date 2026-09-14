@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
@@ -13,10 +14,12 @@ interface Props {
 
 const props = defineProps<Props>();
 const modelStore = useModelStore();
+const { t } = useI18n();
 
-const formatLabel = computed(
-  () => TEXT_TO_SPEECH_FORMATS.find(option => option.value === props.record.detail.format)?.label ?? props.record.detail.format
-);
+const formatLabel = computed(() => {
+  const found = TEXT_TO_SPEECH_FORMATS.find(option => option.value === props.record.detail.format);
+  return found ? t(found.label) : props.record.detail.format;
+});
 const baseModelLabel = computed(() => modelStore.getModelLabel(props.record.detail.baseModel));
 const voicePrompt = computed(() => String(props.record.detail.modelParams.voicePrompt ?? ''));
 </script>

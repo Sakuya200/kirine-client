@@ -43,5 +43,12 @@ export default {
       single: 'Single Sample',
       dataset: 'Dataset'
     }
+  },
+  textToSpeech: {
+    format: {
+      wav: 'WAV (lossless)',
+      mp3: 'MP3 (compressed)',
+      flac: 'FLAC (lossless compression)'
+    }
   }
 };

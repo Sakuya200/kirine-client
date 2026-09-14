@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -97,6 +98,7 @@ const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<s
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -123,9 +125,9 @@ const form = reactive({
   text: '',
   modelParams: {} as Record<string, unknown>
 });
-const formatOptions = TEXT_TO_SPEECH_FORMATS;
+const formatOptions = computed(() => TEXT_TO_SPEECH_FORMATS.map(option => ({ ...option, label: t(option.label) })));
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
-const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions.value[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
@@ -320,7 +322,10 @@ watch(
 );
 
 const findLanguageLabel = (language: AppLanguage) => APP_LANGUAGE_LABELS[language] ?? language;
-const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
+const findFormatLabel = (format: TextToSpeechFormat) => {
+  const found = TEXT_TO_SPEECH_FORMATS.find(option => option.value === format);
+  return found ? t(found.label) : format;
+};
 
 const clearReplayTaskId = async () => {
   if (!(HISTORY_TASK_REPLAY_QUERY_KEY in route.query)) {
@@ -397,7 +402,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
 };
@@ -419,7 +424,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
 
   if (setAsActiveResult) {
@@ -726,7 +731,7 @@ const resetForm = () => {
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   uiStore.notifyInfo('表单已重置。', 2200);
 };
@@ -735,7 +740,7 @@ onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });

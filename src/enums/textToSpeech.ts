@@ -14,7 +14,7 @@ export interface TextToSpeechSpeakerOption extends TextToSpeechOption {
 }
 
 export const TEXT_TO_SPEECH_FORMATS: TextToSpeechOption[] = [
-  { value: TextToSpeechFormat.Wav, label: 'WAV 无损' },
-  { value: TextToSpeechFormat.Mp3, label: 'MP3 压缩' },
-  { value: TextToSpeechFormat.Flac, label: 'FLAC 无损压缩' }
+  { value: TextToSpeechFormat.Wav, label: 'common.textToSpeech.format.wav' },
+  { value: TextToSpeechFormat.Mp3, label: 'common.textToSpeech.format.mp3' },
+  { value: TextToSpeechFormat.Flac, label: 'common.textToSpeech.format.flac' }
 ];
