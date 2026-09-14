@@ -18,6 +18,7 @@ import { useModelStore } from '@/stores/models';
 import type { ModelInfo } from '@/types/domain';
 
 const modelStore = useModelStore();
+const { t } = useI18n();
 const isMutating = ref(false);
 const mutatingModelId = ref<number | null>(null);
 const mutatingAction = ref<'install' | 'uninstall' | 'reinstall' | null>(null);
@@ -46,17 +47,16 @@ const onSetPageSize = (next: number) => {
 const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
 const modelBusyLabel = computed(() => {
   if (isMutating.value) {
-    return '正在处理模型安装或卸载，请稍候';
+    return t('modelManage.busy.mutating');
   }
 
   if (modelStore.isLoading) {
-    return '正在加载模型列表';
+    return t('modelManage.busy.loading');
   }
 
   return '';
 });
 
-const { t } = useI18n();
 
 const featureLabelMap = computed<Record<string, string>>(() => ({
   [HistoryTaskType.TextToSpeech]: t(HISTORY_TASK_TYPE_TEXT_KEY[HistoryTaskType.TextToSpeech]),
@@ -186,15 +186,15 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="模型管理" description="查看系统支持的基础模型、功能支持情况和当前安装状态，并执行安装或卸载。" eyebrow="Model Management" />
+    <PageHeader :title="t('modelManage.title')" :description="t('modelManage.description')" eyebrow="Model Management" />
 
     <BaseLoadingBanner v-if="modelBusyLabel" :label="modelBusyLabel" :show-history-link="false" />
 
-    <PanelCard title="模型列表" subtitle="系统中可用的基础模型及其支持的功能和安装状态" class="relative">
+    <PanelCard :title="t('modelManage.panel.title')" :subtitle="t('modelManage.panel.subtitle')" class="relative">
       <template #actions>
         <BaseButton tone="ghost" :loading="modelStore.isLoading" :disabled="isMutating" @click="refreshModels">
           <ArrowPathIcon v-if="!modelStore.isLoading" class="h-4 w-4" aria-hidden="true" />
-          <span>{{ modelStore.isLoading ? '刷新中...' : '刷新列表' }}</span>
+          <span>{{ modelStore.isLoading ? t('modelManage.panel.refreshing') : t('modelManage.panel.refresh') }}</span>
         </BaseButton>
       </template>
 
@@ -202,13 +202,13 @@ onMounted(async () => {
         <table class="w-full min-w-[1080px] text-left text-sm">
           <thead>
             <tr class="border-b border-brand-100 text-xs uppercase tracking-wide text-stone-500">
-              <th class="py-3 align-middle">模型</th>
-              <th class="py-3 align-middle">版本</th>
-              <th class="py-3 align-middle">支持功能</th>
-              <th class="py-3 align-middle">依赖</th>
-              <th class="py-3 align-middle">当前设备</th>
-              <th class="py-3 align-middle">状态</th>
-              <th class="py-3 align-middle">操作</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.model') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.version') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.features') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.dependencies') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.currentDevice') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.status') }}</th>
+              <th class="py-3 align-middle">{{ t('modelManage.table.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -235,7 +235,7 @@ onMounted(async () => {
                     :model-value="effectiveDevice(item)"
                     :options="deviceOptions(item)"
                     :disabled="deviceSelectDisabled(item)"
-                    placeholder="请选择设备"
+                    :placeholder="t('modelManage.table.devicePlaceholder')"
                     teleport
                     @update:model-value="handleDeviceChange(item, $event as HardwareType)"
                   />
@@ -253,7 +253,7 @@ onMounted(async () => {
                     size="sm"
                     :loading="(mutatingAction === 'install' || mutatingAction === 'reinstall') && mutatingModelId === item.id"
                     :disabled="isMutating || effectiveDevice(item) === null"
-                    :title="effectiveDevice(item) === null ? '请先选择当前设备' : ''"
+                    :title="effectiveDevice(item) === null ? t('modelManage.table.deviceRequired') : ''"
                     @click="handleInstall(item.id)"
                   >
                     <ArrowDownTrayIcon
@@ -264,18 +264,18 @@ onMounted(async () => {
                     <span>
                       {{
                         mutatingModelId === item.id && mutatingAction === 'reinstall'
-                          ? '重装中...'
+                          ? t('modelManage.table.reinstalling')
                           : mutatingModelId === item.id && mutatingAction === 'install'
-                            ? '安装中...'
+                            ? t('modelManage.table.installing')
                             : item.downloaded
-                              ? '重装'
-                              : '安装'
+                              ? t('modelManage.table.reinstall')
+                              : t('modelManage.table.install')
                       }}
                     </span>
                   </BaseButton>
                   <BaseButton tone="quiet" size="sm" :disabled="isMutating || !item.downloaded" @click="requestUninstall(item.id)">
                     <TrashIcon class="h-4 w-4" aria-hidden="true" />
-                    <span>卸载</span>
+                    <span>{{ t('modelManage.table.uninstall') }}</span>
                   </BaseButton>
                 </div>
               </td>
@@ -285,7 +285,7 @@ onMounted(async () => {
       </div>
 
       <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
-        {{ modelStore.isLoading ? '正在加载模型列表...' : '当前没有可展示的模型信息。' }}
+        {{ modelStore.isLoading ? t('modelManage.panel.loading') : t('modelManage.panel.empty') }}
       </div>
 
       <div v-if="modelStore.items.length > 0" class="mt-4">
@@ -301,19 +301,19 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <BaseDialog :open="uninstallTarget !== null" title="卸载模型" @close="closeUninstallDialog">
+    <BaseDialog :open="uninstallTarget !== null" :title="t('modelManage.deleteDialog.title')" @close="closeUninstallDialog">
       <p class="text-sm text-slate-600">
         <template v-if="uninstallTarget">
-          将卸载模型“{{ uninstallTarget.modelName }} {{ uninstallTarget.modelVersion }}”的专属权重文件，并把状态改为未安装。共享依赖会保留。
+          {{ t('modelManage.deleteDialog.confirm', { name: uninstallTarget.modelName, version: uninstallTarget.modelVersion }) }}
         </template>
-        <template v-else>未找到要卸载的模型。</template>
+        <template v-else>{{ t('modelManage.deleteDialog.notFound') }}</template>
       </p>
       <template #footer>
         <BaseButton tone="ghost" @click="closeUninstallDialog">
-          <span>取消</span>
+          <span>{{ t('common.cancel') }}</span>
         </BaseButton>
         <BaseButton tone="quiet" :loading="isMutating" :disabled="!uninstallTarget || isMutating" @click="confirmUninstall">
-          <span>{{ isMutating ? '卸载中...' : '确认卸载' }}</span>
+          <span>{{ isMutating ? t('modelManage.deleteDialog.uninstalling') : t('modelManage.deleteDialog.confirmDelete') }}</span>
         </BaseButton>
       </template>
     </BaseDialog>

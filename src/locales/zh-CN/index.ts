@@ -1,6 +1,7 @@
 import common from './common';
 import errors from './errors';
 import history from './history';
+import modelManage from './modelManage';
 import settings from './settings';
 import speakers from './speakers';
 import streaming from './streaming';
@@ -9,4 +10,4 @@ import tts from './tts';
 import voiceClone from './voiceClone';
 import voiceDesign from './voiceDesign';
 
-export default { common, errors, history, settings, speakers, streaming, training, tts, voiceClone, voiceDesign };
+export default { common, errors, history, modelManage, settings, speakers, streaming, training, tts, voiceClone, voiceDesign };
