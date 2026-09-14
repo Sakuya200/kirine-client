@@ -169,7 +169,7 @@ const pageButtonClass =
       </button>
 
       <span class="ml-1 flex items-center gap-1 text-xs text-stone-500">
-        前往
+        {{ t('common.ui.jumpLabelPrefix') }}
         <input
           v-model="jumpInput"
           type="number"
@@ -180,7 +180,7 @@ const pageButtonClass =
           @keyup.enter="commitJump"
           @blur="commitJump"
         />
-        页
+        {{ t('common.ui.jumpLabelSuffix') }}
       </span>
     </div>
   </div>

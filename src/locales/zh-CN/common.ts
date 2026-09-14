@@ -60,6 +60,8 @@ export default {
     prevPage: '上一页',
     nextPage: '下一页',
     lastPage: '最后一页',
+    jumpLabelPrefix: '前往',
+    jumpLabelSuffix: '页',
     tooltipFallback: '显示提示信息',
     defaultSpeaker: '默认说话人',
     continue: '继续',
@@ -110,6 +112,11 @@ export default {
   },
   recentList: {
     actionLabel: '查看'
+  },
+  loadingBanner: {
+    historyHintPrefix: '可前往',
+    historyHintSuffix: '页面随时查询执行结果。',
+    waitHint: '当前页面会持续展示任务状态与执行结果，请不要切换页面，耐心等待，不要重复操作。'
   },
   deviceGuard: {
     title: '硬件环境确认',

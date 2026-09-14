@@ -1,5 +1,7 @@
 # Kirine Client 用户手册
 
+语言 / Language: [中文](README.md) | [English](README.en-US.md)
+
 Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持本地文本转语音、声音克隆、音色设计、模型训练、流式语音会话、说话人管理和历史任务管理。
 
 本项目的目标是实现一个通用的音频合成模型UI以及调度层实现，提供开箱即用的多模型音频合成功能，未来将引入更多的音频合成相关功能，b站功能介绍视频地址：https://www.bilibili.com/video/BV1MwLy6yEzU
@@ -35,8 +37,7 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 | VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
 | MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
 | MOSS-TTS Realtime | 1.7B | — | — | — | — | ✓ | CPU / CUDA |
-| GPT-SoVITS-CPUFast | V1 | ✓ | ✓ | — | — | — | CPU |
-| GPT-SoVITS-CPUFast | V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
+| GPT-SoVITS-CPUFast | V1 / V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
 
 ## 4. 快速上手
 

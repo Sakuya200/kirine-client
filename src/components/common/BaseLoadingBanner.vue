@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 
 import BaseLoadingIndicator from '@/components/common/BaseLoadingIndicator.vue';
 
@@ -11,6 +12,8 @@ interface Props {
 withDefaults(defineProps<Props>(), {
   showHistoryLink: true
 });
+
+const { t } = useI18n();
 </script>
 
 <template>
@@ -19,13 +22,13 @@ withDefaults(defineProps<Props>(), {
       <BaseLoadingIndicator size="lg" :label="label" />
       <p class="max-w-2xl text-xs leading-5 text-stone-500">
         <template v-if="showHistoryLink">
-          可前往
+          {{ t('common.loadingBanner.historyHintPrefix') }}
           <RouterLink to="/history" class="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800">
-            历史任务
+            {{ t('history.title') }}
           </RouterLink>
-          页面随时查询执行结果。
+          {{ t('common.loadingBanner.historyHintSuffix') }}
         </template>
-        <template v-else>当前页面会持续展示任务状态与执行结果，请不要切换页面，耐心等待，不要重复操作。</template>
+        <template v-else>{{ t('common.loadingBanner.waitHint') }}</template>
       </p>
     </div>
   </section>

@@ -60,6 +60,8 @@ export default {
     prevPage: 'Previous page',
     nextPage: 'Next page',
     lastPage: 'Last page',
+    jumpLabelPrefix: 'Go to page',
+    jumpLabelSuffix: '',
     tooltipFallback: 'Show tooltip',
     defaultSpeaker: 'Default speaker',
     continue: 'Continue',
@@ -110,6 +112,11 @@ export default {
   },
   recentList: {
     actionLabel: 'View'
+  },
+  loadingBanner: {
+    historyHintPrefix: 'Go to the',
+    historyHintSuffix: 'page at any time to check task results.',
+    waitHint: 'This page keeps showing the task status and results. Please stay on this page, wait patiently, and avoid repeating operations.'
   },
   deviceGuard: {
     title: 'Hardware Environment Confirmation',

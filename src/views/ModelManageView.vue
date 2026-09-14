@@ -216,18 +216,25 @@ onMounted(async () => {
               <td class="py-3 align-middle font-medium text-slate-900">{{ item.modelName }}</td>
               <td class="py-3 align-middle">{{ item.modelVersion }}</td>
               <td class="py-3 align-middle">
-                <div class="flex flex-wrap gap-1.5">
-                  <span
-                    v-for="feature in item.supportedFeatureList"
-                    :key="feature"
-                    class="rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] text-brand-700"
-                  >
-                    {{ featureLabelMap[feature] ?? feature }}
-                  </span>
+                <!-- 固定宽度 + 横向不换行：溢出时单元格内出现底部滚动条拖拽查看 -->
+                <div class="w-52 max-w-[13rem] overflow-x-auto">
+                  <div class="flex w-max flex-nowrap gap-1.5">
+                    <span
+                      v-for="feature in item.supportedFeatureList"
+                      :key="feature"
+                      class="shrink-0 whitespace-nowrap rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] text-brand-700"
+                    >
+                      {{ featureLabelMap[feature] ?? feature }}
+                    </span>
+                  </div>
                 </div>
               </td>
               <td class="py-3 align-middle text-xs text-stone-500">
-                <div v-for="name in item.requiredModelNameList" :key="name">{{ name }}</div>
+                <div class="w-40 max-w-[10rem] overflow-x-auto">
+                  <div class="flex w-max flex-nowrap items-center gap-2">
+                    <span v-for="name in item.requiredModelNameList" :key="name" class="shrink-0 whitespace-nowrap">{{ name }}</span>
+                  </div>
+                </div>
               </td>
               <td class="py-3 align-middle">
                 <div class="w-44">
