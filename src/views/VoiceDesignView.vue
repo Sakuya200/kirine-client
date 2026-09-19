@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -89,6 +90,7 @@ const normalizeVoiceDesignModelParams = (baseModel: string, modelParams: Record<
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -116,9 +118,9 @@ const form = reactive({
   modelParams: {} as Record<string, unknown>
 });
 
-const formatOptions = TEXT_TO_SPEECH_FORMATS;
+const formatOptions = computed(() => TEXT_TO_SPEECH_FORMATS.map(option => ({ ...option, label: t(option.label) })));
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
-const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions.value[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
@@ -176,11 +178,11 @@ const canCancelActiveTask = computed(() => {
   return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const designSummary = computed(() => [
-  `当前模型：${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}`,
-  `当前设备：${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}`,
-  `输出语言：${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}`,
-  `输出格式：${selectedFormatOption.value?.label ?? form.format}`,
-  `导出名称：${form.exportAudioName}`
+  t('voiceDesign.summary.model', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }),
+  t('voiceDesign.summary.device', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }),
+  t('voiceDesign.summary.language', { language: selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language] }),
+  t('voiceDesign.summary.format', { format: selectedFormatOption.value?.label ?? form.format }),
+  t('voiceDesign.summary.exportName', { name: form.exportAudioName })
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -193,29 +195,29 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
     taskId: item.taskId,
     title: item.fileName,
-    subtitle: `任务 ${item.taskId} · ${item.languageLabel} · ${item.exportAudioName}`,
+    subtitle: t('voiceDesign.recent.subtitle', { taskId: item.taskId, language: item.languageLabel, fileName: item.exportAudioName }),
     status: item.status
   }))
 );
 const activeTaskBusyLabel = computed(() => {
   if (isCancelling.value) {
-    return '正在发送终止请求...';
+    return t('voiceDesign.busy.cancelling');
   }
 
   if (isCheckingDeviceType.value) {
-    return '正在检查模型环境...';
+    return t('voiceDesign.busy.checkingDevice');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认硬件环境切换';
+    return t('voiceDesign.busy.awaitingDeviceConfirm');
   }
 
   if (isGenerating.value) {
-    return '正在创建音色设计任务...';
+    return t('voiceDesign.busy.creating');
   }
 
   if (activeResult.value?.status === TaskStatus.Pending || activeResult.value?.status === TaskStatus.Running) {
-    return '任务执行中，状态会自动刷新。';
+    return t('voiceDesign.busy.running');
   }
 
   return '';
@@ -223,14 +225,14 @@ const activeTaskBusyLabel = computed(() => {
 const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
 const submitButtonText = computed(() => {
   if (isCheckingDeviceType.value) {
-    return '检查环境中...';
+    return t('voiceDesign.submit.checking');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认...';
+    return t('voiceDesign.submit.awaitingConfirm');
   }
 
-  return isGenerating.value ? '生成中...' : '生成音频';
+  return isGenerating.value ? t('voiceDesign.submit.generating') : t('voiceDesign.submit.generate');
 });
 
 watch(
@@ -296,7 +298,7 @@ watch(
 watch(
   () => form.format,
   next => {
-    selectedFormatOption.value = formatOptions.find(option => option.value === next) ?? null;
+    selectedFormatOption.value = formatOptions.value.find(option => option.value === next) ?? null;
   },
   { immediate: true }
 );
@@ -325,7 +327,7 @@ const mapResultPayload = (payload: VoiceDesignTaskResultPayload): VoiceDesignRes
   language: payload.language,
   languageLabel: APP_LANGUAGE_LABELS[payload.language] ?? payload.language,
   format: payload.format,
-  formatLabel: formatOptions.find(option => option.value === payload.format)?.label ?? payload.format,
+  formatLabel: t(TEXT_TO_SPEECH_FORMATS.find(option => option.value === payload.format)?.label ?? payload.format),
   exportAudioName: payload.exportAudioName,
   device: payload.device,
   durationSeconds: payload.durationSeconds,
@@ -350,7 +352,7 @@ const mapHistoryRecordToResult = (record: HistoryRecord): VoiceDesignResult | nu
     language: record.detail.language,
     languageLabel: APP_LANGUAGE_LABELS[record.detail.language] ?? record.detail.language,
     format: record.detail.format,
-    formatLabel: formatOptions.find(option => option.value === record.detail.format)?.label ?? record.detail.format,
+    formatLabel: t(TEXT_TO_SPEECH_FORMATS.find(option => option.value === record.detail.format)?.label ?? record.detail.format),
     exportAudioName: record.detail.exportAudioName,
     device: record.device,
     durationSeconds: record.durationSeconds,
@@ -425,12 +427,12 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false, silent
       .slice(0, 5);
 
     if (notifyOnSuccess) {
-      uiStore.notifySuccess('音色设计任务状态已刷新。', 2200);
+      uiStore.notifySuccess(t('voiceDesign.notice.statusRefreshed'), 2200);
     }
   } catch (error) {
     generationHistory.value = [];
     if (!silentOnError) {
-      uiStore.notifyError(formatErrorMessage('刷新音色设计历史任务失败，请检查 Rust 后端日志。', error));
+      uiStore.notifyError(formatErrorMessage(t('voiceDesign.notice.refreshFailed'), error));
     }
   } finally {
     isHistoryRefreshInFlight = false;
@@ -483,7 +485,7 @@ const refreshActiveTaskStatus = async () => {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('刷新音色设计任务状态失败，请检查后端日志。', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceDesign.notice.refreshCurrentFailed'), error));
   } finally {
     if (generation === activeTaskRefreshGeneration) {
       isActiveTaskRefreshInFlight = false;
@@ -502,7 +504,7 @@ const hydrateReplayTaskFromRoute = async () => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId });
     const replayResult = mapHistoryRecordToResult(record);
     if (!replayResult) {
-      uiStore.notifyWarning('当前历史任务不是音色设计任务，无法回填。');
+      uiStore.notifyWarning(t('voiceDesign.notice.notDesignTask'));
       return;
     }
 
@@ -510,9 +512,9 @@ const hydrateReplayTaskFromRoute = async () => {
     activeResult.value = replayResult;
     setSelectedHistoryTaskId(replayResult.taskId, true);
     syncActiveTaskStatusRefresh();
-    uiStore.notifyInfo(`已回填任务 ${replayResult.taskId} 的参数，可直接再次生成。`, 3200);
+    uiStore.notifyInfo(t('voiceDesign.notice.replayFilled', { taskId: replayResult.taskId }), 3200);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('读取回放任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceDesign.notice.replayFailed'), error));
   } finally {
     if (!(HISTORY_TASK_REPLAY_QUERY_KEY in route.query)) {
       return;
@@ -535,7 +537,7 @@ watch(selectedHistoryTaskId, async taskId => {
     const result = mapHistoryRecordToResult(record);
 
     if (!result) {
-      uiStore.notifyWarning('当前记录不是音色设计任务。');
+      uiStore.notifyWarning(t('voiceDesign.notice.notDesignRecord'));
       return;
     }
 
@@ -543,7 +545,7 @@ watch(selectedHistoryTaskId, async taskId => {
     applyResultToForm(result);
     syncActiveTaskStatusRefresh();
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('加载历史任务详情失败，请检查后端日志。', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceDesign.notice.loadDetailFailed'), error));
   }
 });
 
@@ -562,7 +564,7 @@ const createTask = async () => {
   }
 
   isGenerating.value = true;
-  uiStore.notifyInfo('正在创建音色设计任务。', 2200);
+  uiStore.notifyInfo(t('voiceDesign.notice.submitting'), 2200);
 
   try {
     const payload = await invoke<VoiceDesignTaskResultPayload>('create_voice_design_task', {
@@ -583,9 +585,9 @@ const createTask = async () => {
     setSelectedHistoryTaskId(result.taskId, true);
     generationHistory.value = [result, ...generationHistory.value.filter(item => item.taskId !== result.taskId)].slice(0, 5);
     syncActiveTaskStatusRefresh();
-    uiStore.notifySuccess(`音色设计任务已创建，任务 ID ${result.taskId}。`, 3600);
+    uiStore.notifySuccess(t('voiceDesign.notice.created', { taskId: result.taskId }), 3600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('音色设计任务创建失败', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceDesign.notice.createFailed'), error));
   } finally {
     isGenerating.value = false;
   }
@@ -605,15 +607,15 @@ const cancelActiveTask = async () => {
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      uiStore.notifyWarning(t('tts.notice.alreadyCancelling'));
       return;
     }
 
-    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    uiStore.notifyInfo(t('tts.notice.cancelRequested', { taskId }), 3600);
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.cancelFailed'), error));
   } finally {
     isCancelling.value = false;
   }
@@ -637,16 +639,16 @@ const resetForm = () => {
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
-  uiStore.notifyInfo('表单已重置。', 2200);
+  uiStore.notifyInfo(t('voiceDesign.notice.formReset'), 2200);
 };
 
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });
@@ -663,30 +665,30 @@ usePollingResume(() => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="音色设计" description="输入音色描述与目标台词，生成符合指定风格的语音音频。" eyebrow="Voice-Design" />
+    <PageHeader :title="t('voiceDesign.title')" :description="t('voiceDesign.description')" eyebrow="Voice-Design" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="基础参数" subtitle="支持 qwen3_tts 的 1.7B 与 0.6B 版本，设备类型按任务单独选择。">
+      <PanelCard :title="t('voiceDesign.panels.basic')" :subtitle="t('voiceDesign.panels.basicSubtitle')">
         <div class="grid gap-4 md:grid-cols-2">
-          <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox v-model="form.baseModel" :label="t('tts.form.baseModel')" :options="modelOptions" />
+          <BaseListbox v-model="form.modelVersion" :label="t('tts.form.modelVersion')" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox
             v-model="form.device"
             v-model:selected-option="selectedDeviceOption"
-            label="设备类型"
+            :label="t('tts.form.deviceType')"
             :options="deviceOptions"
             :disabled="deviceOptions.length === 0"
           />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
-          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" :label="t('tts.form.language')" :options="languageOptions" />
+          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" :label="t('tts.form.format')" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ t('tts.form.exportAudioName') }}</span>
             <input
               v-model="form.exportAudioName"
               class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-              placeholder="例如 voice_design_demo"
+              :placeholder="t('voiceDesign.form.exportNamePlaceholder')"
             />
           </label>
         </div>
@@ -699,74 +701,74 @@ usePollingResume(() => {
           :meta-text="activeResultMetaText"
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
-          empty-text="还没有生成结果。完成音色描述和目标文本输入后，结果会显示在这里。"
+          :empty-text="t('voiceDesign.result.emptyText')"
           @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
-              <p>任务 ID：{{ activeResult.taskId }}</p>
-              <p>生成时间：{{ activeResult.createdAt }}</p>
-              <p>导出名称：{{ activeResult.exportAudioName }}</p>
-              <p class="pt-1 line-clamp-3 text-slate-700">音色描述：{{ activeResult.prompt }}</p>
+              <p>{{ t('voiceDesign.result.taskId', { id: activeResult.taskId }) }}</p>
+              <p>{{ t('voiceDesign.result.createdAt', { time: activeResult.createdAt }) }}</p>
+              <p>{{ t('voiceDesign.result.exportName', { name: activeResult.exportAudioName }) }}</p>
+              <p class="pt-1 line-clamp-3 text-slate-700">{{ t('voiceDesign.result.prompt', { text: activeResult.prompt }) }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
           </template>
         </GeneratedAudioResultCard>
 
-        <PanelCard title="最近任务" subtitle="展示最近 5 条音色设计任务，数据来自统一历史记录">
+        <PanelCard :title="t('voiceDesign.panels.recent')" :subtitle="t('voiceDesign.panels.recentSubtitle')">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ manual: true, notifyOnSuccess: true })">
               <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
+              <span>{{ isRefreshingHistory ? t('tts.form.refreshing') : t('tts.form.refresh') }}</span>
             </BaseButton>
           </template>
 
           <RecentTaskList
             :items="recentTaskItems"
             v-model:selected-task-id="selectedHistoryTaskId"
-            empty-text="还没有历史任务。生成音频后会自动加入这里。"
-            action-label="查看"
+            :empty-text="t('tts.result.historyEmptyText')"
+            :action-label="t('tts.form.view')"
           />
         </PanelCard>
       </div>
     </div>
 
-    <PanelCard class="z-20" title="生成参数" subtitle="输入音色描述 Prompt 与目标台词，生成符合需求的人声。">
+    <PanelCard class="z-20" :title="t('voiceDesign.panels.params')" :subtitle="t('voiceDesign.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block">
-          <span class="mb-1 block text-xs text-stone-500">音色描述 Prompt</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('voiceDesign.form.prompt') }}</span>
           <textarea
             v-model="form.prompt"
             rows="4"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="例如：体现温柔成熟的女声，语速平稳，音色偏暖，带轻微气声。"
+            :placeholder="t('voiceDesign.form.promptPlaceholder')"
           />
         </label>
 
         <label class="block">
-          <span class="mb-1 block text-xs text-stone-500">目标台词</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('voiceDesign.form.text') }}</span>
           <textarea
             v-model="form.text"
             rows="5"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="填写需要合成的目标文本"
+            :placeholder="t('voiceDesign.form.textPlaceholder')"
           />
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-            <span>当前字符数 {{ charCount }}</span>
+            <span>{{ t('voiceDesign.form.charStats', { chars: charCount }) }}</span>
           </div>
         </label>
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <p class="text-base font-semibold tracking-tight text-slate-900">{{ t('tts.form.modelParams') }}</p>
           <div class="mt-4">
             <GenericTaskParamsForm v-if="activeVoiceDesignTaskConfig" v-model="form.modelParams" :task-config="activeVoiceDesignTaskConfig" />
-            <UiParamEmptyState v-else title="当前模型没有可配置的特定参数" description="这个任务下没有额外参数需要配置，可以直接继续生成音色设计。" />
+            <UiParamEmptyState v-else :title="t('voiceDesign.form.emptyParamsTitle')" :description="t('voiceDesign.form.emptyParamsDesc')" />
           </div>
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
-            <p>生成摘要</p>
+            <p>{{ t('tts.form.summary') }}</p>
             <p v-for="tip in designSummary" :key="tip" class="mt-1">{{ tip }}</p>
           </div>
 
@@ -778,11 +780,11 @@ usePollingResume(() => {
               </BaseButton>
               <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
                 <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
+                <span>{{ isCancelling ? t('tts.form.cancelling') : t('tts.form.cancel') }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-                <span>重置表单</span>
+                <span>{{ t('tts.form.resetForm') }}</span>
               </BaseButton>
             </div>
           </div>

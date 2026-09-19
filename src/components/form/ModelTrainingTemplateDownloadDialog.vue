@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { DocumentArrowDownIcon, DocumentTextIcon, TableCellsIcon } from '@heroicons/vue/24/outline';
 import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
@@ -19,6 +20,8 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+const { t } = useI18n();
+
 const uiStore = useUiStore();
 const downloadingFormat = ref<ModelTrainingAnnotationFormat | null>(null);
 
@@ -30,10 +33,10 @@ const downloadTemplate = async (format: ModelTrainingAnnotationFormat) => {
     });
 
     if (saved) {
-      uiStore.notifySuccess(format === ModelTrainingAnnotationFormat.Xlsx ? 'Excel 模板已保存。' : 'JSONL 模板已保存。', 2200);
+      uiStore.notifySuccess(format === ModelTrainingAnnotationFormat.Xlsx ? t('training.template.xlsxSaved') : t('training.template.jsonlSaved'), 2200);
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('保存模板文件失败', error));
+    uiStore.notifyError(formatErrorMessage(t('training.template.saveFailed'), error));
   } finally {
     downloadingFormat.value = null;
   }
@@ -43,15 +46,15 @@ const templateCards = [
   {
     format: ModelTrainingAnnotationFormat.Jsonl,
     title: MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Jsonl],
-    description: '每行一个 JSON 对象，适合脚本批量处理或版本管理。',
-    hint: '{"audio": "speaker_001.wav", "text": "这里填写台词"}',
+    description: t('training.template.jsonlDesc'),
+    hint: t('training.template.jsonlHint'),
     icon: DocumentTextIcon
   },
   {
     format: ModelTrainingAnnotationFormat.Xlsx,
     title: MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Xlsx],
-    description: '首列填写文件名，第二列填写台词，适合直接用 Excel 编辑。',
-    hint: '第一列 文件名 / 第二列 台词',
+    description: t('training.template.xlsxDesc'),
+    hint: t('training.template.xlsxHint'),
     icon: TableCellsIcon
   }
 ] as const;
@@ -60,7 +63,7 @@ const templateCards = [
 <template>
   <BaseDialog
     :open="open"
-    title="下载数据标注模板"
+    :title="t('training.template.dialogTitle')"
     panel-class="max-w-2xl sm:max-w-3xl"
     content-class="overflow-visible"
     z-class="z-[160]"
@@ -68,7 +71,7 @@ const templateCards = [
   >
     <div class="space-y-4">
       <p class="text-sm leading-6 text-stone-600">
-        选择一种模板格式下载。JSONL 与 Excel 模板都使用相同的数据结构，Excel 导入时会读取第一列文件名与第二列台词。
+        {{ t('training.template.dialogIntro') }}
       </p>
 
       <div class="grid items-stretch gap-3 md:grid-cols-2">
@@ -94,23 +97,23 @@ const templateCards = [
             <DocumentArrowDownIcon class="h-4 w-4" aria-hidden="true" />
             <span>{{
               downloadingFormat === card.format
-                ? '下载中...'
+                ? t('training.template.downloading')
                 : card.format === ModelTrainingAnnotationFormat.Xlsx
-                  ? '下载Excel模板'
-                  : `下载 ${card.title} 模板`
+                  ? t('training.template.downloadXlsx')
+                  : t('training.template.downloadNamed', { title: card.title })
             }}</span>
           </BaseButton>
         </article>
       </div>
 
       <div class="rounded-2xl border border-brand-200 bg-white/90 p-4 text-xs leading-5 text-stone-500">
-        <p>Excel 导入支持 .xlsx 与 .xls。</p>
-        <p class="mt-1">如果压缩包中的音频是 OGG，后端会在训练前自动转成 WAV 后再交给模型处理。</p>
+        <p>{{ t('training.template.xlsxSupport') }}</p>
+        <p class="mt-1">{{ t('training.template.oggHint') }}</p>
       </div>
     </div>
 
     <template #footer>
-      <BaseButton tone="ghost" @click="emit('close')">关闭</BaseButton>
+      <BaseButton tone="ghost" @click="emit('close')">{{ t('training.template.close') }}</BaseButton>
     </template>
   </BaseDialog>
 </template>

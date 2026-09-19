@@ -2,6 +2,7 @@
 import { TransitionChild, TransitionRoot } from '@headlessui/vue';
 import { QuestionMarkCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, useSlots } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 interface Props {
   text?: string;
@@ -11,6 +12,8 @@ interface Props {
   panelClass?: string;
   disabled?: boolean;
 }
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<Props>(), {
   text: '',
@@ -72,7 +75,7 @@ const hide = () => {
       type="button"
       class="inline-flex h-5 w-5 items-center justify-center rounded-full text-brand-500 transition-colors duration-200 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-200 focus-visible:ring-offset-2"
       :disabled="disabled || !hasContent"
-      :aria-label="title || text || '显示提示信息'"
+      :aria-label="title || text || t('common.ui.tooltipFallback')"
       @focus="show"
       @blur="hide"
     >

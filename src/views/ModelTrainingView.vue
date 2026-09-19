@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -26,13 +27,13 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import ModelTrainingTemplateDownloadDialog from '@/components/form/ModelTrainingTemplateDownloadDialog.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
-import { AppLanguage, APP_LANGUAGE_SHORT_LABELS } from '@/enums/language';
+import { AppLanguage, APP_LANGUAGE_SHORT_LABELS_KEY } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import {
   MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS,
   MODEL_TRAINING_ANNOTATION_FORMAT_TEXT,
   MODEL_TRAINING_AUDIO_FILE_EXTENSIONS,
-  MODEL_TRAINING_SAMPLE_TYPE_TEXT,
+  MODEL_TRAINING_SAMPLE_TYPE_TEXT_KEY,
   ModelTrainingAnnotationFormat,
   ModelTrainingSampleType,
   type ModelTrainingOption
@@ -113,6 +114,7 @@ const detailReloadToken = ref(0);
 const modelStore = useModelStore();
 const speakerStore = useSpeakerStore();
 const uiStore = useUiStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -139,11 +141,11 @@ let skipHistoryTaskSelectionReload = false;
 // 单次状态刷新被允许挂起的最长时间：超过即视为被系统睡眠冻结，重置占用标志恢复轮询。
 const ACTIVE_TASK_REFRESH_STALE_MS = 15_000;
 
-const trainingChecklist = [
-  '准备最少 1 条音频样本与对应文本稿，作为微调数据输入，建议 24kHz 以上质量。',
-  '确保样本语言一致，避免中途切换语言导致风格漂移。',
-  '上传前先裁剪静音段，控制单条样本长度在 15 秒以内。'
-];
+const trainingChecklist = computed(() => [
+  t('training.checklist.item1'),
+  t('training.checklist.item2'),
+  t('training.checklist.item3')
+]);
 
 const importedSamples = ref<ImportedSampleItem[]>([]);
 const modelOptions = computed(() =>
@@ -162,7 +164,7 @@ const deviceOptions = computed(() =>
 const languageOptions = computed(() =>
   modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
     value: language,
-    label: APP_LANGUAGE_SHORT_LABELS[language] ?? language
+    label: t(APP_LANGUAGE_SHORT_LABELS_KEY[language]) ?? language
   }))
 );
 const activeTrainingTaskConfig = computed(() => uiConfigStore.getTaskConfig(form.baseModel, HistoryTaskType.ModelTraining));
@@ -199,7 +201,7 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.speakerName,
-    subtitle: `任务 ${item.id} · ${modelStore.getModelLabel(item.detail.baseModel)} ${item.detail.modelVersion}`,
+    subtitle: t('training.recent.subtitle', { taskId: item.id, model: modelStore.getModelLabel(item.detail.baseModel) + ' ' + item.detail.modelVersion }),
     status: item.status
   }))
 );
@@ -212,7 +214,7 @@ const currentTrainingInfo = computed(() => {
     return {
       taskId: record.id,
       speakerName: record.detail.speakerName,
-      description: record.detail.description?.trim() || '未填写',
+      description: record.detail.description?.trim() || t('training.info.notFilled'),
       baseModel: record.detail.baseModel,
       modelVersion: record.detail.modelVersion,
       device: record.device,
@@ -229,7 +231,7 @@ const currentTrainingInfo = computed(() => {
   return {
     taskId: activeTrainingTask.value.taskId,
     speakerName: activeTrainingTask.value.speakerName,
-    description: form.description.trim() || '未填写',
+    description: form.description.trim() || t('training.info.notFilled'),
     baseModel: activeTrainingTask.value.baseModel,
     modelVersion: activeTrainingTask.value.modelVersion,
     device: activeTrainingTask.value.device,
@@ -241,23 +243,23 @@ const currentTrainingInfo = computed(() => {
 
 const trainingBusyLabel = computed(() => {
   if (isCheckingDeviceType.value) {
-    return '正在检查模型环境，请稍候';
+    return t('training.busy.checkingDevice');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认硬件环境切换';
+    return t('training.busy.awaitingDeviceConfirm');
   }
 
   if (isStarting.value) {
-    return '正在创建模型微调任务，请稍候';
+    return t('training.busy.creating');
   }
 
   if (isCancelling.value) {
-    return '正在请求终止模型微调任务，请稍候';
+    return t('training.busy.cancelling');
   }
 
   if (activeTrainingTask.value?.status === TaskStatus.Pending || activeTrainingTask.value?.status === TaskStatus.Running) {
-    return '任务执行中，页面会持续刷新状态';
+    return t('training.busy.running');
   }
 
   return '';
@@ -265,14 +267,14 @@ const trainingBusyLabel = computed(() => {
 const isSubmitPending = computed(() => isStarting.value || isDeviceGuardPending.value);
 const submitButtonText = computed(() => {
   if (isCheckingDeviceType.value) {
-    return '检查环境中...';
+    return t('training.submit.checking');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认...';
+    return t('training.submit.awaitingConfirm');
   }
 
-  return isStarting.value ? '创建中...' : '开始微调';
+  return isStarting.value ? t('training.submit.creating') : t('training.submit.start');
 });
 
 const openCurrentTaskDetail = () => {
@@ -442,21 +444,21 @@ const selectLocalFile = async (title: string, extensions: string[], fileKind: Lo
       fileKind
     } satisfies SelectedLocalFile;
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('打开文件选择器失败', error));
+    uiStore.notifyError(formatErrorMessage(t('training.notice.pickerFailed'), error));
     return null;
   }
 };
 
 const chooseSingleAudio = async () => {
-  form.singleAudioFile = await selectLocalFile('选择音频文件', [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS], 'audio');
+  form.singleAudioFile = await selectLocalFile(t('training.dialog.selectAudio'), [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS], 'audio');
 };
 
 const chooseDatasetArchive = async () => {
-  form.datasetArchiveFile = await selectLocalFile('选择 ZIP 压缩包', ['zip'], 'archive');
+  form.datasetArchiveFile = await selectLocalFile(t('training.dialog.selectZip'), ['zip'], 'archive');
 };
 
 const chooseDatasetAnnotation = async () => {
-  form.datasetAnnotationFile = await selectLocalFile('选择数据标注文件', [...MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS], 'annotation');
+  form.datasetAnnotationFile = await selectLocalFile(t('training.dialog.selectAnnotation'), [...MODEL_TRAINING_ANNOTATION_FILE_EXTENSIONS], 'annotation');
 };
 
 const addSingleSample = () => {
@@ -468,14 +470,14 @@ const addSingleSample = () => {
     id: nextImportedSampleId(),
     type: ModelTrainingSampleType.Single,
     title: form.singleAudioFile.fileName,
-    detail: `音频文件 · ${form.singleAudioFile.filePath}`,
+    detail: t('training.single.detail', { path: form.singleAudioFile.filePath }),
     transcriptPreview: form.singleTranscript.trim(),
     primaryFile: form.singleAudioFile
   });
 
   form.singleAudioFile = null;
   form.singleTranscript = '';
-  uiStore.notifySuccess('已将单样本加入导入列表，可继续添加更多数据。', 2600);
+  uiStore.notifySuccess(t('training.single.added'), 2600);
 };
 
 const addDatasetSample = () => {
@@ -487,14 +489,14 @@ const addDatasetSample = () => {
     id: nextImportedSampleId(),
     type: ModelTrainingSampleType.Dataset,
     title: form.datasetArchiveFile.fileName,
-    detail: `ZIP 压缩包 + 标注文件 · ${form.datasetArchiveFile.filePath}`,
+    detail: t('training.dataset.detail', { path: form.datasetArchiveFile.filePath }),
     primaryFile: form.datasetArchiveFile,
     secondaryFile: form.datasetAnnotationFile
   });
 
   form.datasetArchiveFile = null;
   form.datasetAnnotationFile = null;
-  uiStore.notifySuccess('已将样本集加入导入列表，训练时会按数据集方式处理。', 2600);
+  uiStore.notifySuccess(t('training.dataset.added'), 2600);
 };
 
 const removeImportedSample = (sampleId: number) => {
@@ -516,7 +518,7 @@ const resetForm = () => {
   selectedLanguageOption.value = languageOptions.value[0] ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   importedSamples.value = [];
-  uiStore.notifyInfo('训练表单已重置。', 2200);
+  uiStore.notifyInfo(t('training.notice.formReset'), 2200);
 };
 
 const mapHistorySampleToImportedSample = (sample: ModelTrainingSampleDetail): ImportedSampleItem => ({
@@ -571,7 +573,7 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
 
     if (!isModelTrainingHistoryRecord(record)) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
@@ -580,7 +582,7 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     recentTrainingHistory.value = recentTrainingHistory.value.map(item => (item.id === record.id ? record : item));
     syncActiveTaskStatusRefresh();
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入模型微调历史任务配置失败，请检查 Rust 后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('training.notice.loadFailed'), error));
   }
 };
 
@@ -609,13 +611,13 @@ const hydrateReplayTaskFromRoute = async () => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId });
 
     if (record.taskType !== HistoryTaskType.ModelTraining) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
     applyTrainingHistoryToForm(record as ModelTrainingHistoryRecord);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入历史任务配置失败，请检查任务记录是否仍然存在', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.loadGenericFailed'), error));
   } finally {
     await clearReplayTaskId();
   }
@@ -636,12 +638,12 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
     recentTrainingHistory.value = records.filter(isModelTrainingHistoryRecord).slice(0, 5);
 
     if (notifyOnSuccess) {
-      uiStore.notifySuccess('模型微调任务状态已刷新。', 2200);
+      uiStore.notifySuccess(t('training.notice.statusRefreshed'), 2200);
     }
   } catch (error) {
     recentTrainingHistory.value = [];
     if (!silentOnError) {
-      uiStore.notifyError(formatErrorMessage('刷新模型微调历史任务失败，请检查 Rust 后端日志', error));
+      uiStore.notifyError(formatErrorMessage(t('training.notice.refreshFailed'), error));
     }
   } finally {
     isHistoryRefreshInFlight = false;
@@ -708,7 +710,7 @@ const refreshActiveTaskStatus = async () => {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
-    console.log(formatErrorMessage('刷新模型微调任务状态失败，请检查 Rust 后端日志', error));
+    console.log(formatErrorMessage(t('training.notice.refreshCurrentFailed'), error));
   } finally {
     if (generation === activeTaskRefreshGeneration) {
       isActiveTaskRefreshInFlight = false;
@@ -730,15 +732,15 @@ const cancelActiveTrainingTask = async () => {
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      uiStore.notifyWarning(t('tts.notice.alreadyCancelling'));
       return;
     }
 
-    uiStore.notifyInfo(`已发送终止请求，任务 ${activeTrainingTask.value.taskId} 会在后端停止后刷新状态。`, 3600);
+    uiStore.notifyInfo(t('tts.notice.cancelRequested', { taskId: activeTrainingTask.value.taskId }), 3600);
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.cancelFailed'), error));
   } finally {
     isCancelling.value = false;
   }
@@ -757,7 +759,7 @@ const cancelTrainingTask = async (historyId: number) => {
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      uiStore.notifyWarning(t('tts.notice.alreadyCancelling'));
       return;
     }
 
@@ -766,9 +768,9 @@ const cancelTrainingTask = async (historyId: number) => {
     }
 
     await loadRecentTasks({ silentOnError: true });
-    uiStore.notifyInfo(`已发送终止请求，任务 ${historyId} 会在后端停止后刷新状态。`, 3600);
+    uiStore.notifyInfo(t('tts.notice.cancelRequested', { taskId: historyId }), 3600);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.cancelFailed'), error));
   } finally {
     isCancelling.value = false;
   }
@@ -789,7 +791,7 @@ const startTraining = async () => {
   }
 
   isStarting.value = true;
-  uiStore.notifyInfo('正在创建模型微调任务。', 2200);
+  uiStore.notifyInfo(t('training.notice.submitting'), 2200);
 
   try {
     const payload = await invoke<ModelTrainingTaskResultPayload>('create_model_training_task', {
@@ -820,11 +822,11 @@ const startTraining = async () => {
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      `模型微调任务已创建：${payload.speakerName}，任务 ID ${payload.taskId}，基础模型 ${modelStore.getModelLabel(payload.baseModel)} ${payload.modelVersion}，共 ${payload.sampleCount} 项样本。`,
+      t('training.notice.created', { speaker: payload.speakerName, taskId: payload.taskId, model: modelStore.getModelLabel(payload.baseModel), version: payload.modelVersion, count: payload.sampleCount }),
       5200
     );
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('模型微调任务创建失败', error));
+    uiStore.notifyError(formatErrorMessage(t('training.notice.createFailed'), error));
   } finally {
     isStarting.value = false;
   }
@@ -849,92 +851,90 @@ usePollingResume(() => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="模型微调" description="上传微调样本与标注内容，配置参数并创建可用于文本转语音的本地说话人模型。" eyebrow="Model-Fine-Tuning" />
+    <PageHeader :title="t('training.title')" :description="t('training.description')" eyebrow="Model-Fine-Tuning" />
 
     <BaseLoadingBanner v-if="trainingBusyLabel" :label="trainingBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-      <PanelCard title="微调数据导入" subtitle="支持逐条导入和按数据集导入，两种方式都需要音频与文本对齐">
+      <PanelCard :title="t('training.panels.import')" :subtitle="t('training.panels.importSubtitle')">
         <div class="grid gap-4 xl:grid-cols-2">
           <section class="flex h-full flex-col rounded-2xl border border-brand-200 bg-white/80 p-4">
             <div class="mb-3">
-              <span class="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-medium text-brand-700">单样本</span>
+              <span class="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-medium text-brand-700">{{ t('training.single.badge') }}</span>
             </div>
             <div class="min-h-[68px]">
-              <p class="text-sm font-semibold text-slate-800">一对一上传</p>
-              <p class="mt-1 text-xs leading-5 text-stone-500">提供一段音频和对应台词，导入后记为单样本微调数据。</p>
+              <p class="text-sm font-semibold text-slate-800">{{ t('training.single.heading') }}</p>
+              <p class="mt-1 text-xs leading-5 text-stone-500">{{ t('training.single.desc') }}</p>
             </div>
 
             <label class="mt-4 block text-sm text-slate-700">
-              <span class="mb-1 block text-xs text-stone-500">音频文件</span>
+              <span class="mb-1 block text-xs text-stone-500">{{ t('training.single.audio') }}</span>
               <div class="flex min-h-[120px] flex-col justify-between rounded-2xl border border-dashed border-brand-300 bg-brand-50/50 p-4">
                 <BaseButton tone="ghost" @click="chooseSingleAudio">
                   <ArrowUpTrayIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>选择本地音频</span>
+                  <span>{{ t('training.single.selectAudio') }}</span>
                 </BaseButton>
-                <p class="mt-2 text-xs text-stone-500">{{ form.singleAudioFile?.fileName ?? '尚未选择音频文件' }}</p>
+                <p class="mt-2 text-xs text-stone-500">{{ form.singleAudioFile?.fileName ?? t('training.single.noAudio') }}</p>
                 <p v-if="form.singleAudioFile" class="mt-1 break-all text-[11px] text-stone-400">{{ form.singleAudioFile.filePath }}</p>
               </div>
             </label>
 
             <label class="mt-4 block text-sm text-slate-700">
-              <span class="mb-1 block text-xs text-stone-500">台词文本</span>
+              <span class="mb-1 block text-xs text-stone-500">{{ t('training.single.text') }}</span>
               <textarea
                 v-model="form.singleTranscript"
                 rows="5"
                 class="min-h-[120px] w-full rounded-2xl border border-brand-200 bg-brand-50/35 px-3 py-2 text-sm text-slate-700"
-                placeholder="请输入与音频严格对应的台词文本..."
+                :placeholder="t('training.single.textPlaceholder')"
               />
             </label>
 
             <div class="mt-auto pt-4">
               <BaseButton block :disabled="!singleImportReady" @click="addSingleSample">
                 <ArrowUpTrayIcon class="h-4 w-4" aria-hidden="true" />
-                <span>加入导入列表</span>
+                <span>{{ t('training.dataset.add') }}</span>
               </BaseButton>
             </div>
           </section>
 
           <section class="flex h-full flex-col rounded-2xl border border-brand-200 bg-white/80 p-4">
             <div class="mb-3">
-              <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">样本集</span>
+              <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">{{ t('training.dataset.badge') }}</span>
             </div>
             <div class="min-h-[68px]">
-              <p class="text-sm font-semibold text-slate-800">批量上传</p>
-              <p class="mt-1 text-xs leading-5 text-stone-500">提供音频压缩包与数据标注文件，导入后记为批量微调数据。</p>
+              <p class="text-sm font-semibold text-slate-800">{{ t('training.dataset.heading') }}</p>
+              <p class="mt-1 text-xs leading-5 text-stone-500">{{ t('training.dataset.desc') }}</p>
             </div>
 
             <label class="mt-4 block text-sm text-slate-700">
-              <span class="mb-1 block text-xs text-stone-500">音频压缩包</span>
+              <span class="mb-1 block text-xs text-stone-500">{{ t('training.dataset.archive') }}</span>
               <div class="flex min-h-[120px] flex-col justify-between rounded-2xl border border-dashed border-brand-300 bg-brand-50/50 p-4">
                 <BaseButton tone="ghost" @click="chooseDatasetArchive">
                   <ArchiveBoxArrowDownIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>选择 ZIP 压缩包</span>
+                  <span>{{ t('training.dataset.selectZip') }}</span>
                 </BaseButton>
-                <p class="mt-2 text-xs text-stone-500">{{ form.datasetArchiveFile?.fileName ?? '尚未选择 ZIP 压缩包' }}</p>
+                <p class="mt-2 text-xs text-stone-500">{{ form.datasetArchiveFile?.fileName ?? t('training.dataset.noZip') }}</p>
                 <p v-if="form.datasetArchiveFile" class="mt-1 break-all text-[11px] text-stone-400">{{ form.datasetArchiveFile.filePath }}</p>
               </div>
             </label>
 
             <label class="mt-4 block text-sm text-slate-700">
               <div class="mb-1 flex items-center justify-between gap-3 text-xs text-stone-500">
-                <span>数据标注文件</span>
+                <span>{{ t('training.dataset.annotation') }}</span>
                 <BaseButton tone="quiet" size="sm" @click="isTemplateDialogOpen = true">
                   <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>下载模板</span>
+                  <span>{{ t('training.dataset.downloadTemplate') }}</span>
                 </BaseButton>
               </div>
               <div class="flex min-h-[120px] flex-col justify-between rounded-2xl border border-dashed border-brand-300 bg-brand-50/50 p-4">
                 <BaseButton tone="ghost" @click="chooseDatasetAnnotation">
                   <ArrowUpTrayIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>选择数据标注文件</span>
+                  <span>{{ t('training.dataset.selectAnnotation') }}</span>
                 </BaseButton>
-                <p class="mt-2 text-xs text-stone-500">{{ form.datasetAnnotationFile?.fileName ?? '尚未选择标注文件' }}</p>
+                <p class="mt-2 text-xs text-stone-500">{{ form.datasetAnnotationFile?.fileName ?? t('training.dataset.noAnnotation') }}</p>
                 <p v-if="form.datasetAnnotationFile" class="mt-1 break-all text-[11px] text-stone-400">{{ form.datasetAnnotationFile.filePath }}</p>
                 <p class="mt-2 text-[11px] text-stone-400">
-                  支持 {{ MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Jsonl] }}、
-                  {{ MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Xlsx] }} 和
-                  {{ MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Xls] }}。
+                  {{ t('training.dataset.formatHint', { jsonl: MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Jsonl], xlsx: MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Xlsx], xls: MODEL_TRAINING_ANNOTATION_FORMAT_TEXT[ModelTrainingAnnotationFormat.Xls] }) }}
                 </p>
               </div>
             </label>
@@ -942,7 +942,7 @@ usePollingResume(() => {
             <div class="mt-auto pt-4">
               <BaseButton block :disabled="!batchImportReady" @click="addDatasetSample">
                 <ArchiveBoxArrowDownIcon class="h-4 w-4" aria-hidden="true" />
-                <span>加入导入列表</span>
+                <span>{{ t('training.single.add') }}</span>
               </BaseButton>
             </div>
           </section>
@@ -951,8 +951,8 @@ usePollingResume(() => {
         <div class="mt-4 rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-semibold text-slate-800">导入列表</p>
-              <p class="mt-1 text-xs text-stone-500">已导入 {{ sampleSummary.total }} 项样本。</p>
+              <p class="text-sm font-semibold text-slate-800">{{ t('training.list.heading') }}</p>
+              <p class="mt-1 text-xs text-stone-500">{{ t('training.list.summary', { total: sampleSummary.total }) }}</p>
             </div>
           </div>
 
@@ -964,7 +964,7 @@ usePollingResume(() => {
                     <div class="flex items-center gap-2">
                       <p class="text-sm font-semibold text-slate-800">{{ sample.title }}</p>
                       <span class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-700">
-                        {{ MODEL_TRAINING_SAMPLE_TYPE_TEXT[sample.type] }}
+                        {{ t(MODEL_TRAINING_SAMPLE_TYPE_TEXT_KEY[sample.type]) }}
                       </span>
                     </div>
                     <p class="mt-1 text-xs text-stone-500">{{ sample.detail }}</p>
@@ -972,21 +972,21 @@ usePollingResume(() => {
                   </div>
                   <BaseButton tone="quiet" size="sm" @click="removeImportedSample(sample.id)">
                     <TrashIcon class="h-4 w-4" aria-hidden="true" />
-                    <span>移除</span>
+                    <span>{{ t('training.list.remove') }}</span>
                   </BaseButton>
                 </div>
               </li>
             </ul>
 
             <div v-else class="rounded-xl border border-dashed border-brand-200 bg-white/80 p-4 text-xs text-stone-500">
-              还没有导入任何样本。单样本和样本集都可以加入微调列表。
+              {{ t('training.list.empty') }}
             </div>
           </div>
         </div>
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard class="z-0" title="准备清单" subtitle="开始微调前，先确保数据质量">
+        <PanelCard class="z-0" :title="t('training.panels.checklist')" :subtitle="t('training.panels.checklistSubtitle')">
           <ul class="space-y-2 text-sm text-slate-700">
             <li v-for="item in trainingChecklist" :key="item" class="flex gap-2">
               <CheckCircleIcon class="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
@@ -995,41 +995,41 @@ usePollingResume(() => {
           </ul>
         </PanelCard>
 
-        <PanelCard class="z-0" title="微调任务信息" subtitle="展示当前聚焦任务的关键信息，可直接查看完整详情。">
+        <PanelCard class="z-0" :title="t('training.panels.taskInfo')" :subtitle="t('training.panels.taskInfoSubtitle')">
           <div v-if="currentTrainingInfo" class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <p class="text-sm font-semibold text-slate-900">{{ currentTrainingInfo.speakerName }}</p>
-                <p class="mt-1 text-xs text-stone-500">任务 ID {{ currentTrainingInfo.taskId }} · {{ currentTrainingInfo.createTime }}</p>
+                <p class="mt-1 text-xs text-stone-500">{{ t('training.info.taskMeta', { taskId: currentTrainingInfo.taskId, createTime: currentTrainingInfo.createTime }) }}</p>
               </div>
               <StatusPill :status="currentTrainingInfo.status" />
             </div>
 
             <div class="mt-4 space-y-2">
-              <p>说话人名称 {{ currentTrainingInfo.speakerName }}。</p>
-              <p>说话人描述 {{ currentTrainingInfo.description }}。</p>
-              <p>使用模型 {{ modelStore.getModelLabel(currentTrainingInfo.baseModel) }} {{ currentTrainingInfo.modelVersion }}。</p>
-              <p>样本数 {{ currentTrainingInfo.sampleCount }} 项。</p>
+              <p>{{ t('training.info.speakerName', { name: currentTrainingInfo.speakerName }) }}</p>
+              <p>{{ t('training.info.speakerDescription', { description: currentTrainingInfo.description }) }}</p>
+              <p>{{ t('training.info.model', { model: modelStore.getModelLabel(currentTrainingInfo.baseModel), version: currentTrainingInfo.modelVersion }) }}</p>
+              <p>{{ t('training.info.sampleCount', { count: currentTrainingInfo.sampleCount }) }}</p>
             </div>
 
             <div class="mt-4 flex justify-end">
               <BaseButton tone="ghost" size="sm" @click="openCurrentTaskDetail">
                 <EyeIcon class="h-4 w-4" aria-hidden="true" />
-                <span>查看详情</span>
+                <span>{{ t('training.info.viewDetail') }}</span>
               </BaseButton>
             </div>
           </div>
 
           <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/82 p-5 text-sm text-stone-500">
-            还没有可展示的微调任务。创建任务后，或从最近任务中选中一项后，会在这里显示关键信息。
+            {{ t('training.info.empty') }}
           </div>
         </PanelCard>
 
-        <PanelCard class="z-0" title="最近任务" subtitle="展示最近 5 条模型微调任务，数据来自统一历史记录">
+        <PanelCard class="z-0" :title="t('training.panels.recent')" :subtitle="t('training.panels.recentSubtitle')">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
               <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
+              <span>{{ isRefreshingHistory ? t('tts.form.refreshing') : t('tts.form.refresh') }}</span>
             </BaseButton>
           </template>
 
@@ -1037,36 +1037,36 @@ usePollingResume(() => {
             <RecentTaskList
               :items="recentTaskItems"
               v-model:selected-task-id="selectedHistoryTaskId"
-              empty-text="还没有历史任务。开始微调后会自动加入这里。"
-              action-label="查看"
+              :empty-text="t('tts.result.historyEmptyText')"
+              :action-label="t('tts.form.view')"
             />
           </div>
         </PanelCard>
       </div>
     </div>
 
-    <PanelCard class="z-20" title="微调参数" subtitle="模型微调参数配置">
+    <PanelCard class="z-20" :title="t('training.panels.params')" :subtitle="t('training.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label class="block xl:col-span-1">
-            <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ t('training.form.speakerName') }}</span>
             <input
               v-model="form.speakerName"
               class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-              placeholder="请输入说话人名称"
+              :placeholder="t('training.form.speakerNamePlaceholder')"
             />
           </label>
           <div class="xl:col-span-1">
-            <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
+            <BaseListbox v-model="form.baseModel" :label="t('tts.form.baseModel')" :options="modelOptions" />
           </div>
           <div class="xl:col-span-1">
-            <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+            <BaseListbox v-model="form.modelVersion" :label="t('tts.form.modelVersion')" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           </div>
           <div class="xl:col-span-1">
             <BaseListbox
               v-model="form.device"
               v-model:selected-option="selectedDeviceOption"
-              label="设备类型"
+              :label="t('tts.form.deviceType')"
               :options="deviceOptions"
               :disabled="deviceOptions.length === 0"
             />
@@ -1075,37 +1075,37 @@ usePollingResume(() => {
             <BaseListbox
               v-model="form.language"
               v-model:selected-option="selectedLanguageOption"
-              label="语种"
+              :label="t('training.form.language')"
               :options="languageOptions"
             />
           </div>
         </div>
 
         <label class="block">
-          <span class="mb-1 block text-xs text-stone-500">说话人描述</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('training.form.speakerDescription') }}</span>
           <textarea
             v-model="form.description"
             rows="2"
             class="min-h-[42px] w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-            placeholder="请输入说话人描述，用于后续在说话人列表中识别模型"
+            :placeholder="t('training.form.speakerDescriptionPlaceholder')"
           />
         </label>
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定微调参数</p>
-          <p class="mt-1 text-xs leading-5 text-stone-500">当选择不同的基础模型时，可配置的微调参数会有所不同，请参考不同模型的官方文档。</p>
+          <p class="text-base font-semibold tracking-tight text-slate-900">{{ t('training.form.modelParams') }}</p>
+          <p class="mt-1 text-xs leading-5 text-stone-500">{{ t('training.form.modelParamsHint') }}</p>
           <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTrainingTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
-            <p>微调摘要</p>
-            <p class="mt-1">当前将使用 {{ sampleSummary.total }} 项导入数据，语言 {{ selectedLanguageOption?.label ?? '未选择' }}。</p>
-            <p class="mt-1">基础模型 {{ modelStore.getModelLabel(form.baseModel) }} {{ form.modelVersion }}。</p>
-            <p class="mt-1">设备类型 {{ HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }}。</p>
-            <p class="mt-1">说话人描述 {{ form.description.trim() || '未填写' }}。</p>
-            <p class="mt-1">建议批次大小根据显存调整，样本较少时可先从 4 到 8 开始。</p>
-            <p class="mt-1">当前梯度累积 {{ form.modelParams.gradientAccumulationSteps ?? 0 }}。</p>
+            <p>{{ t('training.form.summary') }}</p>
+            <p class="mt-1">{{ t('training.form.summaryData', { total: sampleSummary.total, language: selectedLanguageOption?.label ?? t('training.form.notSelected') }) }}</p>
+            <p class="mt-1">{{ t('training.form.summaryModel', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }) }}</p>
+            <p class="mt-1">{{ t('training.form.summaryDevice', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }) }}</p>
+            <p class="mt-1">{{ t('training.form.summaryDescription', { description: form.description.trim() || t('training.info.notFilled') }) }}</p>
+            <p class="mt-1">{{ t('training.form.summaryBatch') }}</p>
+            <p class="mt-1">{{ t('training.form.summaryGradAccum', { steps: form.modelParams.gradientAccumulationSteps ?? 0 }) }}</p>
           </div>
 
           <div class="rounded-2xl border border-brand-200 bg-brand-50/35 p-4">
@@ -1121,11 +1121,11 @@ usePollingResume(() => {
                 @click="cancelActiveTrainingTask"
               >
                 <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isCancelling ? '终止中...' : '终止微调' }}</span>
+                <span>{{ isCancelling ? t('tts.form.cancelling') : t('training.form.cancel') }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-                <span>重置表单</span>
+                <span>{{ t('tts.form.resetForm') }}</span>
               </BaseButton>
             </div>
           </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { PencilSquareIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
@@ -30,6 +31,7 @@ const store = useStreamingSpeechStore();
 const modelStore = useModelStore();
 const uiConfigStore = useUiConfigStore();
 const uiStore = useUiStore();
+const { t } = useI18n();
 
 const drawerWidth = ref(props.width);
 const isFormOpen = ref(false);
@@ -165,19 +167,19 @@ const closeSpeakerForm = () => {
 const submitSpeaker = (payload: StreamingSpeakerInput) => {
   if (editingSpeaker.value) {
     store.updateSpeaker(editingSpeaker.value.id, payload);
-    uiStore.notifySuccess(`已更新说话人「${payload.name}」。`, 3200);
+    uiStore.notifySuccess(t('streaming.drawer.updatedSpeaker', { name: payload.name }), 3200);
   } else {
     store.addSpeaker(payload);
-    uiStore.notifySuccess(`已添加说话人「${payload.name}」。`, 3200);
+    uiStore.notifySuccess(t('streaming.drawer.addedSpeaker', { name: payload.name }), 3200);
   }
   closeSpeakerForm();
 };
 const removeSpeaker = (speaker: StreamingSpeakerConfig) => {
   store.removeSpeaker(speaker.id);
-  uiStore.notifyInfo(`已移除说话人「${speaker.name}」。`, 2200);
+  uiStore.notifyInfo(t('streaming.drawer.removedSpeaker', { name: speaker.name }), 2200);
 };
 
-const categoryLabel = (speaker: StreamingSpeakerConfig) => (speaker.category === 'voice-clone' ? '语音克隆' : speaker.category);
+const categoryLabel = (speaker: StreamingSpeakerConfig) => (speaker.category === 'voice-clone' ? t('streaming.form.categoryVoiceClone') : speaker.category);
 
 // 左边缘拖拽调宽（320–1080）
 const startDrag = (event: PointerEvent) => {
@@ -224,7 +226,7 @@ onBeforeUnmount(() => {
           <header class="flex items-center justify-between gap-3 border-b border-brand-100 px-5 py-4">
             <div>
               <p class="text-[11px] uppercase tracking-[0.26em] text-brand-500">Streaming</p>
-              <h2 class="text-base font-semibold text-slate-900">流式语音配置</h2>
+              <h2 class="text-base font-semibold text-slate-900">{{ t('streaming.drawer.title') }}</h2>
             </div>
             <button
               class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 transition hover:bg-brand-50 hover:text-brand-700"
@@ -237,34 +239,34 @@ onBeforeUnmount(() => {
           <div class="flex-1 space-y-4 overflow-y-auto p-5">
             <PanelCard
               class="z-30"
-              title="基础配置"
-              :subtitle="isSessionLocked ? '会话已开启，模型与设备配置不可更改' : '选择模型、设备与输出语言'"
+              :title="t('streaming.drawer.basic')"
+              :subtitle="isSessionLocked ? t('streaming.drawer.basicLocked') : t('streaming.drawer.basicUnlocked')"
             >
               <div class="grid gap-4 md:grid-cols-2">
                 <BaseListbox
                   :model-value="store.sessionConfig.baseModel"
-                  label="基础模型"
+                  :label="t('streaming.drawer.baseModel')"
                   :options="modelOptions"
                   :disabled="isSessionLocked"
                   @update:model-value="onBaseModelChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.modelVersion"
-                  label="模型版本"
+                  :label="t('streaming.drawer.modelVersion')"
                   :options="modelVersionOptions"
                   :disabled="isSessionLocked || modelVersionOptions.length === 0"
                   @update:model-value="onModelVersionChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.device"
-                  label="设备类型"
+                  :label="t('streaming.drawer.deviceType')"
                   :options="deviceOptions"
                   :disabled="isSessionLocked || deviceOptions.length === 0"
                   @update:model-value="onDeviceChange"
                 />
                 <BaseListbox
                   :model-value="store.sessionConfig.language"
-                  label="输出语言"
+                  :label="t('streaming.drawer.language')"
                   :options="languageOptions"
                   :disabled="isSessionLocked"
                   @update:model-value="onLanguageChange"
@@ -273,13 +275,13 @@ onBeforeUnmount(() => {
             </PanelCard>
 
             <PanelCard
-              title="说话人管理"
-              :subtitle="isSessionLocked ? '会话中修改说话人将即时生效' : '配置可在聊天中选择的语音克隆说话人'"
+              :title="t('streaming.drawer.speakerManagement')"
+              :subtitle="isSessionLocked ? t('streaming.drawer.speakersLocked') : t('streaming.drawer.speakersUnlocked')"
             >
               <template #actions>
                 <BaseButton tone="ghost" size="sm" @click="openAddSpeaker">
                   <PlusIcon class="h-4 w-4" aria-hidden="true" />
-                  <span>新增</span>
+                  <span>{{ t('streaming.drawer.add') }}</span>
                 </BaseButton>
               </template>
 
@@ -293,8 +295,8 @@ onBeforeUnmount(() => {
                           categoryLabel(speaker)
                         }}</span>
                       </div>
-                      <p class="mt-1 truncate text-xs text-stone-500">参考音频：{{ speaker.refAudioName || '未设置' }}</p>
-                      <p v-if="speaker.refText" class="mt-0.5 line-clamp-2 text-xs text-slate-600">参考台词：{{ speaker.refText }}</p>
+                      <p class="mt-1 truncate text-xs text-stone-500">{{ t('streaming.drawer.refAudio', { name: speaker.refAudioName || t('streaming.drawer.noRefAudio') }) }}</p>
+                      <p v-if="speaker.refText" class="mt-0.5 line-clamp-2 text-xs text-slate-600">{{ t('streaming.drawer.refText', { text: speaker.refText }) }}</p>
                     </div>
                     <div class="flex shrink-0 gap-1">
                       <button
@@ -315,11 +317,11 @@ onBeforeUnmount(() => {
               </div>
 
               <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-4 text-sm text-stone-500">
-                尚未配置说话人。点击「新增」添加一个语音克隆说话人。
+                {{ t('streaming.drawer.noSpeakers') }}
               </div>
             </PanelCard>
 
-            <PanelCard title="模型参数" subtitle="根据所选模型动态生成">
+            <PanelCard :title="t('streaming.drawer.modelParams')" :subtitle="t('streaming.drawer.modelParamsSubtitle')">
               <GenericTaskParamsForm
                 v-if="!isSessionLocked"
                 :model-value="store.sessionConfig.modelParams"
@@ -327,7 +329,7 @@ onBeforeUnmount(() => {
                 @update:model-value="onModelParamsChange"
               />
               <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-4 text-sm text-stone-500">
-                会话进行中模型参数不可更改。
+                {{ t('streaming.drawer.paramsLocked') }}
               </div>
             </PanelCard>
           </div>

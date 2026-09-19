@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import StreamableAudioPlayer from '@/components/common/StreamableAudioPlayer.vue';
 import StreamingMessageAvatar from '@/components/streaming/StreamingMessageAvatar.vue';
@@ -18,6 +19,8 @@ interface Props {
   message: StreamingChatMessage;
   compact?: boolean;
 }
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<Props>(), { compact: false });
 
@@ -44,7 +47,7 @@ const hasAvatar = computed(() => Boolean(speaker.value?.avatarPath));
         class="mb-1.5 flex items-center gap-2 text-[11px] text-stone-500"
         :class="isLeft ? 'justify-start' : 'justify-end'"
       >
-        <span class="truncate font-medium text-slate-600">{{ message.speakerName || '默认说话人' }}</span>
+        <span class="truncate font-medium text-slate-600">{{ message.speakerName || t('common.ui.defaultSpeaker') }}</span>
         <template v-if="!compact">
           <span class="h-1 w-1 rounded-full bg-stone-300" />
           <StreamingMessageStatusPill :status="message.status" />

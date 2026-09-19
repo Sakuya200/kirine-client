@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowPathIcon, ClipboardDocumentIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -85,6 +86,7 @@ const ACTIVE_TASK_REFRESH_STALE_MS = 15_000;
 const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.TextToSpeech);
 
 const uiConfigStore = useUiConfigStore();
+const { t } = useI18n();
 
 const normalizeTtsModelParams = (baseModel: string, modelParams: Record<string, unknown>) => {
   const taskConfig = uiConfigStore.getTaskConfig(baseModel, HistoryTaskType.TextToSpeech);
@@ -105,7 +107,8 @@ const form = reactive({
 
 const selectedSpeakerOption = ref<TextToSpeechSpeakerOption | null>(null);
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
-const selectedFormatOption = ref<TextToSpeechOption | null>(TEXT_TO_SPEECH_FORMATS[0]);
+const formatOptions = computed(() => TEXT_TO_SPEECH_FORMATS.map(option => ({ ...option, label: t(option.label) })));
+const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions.value[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
@@ -170,15 +173,15 @@ const activeTextToSpeechTaskConfig = computed(() => uiConfigStore.getTaskConfig(
 const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
   {
     value: null,
-    label: '自动选择',
-    description: '不指定说话人，后端会按当前模型使用默认推理说话人或模型内默认配置。'
+    label: t('tts.speaker.autoSelect'),
+    description: t('tts.speaker.autoSelectDesc')
   },
   ...speakerStore.speakers
     .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
     .map(speaker => ({
       value: speaker.id,
       label: speaker.speakerName,
-      description: speaker.description || '该说话人暂无备注。'
+      description: speaker.description || t('tts.speaker.noDescription')
     }))
 ]);
 const charCount = computed(() => trimmedText.value.length);
@@ -206,11 +209,13 @@ const canCancelActiveTask = computed(() => {
   return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const generationTips = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
-  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
-  isDynamicReferenceModel.value ? `当前模型通过动态参数提供参考音频与参考文本。` : `当前说话人为 ${selectedSpeakerOption.value?.label ?? '未选择'}。`,
-  `当前字符数 ${charCount.value}，共 ${paragraphCount.value} 段。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}，导出名称为 ${form.exportAudioName}。`
+  t('tts.summary.model', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }),
+  t('tts.summary.device', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }),
+  isDynamicReferenceModel.value
+    ? t('tts.summary.dynamicReference')
+    : t('tts.summary.speaker', { speaker: selectedSpeakerOption.value?.label ?? t('tts.summary.notSelected') }),
+  t('tts.summary.chars', { chars: charCount.value, paragraphs: paragraphCount.value }),
+  t('tts.summary.format', { format: selectedFormatOption.value?.label ?? form.format, name: form.exportAudioName })
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -223,29 +228,29 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
     taskId: item.taskId,
     title: item.fileName,
-    subtitle: `任务 ${item.taskId} · ${item.speakerLabel} · ${item.languageLabel}`,
+    subtitle: t('tts.recent.subtitle', { taskId: item.taskId, speaker: item.speakerLabel, language: item.languageLabel }),
     status: item.status
   }))
 );
 const activeTaskBusyLabel = computed(() => {
   if (isCancelling.value) {
-    return '正在发送终止请求，请稍候';
+    return t('tts.busy.cancelling');
   }
 
   if (isCheckingDeviceType.value) {
-    return '正在检查模型环境，请稍候';
+    return t('tts.busy.checkingDevice');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认硬件环境切换';
+    return t('tts.busy.awaitingDeviceConfirm');
   }
 
   if (isGenerating.value) {
-    return '正在创建文本转语音任务，请稍候';
+    return t('tts.busy.creating');
   }
 
   if (activeResult.value?.status === TaskStatus.Pending || activeResult.value?.status === TaskStatus.Running) {
-    return '任务执行中，页面会持续刷新状态';
+    return t('tts.busy.running');
   }
 
   return '';
@@ -253,14 +258,14 @@ const activeTaskBusyLabel = computed(() => {
 const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
 const submitButtonText = computed(() => {
   if (isCheckingDeviceType.value) {
-    return '检查环境中...';
+    return t('tts.submit.checking');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认...';
+    return t('tts.submit.awaitingConfirm');
   }
 
-  return isGenerating.value ? '生成中...' : '生成音频';
+  return isGenerating.value ? t('tts.submit.generating') : t('tts.submit.generate');
 });
 
 watch(
@@ -373,7 +378,10 @@ const syncActiveTaskStatusRefresh = () => {
 };
 
 const findLanguageLabel = (language: AppLanguage) => APP_LANGUAGE_LABELS[language] ?? language;
-const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
+const findFormatLabel = (format: TextToSpeechFormat) => {
+  const found = TEXT_TO_SPEECH_FORMATS.find(option => option.value === format);
+  return found ? t(found.label) : format;
+};
 
 const clearReplayTaskId = async () => {
   if (!(HISTORY_TASK_REPLAY_QUERY_KEY in route.query)) {
@@ -449,7 +457,7 @@ const applyResultToForm = (item: TtsResult, setAsActiveResult: boolean) => {
   form.modelParams = normalizeTtsModelParams(item.baseModel, { ...item.modelParams });
   selectedSpeakerOption.value = matchedSpeakerOption;
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === item.language) ?? null;
-  selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS.find(option => option.value === item.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === item.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === item.device) ?? null;
 
   if (setAsActiveResult) {
@@ -472,13 +480,13 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
 
     if (record.taskType !== HistoryTaskType.TextToSpeech) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
     const result = mapHistoryRecordToResult(record);
     if (!result) {
-      uiStore.notifyError('历史任务配置解析失败。');
+      uiStore.notifyError(t('tts.notice.parseFailed'));
       return;
     }
 
@@ -486,7 +494,7 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     generationHistory.value = generationHistory.value.map(item => (item.taskId === result.taskId ? result : item));
     await resultCardRef.value?.refreshDetailRecord();
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入文本转语音历史任务配置失败，请检查 Rust 后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.loadFailed'), error));
   }
 };
 
@@ -515,19 +523,19 @@ const hydrateReplayTaskFromRoute = async () => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId });
 
     if (record.taskType !== HistoryTaskType.TextToSpeech) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
     const result = mapHistoryRecordToResult(record);
     if (!result) {
-      uiStore.notifyError('历史任务配置解析失败。');
+      uiStore.notifyError(t('tts.notice.parseFailed'));
       return;
     }
 
     applyResultToForm(result, false);
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入历史任务配置失败，请检查任务记录是否仍然存在', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.loadGenericFailed'), error));
   } finally {
     await clearReplayTaskId();
   }
@@ -551,12 +559,12 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
       .slice(0, 5);
 
     if (notifyOnSuccess) {
-      uiStore.notifySuccess('文本转语音任务状态已刷新。', 2200);
+      uiStore.notifySuccess(t('tts.notice.statusRefreshed'), 2200);
     }
   } catch (error) {
     generationHistory.value = [];
     if (!silentOnError) {
-      uiStore.notifyError(formatErrorMessage('刷新文本转语音历史任务失败，请检查 Rust 后端日志', error));
+      uiStore.notifyError(formatErrorMessage(t('tts.notice.refreshFailed'), error));
     }
   } finally {
     isHistoryRefreshInFlight = false;
@@ -609,7 +617,7 @@ const refreshActiveTaskStatus = async () => {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
-    console.log(formatErrorMessage('刷新当前任务状态失败，请检查 Rust 后端日志', error));
+    console.log(formatErrorMessage(t('tts.notice.refreshCurrentFailed'), error));
   } finally {
     if (generation === activeTaskRefreshGeneration) {
       isActiveTaskRefreshInFlight = false;
@@ -633,7 +641,7 @@ const generateAudio = async () => {
   }
 
   isGenerating.value = true;
-  uiStore.notifyInfo('正在提交生成任务。', 2200);
+  uiStore.notifyInfo(t('tts.notice.submitting'), 2200);
 
   try {
     const payload = await invoke<TextToSpeechTaskResultPayload>('create_text_to_speech_task', {
@@ -655,9 +663,9 @@ const generateAudio = async () => {
     syncActiveTaskStatusRefresh();
     setSelectedHistoryTaskId(result.taskId, true);
     generationHistory.value = [result, ...generationHistory.value].slice(0, 5);
-    uiStore.notifySuccess('任务已提交，可在历史记录中查看执行状态与结果。');
+    uiStore.notifySuccess(t('tts.notice.submitted'));
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('生成失败，请检查 Rust 后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.generateFailed'), error));
   } finally {
     isGenerating.value = false;
   }
@@ -677,15 +685,15 @@ const cancelActiveTask = async () => {
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      uiStore.notifyWarning(t('tts.notice.alreadyCancelling'));
       return;
     }
 
-    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    uiStore.notifyInfo(t('tts.notice.cancelRequested', { taskId }), 3600);
     await refreshActiveTaskStatus();
     await loadRecentTasks({ silentOnError: true });
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.cancelFailed'), error));
   } finally {
     isCancelling.value = false;
   }
@@ -701,7 +709,7 @@ const requestClearText = () => {
     form.device !== HardwareType.Cpu ||
     JSON.stringify(form.modelParams) !== '{}';
   if (!hasChanges) {
-    uiStore.notifyInfo('表单已为默认状态。', 2200);
+    uiStore.notifyInfo(t('tts.notice.formDefault'), 2200);
     return;
   }
 
@@ -718,10 +726,10 @@ const confirmClearText = () => {
   form.modelParams = {};
   selectedSpeakerOption.value = null;
   selectedLanguageOption.value = languageOptions.value[0] ?? null;
-  selectedFormatOption.value = TEXT_TO_SPEECH_FORMATS[0] ?? null;
+  selectedFormatOption.value = formatOptions.value[0] ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
   showClearDialog.value = false;
-  uiStore.notifyInfo('表单已重置。', 2200);
+  uiStore.notifyInfo(t('tts.notice.formReset'), 2200);
 };
 
 const cancelClearText = () => {
@@ -730,15 +738,15 @@ const cancelClearText = () => {
 
 const copyTaskId = async () => {
   if (!activeResult.value) {
-    uiStore.notifyWarning('没有可复制的任务 ID。');
+    uiStore.notifyWarning(t('tts.notice.noTaskId'));
     return;
   }
 
   try {
     await navigator.clipboard.writeText(String(activeResult.value.taskId));
-    uiStore.notifySuccess(`任务 ID 已复制：${activeResult.value.taskId}`);
+    uiStore.notifySuccess(t('tts.notice.taskIdCopied', { taskId: activeResult.value.taskId }));
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('复制失败，当前环境未开放剪贴板权限', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.copyFailed'), error));
   }
 };
 
@@ -769,37 +777,37 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="文本转语音" description="选择模型，可选说话人，输入文本并配置模型参数，生成目标音频。" eyebrow="Text-to-Speech" />
+    <PageHeader :title="t('tts.title')" :description="t('tts.description')" eyebrow="Text-to-Speech" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="基础参数">
+      <PanelCard :title="t('tts.panels.basic')">
         <div class="grid gap-4 md:grid-cols-2">
           <BaseListbox
             v-model="form.speakerId"
             v-model:selected-option="selectedSpeakerOption"
-            label="说话人"
+            :label="t('tts.form.speaker')"
             :options="speakerOptions"
-            placeholder="可选，不指定时自动选择"
+            :placeholder="t('tts.form.speakerPlaceholder')"
           />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
-          <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" :label="t('tts.form.language')" :options="languageOptions" />
+          <BaseListbox v-model="form.baseModel" :label="t('tts.form.baseModel')" :options="modelOptions" />
+          <BaseListbox v-model="form.modelVersion" :label="t('tts.form.modelVersion')" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox
             v-model="form.device"
             v-model:selected-option="selectedDeviceOption"
-            label="设备类型"
+            :label="t('tts.form.deviceType')"
             :options="deviceOptions"
             :disabled="deviceOptions.length === 0"
           />
-          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="TEXT_TO_SPEECH_FORMATS" />
+          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" :label="t('tts.form.format')" :options="formatOptions" />
           <label class="block text-sm text-slate-700">
-            <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ t('tts.form.exportAudioName') }}</span>
             <input
               v-model="form.exportAudioName"
               class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-              placeholder="例如 news_broadcast"
+              :placeholder="t('tts.form.exportNamePlaceholder')"
             />
           </label>
         </div>
@@ -812,66 +820,66 @@ onMounted(async () => {
           :meta-text="activeResultMetaText"
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
-          empty-text="还没有生成结果。完成文本输入并点击“生成音频”后，结果会显示在这里。"
+          :empty-text="t('tts.result.emptyText')"
           @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
-              <p>任务 ID：{{ activeResult.taskId }}</p>
-              <p>生成时间：{{ activeResult.createdAt }}</p>
-              <p>导出名称：{{ activeResult.exportAudioName }}</p>
+              <p>{{ t('tts.result.taskId', { id: activeResult.taskId }) }}</p>
+              <p>{{ t('tts.result.createdAt', { time: activeResult.createdAt }) }}</p>
+              <p>{{ t('tts.result.exportName', { name: activeResult.exportAudioName }) }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
           </template>
           <template #actions>
             <BaseButton v-if="activeResult" tone="ghost" @click="copyTaskId">
               <ClipboardDocumentIcon class="h-4 w-4" aria-hidden="true" />
-              <span>复制任务ID</span>
+              <span>{{ t('tts.result.copyTaskId') }}</span>
             </BaseButton>
           </template>
         </GeneratedAudioResultCard>
 
-        <PanelCard title="最近任务" subtitle="展示最近 5 条文本转语音任务，数据来自统一历史记录">
+        <PanelCard :title="t('tts.panels.recent')" :subtitle="t('tts.panels.recentSubtitle')">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
               <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
+              <span>{{ isRefreshingHistory ? t('tts.form.refreshing') : t('tts.form.refresh') }}</span>
             </BaseButton>
           </template>
 
           <RecentTaskList
             :items="recentTaskItems"
             v-model:selected-task-id="selectedHistoryTaskId"
-            empty-text="还没有历史任务。生成音频后会自动加入这里。"
-            action-label="查看"
+            :empty-text="t('tts.result.historyEmptyText')"
+            :action-label="t('tts.form.view')"
           />
         </PanelCard>
       </div>
     </div>
 
-    <PanelCard class="z-20" title="生成参数" subtitle="输入文本并配置模型特定参数后生成目标音频。">
+    <PanelCard class="z-20" :title="t('tts.panels.params')" :subtitle="t('tts.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block text-sm text-slate-700">
-          <span class="mb-1 block text-xs text-stone-500">输入文本</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('tts.form.inputText') }}</span>
           <textarea
             v-model="form.text"
             rows="8"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2"
-            placeholder="请输入要合成的文本内容..."
+            :placeholder="t('tts.form.textPlaceholder')"
           />
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-            <span>字符数 {{ charCount }}，段落数 {{ paragraphCount }}</span>
+            <span>{{ t('tts.form.charStats', { chars: charCount, paragraphs: paragraphCount }) }}</span>
           </div>
         </label>
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <p class="text-base font-semibold tracking-tight text-slate-900">{{ t('tts.form.modelParams') }}</p>
           <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeTextToSpeechTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
-            <p>生成摘要</p>
+            <p>{{ t('tts.form.summary') }}</p>
             <p v-for="tip in generationTips" :key="tip" class="mt-1">{{ tip }}</p>
           </div>
 
@@ -883,11 +891,11 @@ onMounted(async () => {
               </BaseButton>
               <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
                 <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
+                <span>{{ isCancelling ? t('tts.form.cancelling') : t('tts.form.cancel') }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="requestClearText">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-                <span>重置表单</span>
+                <span>{{ t('tts.form.resetForm') }}</span>
               </BaseButton>
             </div>
           </div>
@@ -895,14 +903,14 @@ onMounted(async () => {
       </div>
     </PanelCard>
 
-    <BaseDialog :open="showClearDialog" title="重置表单" @close="cancelClearText">
-      <p class="text-sm leading-6 text-slate-700">表单将重置到默认状态，包括所有参数设置。已生成的结果记录不会被删除。确定继续吗？</p>
+    <BaseDialog :open="showClearDialog" :title="t('tts.dialog.resetTitle')" @close="cancelClearText">
+      <p class="text-sm leading-6 text-slate-700">{{ t('tts.dialog.resetBody') }}</p>
       <template #footer>
         <BaseButton tone="ghost" @click="cancelClearText">
-          <span>取消</span>
+          <span>{{ t('common.cancel') }}</span>
         </BaseButton>
         <BaseButton @click="confirmClearText">
-          <span>确认重置</span>
+          <span>{{ t('tts.dialog.confirmReset') }}</span>
         </BaseButton>
       </template>
     </BaseDialog>

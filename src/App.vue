@@ -13,15 +13,18 @@ import {
 } from '@heroicons/vue/24/outline';
 import type { Component } from 'vue';
 import { onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 
 import BaseTopNoticeBar from '@/components/common/BaseTopNoticeBar.vue';
 import { HistoryTaskType } from '@/enums/task';
+import { initUiLanguage } from '@/hooks/useUiLanguage';
 import { appRoutes } from '@/routers';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 
 const route = useRoute();
+const { t } = useI18n();
 const uiStore = useUiStore();
 const uiConfigStore = useUiConfigStore();
 
@@ -41,6 +44,7 @@ const navIcons: Record<string, Component> = {
 
 onMounted(() => {
   void uiConfigStore.ensureLoaded();
+  void initUiLanguage();
 });
 </script>
 
@@ -108,7 +112,7 @@ onMounted(() => {
           >
             <component :is="navIcons[String(item.name)]" class="h-4 w-4" aria-hidden="true" />
           </span>
-          <span :class="uiStore.sidebarCollapsed ? 'hidden' : 'inline'">{{ item.meta?.title }}</span>
+          <span :class="uiStore.sidebarCollapsed ? 'hidden' : 'inline'">{{ item.meta?.title ? t(String(item.meta.title)) : "" }}</span>
         </RouterLink>
       </nav>
     </aside>

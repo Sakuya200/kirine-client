@@ -6,6 +6,7 @@ use serde_json::Value;
 use tokio::sync::watch;
 use tracing::{error, info};
 
+use crate::error::{codes, AppError};
 use crate::{
     common::{
         local_paths::{resolve_local_log_dir, resolve_task_path},
@@ -502,11 +503,15 @@ pub(crate) async fn prepare_voice_clone_model_env(
         .model_downloaded_impl(base_model, model_version)
         .await?;
     if !model_downloaded {
-        bail!(
-            "模型 {}:{} 未安装，请先在模型管理页安装后再执行任务",
-            base_model,
-            model_version
-        );
+        return Err(AppError::coded(
+            codes::MODEL_NOT_INSTALLED,
+            format!(
+                "模型 {}:{} 未安装，请先在模型管理页安装后再执行任务",
+                base_model, model_version
+            ),
+        )
+        .with_param("model", format!("{}:{}", base_model, model_version))
+        .into_anyhow());
     }
 
     if !ensure_torch_runtime_script_path.exists() {

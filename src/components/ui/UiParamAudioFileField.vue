@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 
 interface Props {
@@ -12,12 +13,14 @@ interface Props {
   extensions?: string[];
 }
 
+const { t } = useI18n();
+
 const props = withDefaults(defineProps<Props>(), {
   description: '',
-  placeholder: '尚未选择音频文件',
-  dialogTitle: '选择音频文件',
-  buttonText: '选择音频',
-  clearButtonText: '清空',
+  placeholder: undefined,
+  dialogTitle: undefined,
+  buttonText: undefined,
+  clearButtonText: undefined,
   extensions: () => []
 });
 
@@ -27,12 +30,12 @@ const emit = defineEmits<{
 
 const chooseAudioFile = async () => {
   const selected = await open({
-    title: props.dialogTitle,
+    title: props.dialogTitle ?? t('common.ui.selectAudioFile'),
     multiple: false,
     directory: false,
     filters: [
       {
-        name: '音频文件',
+        name: t('common.ui.audioFiles'),
         extensions: props.extensions.length > 0 ? props.extensions : ['wav', 'mp3', 'flac', 'm4a', 'ogg']
       }
     ]
@@ -53,7 +56,7 @@ const clearSelection = () => {
     <span class="mb-1 block text-xs text-stone-500">{{ label }}</span>
     <div class="rounded-xl border border-brand-200 bg-white/90 p-3">
       <p class="break-all text-sm text-slate-700">
-        {{ modelValue || placeholder }}
+        {{ modelValue || (placeholder ?? t('common.ui.noAudioSelected')) }}
       </p>
 
       <div class="mt-3 flex flex-wrap gap-2">
@@ -62,7 +65,7 @@ const clearSelection = () => {
           class="inline-flex h-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-sm font-medium text-white transition hover:bg-brand-600"
           @click="void chooseAudioFile()"
         >
-          {{ buttonText }}
+          {{ buttonText ?? t('common.ui.selectAudioButton') }}
         </button>
 
         <button
@@ -71,7 +74,7 @@ const clearSelection = () => {
           class="inline-flex h-9 items-center justify-center rounded-lg border border-brand-200 px-3 text-sm font-medium text-stone-600 transition hover:bg-brand-50"
           @click="clearSelection"
         >
-          {{ clearButtonText }}
+          {{ clearButtonText ?? t('common.ui.clear') }}
         </button>
       </div>
     </div>

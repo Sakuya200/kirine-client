@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { EyeIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, useSlots } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import AudioResultPlayer from '@/components/common/AudioResultPlayer.vue';
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -31,10 +32,9 @@ interface Props {
   downloadAudio?: (taskId: number) => Promise<boolean>;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  title: '生成结果',
-  subtitle: '展示最近一次任务的返回结果和输出文件信息'
-});
+const props = withDefaults(defineProps<Props>(), { title: undefined, subtitle: undefined });
+
+const { t } = useI18n();
 const emit = defineEmits<{
   cancel: [historyId: number];
 }>();
@@ -76,7 +76,7 @@ defineExpose({
 </script>
 
 <template>
-  <PanelCard :title="title" :subtitle="subtitle">
+  <PanelCard :title="title ?? t('common.resultCard.title')" :subtitle="subtitle ?? t('common.resultCard.subtitle')">
     <div v-if="result" class="surface-grid rounded-2xl border border-brand-200 bg-white/82 p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
@@ -86,7 +86,7 @@ defineExpose({
         <div class="flex items-center gap-2">
           <BaseButton v-if="canViewDetail" tone="ghost" size="sm" :loading="isDetailLoading" @click="openDetail">
             <EyeIcon v-if="!isDetailLoading" class="h-4 w-4" aria-hidden="true" />
-            <span>{{ isDetailLoading ? '载入中...' : '查看详情' }}</span>
+            <span>{{ isDetailLoading ? t('common.resultCard.loadingDetail') : t('common.resultCard.viewDetail') }}</span>
           </BaseButton>
           <StatusPill :status="result.status" />
         </div>
@@ -97,7 +97,7 @@ defineExpose({
           :task="result"
           :load-audio-asset="loadAudioAsset"
           :download-audio="downloadAudio"
-          download-label="下载"
+          :download-label="t('common.resultCard.download')"
           download-tone="ghost"
         />
       </div>

@@ -10,6 +10,7 @@
 - 所有生成音频统一由 `GeneratedAudioSource` 定位：`get_generated_audio` 读取字节供前端构造 Blob URL 播放，`save_generated_audio_as` 使用同一来源另存为；流式消息以 `historyId + messageId` 精确索引，不依赖活动会话。
 - 流式说话人支持消息侧别（`side`，left/right）与头像：头像原图在创建任务时复制进任务 sample 目录并序列化路径入 context.json，经 `get_streaming_speaker_avatar` 读取；说话人列表经 `update_streaming_speakers` 全量更新（运行中经 0x11 帧热重建，name 即身份禁改名，运行中 trained 仅可删）；前端 `StreamingMessageItem` 渲染整行消息（头像/状态/气泡，TransitionGroup 进出场动画），头像是 Blob URL + 首字占位回退。
 
+- [i18n Architecture](i18n-architecture.md) - vue-i18n 按模块词条、UiLanguage 持久化与设置页切换、AppError 错误码化、`_KEY` 枚举表约定、en 缺词回退中文
 - [Project Overview](project-overview.md) - 项目全貌、技术栈、核心功能、存储模式（Local/Remote）概览
 - [Frontend Architecture](tech-stack-frontend.md) - Vue 3 前端目录结构、配置驱动参数表单、UI 组件体系
 - [Backend Architecture](tech-stack-backend.md) - Tauri/Rust 后端模块、Hooks 层、配置系统、Pipeline、远程 client/RemoteService、流式语音会话层

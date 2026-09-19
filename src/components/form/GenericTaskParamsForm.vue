@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import UiParamAudioFileField from '@/components/ui/UiParamAudioFileField.vue';
 import UiParamInputField from '@/components/ui/UiParamInputField.vue';
@@ -14,6 +15,8 @@ interface Props {
   modelValue: Record<string, unknown>;
   taskConfig: TaskParamConfig | null;
 }
+
+const { t } = useI18n();
 
 const props = defineProps<Props>();
 
@@ -133,7 +136,7 @@ const mapSelectOptions = (options: SelectOption[]) =>
           :label="param.componentProps.label || param.name"
           :description="param.componentProps.helpText || param.description"
           :options="mapSelectOptions(param.componentProps.options)"
-          :placeholder="param.componentProps.placeholder || '请选择'"
+          :placeholder="param.componentProps.placeholder || t('common.ui.selectPlaceholder')"
           @update:model-value="handleSelectChange(param, $event)"
         />
 
@@ -154,9 +157,9 @@ const mapSelectOptions = (options: SelectOption[]) =>
           :label="param.componentProps.label || param.name"
           :description="param.componentProps.helpText || param.description"
           :placeholder="param.componentProps.placeholder"
-          :dialog-title="String(param.componentProps.extra.dialogTitle ?? '选择音频文件')"
-          :button-text="String(param.componentProps.extra.buttonText ?? '选择音频')"
-          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? '清空')"
+          :dialog-title="String(param.componentProps.extra.dialogTitle ?? t('common.ui.selectAudioFile'))"
+          :button-text="String(param.componentProps.extra.buttonText ?? t('common.ui.selectAudioButton'))"
+          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? t('common.ui.clear'))"
           :extensions="Array.isArray(param.componentProps.extra.extensions) ? (param.componentProps.extra.extensions as string[]) : []"
           @update:model-value="handleFileChange(param, $event)"
         />
@@ -167,9 +170,9 @@ const mapSelectOptions = (options: SelectOption[]) =>
           :label="param.componentProps.label || param.name"
           :description="param.componentProps.helpText || param.description"
           :placeholder="param.componentProps.placeholder"
-          :dialog-title="String(param.componentProps.extra.dialogTitle ?? '选择文本文件')"
-          :button-text="String(param.componentProps.extra.buttonText ?? '上传文本')"
-          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? '清空')"
+          :dialog-title="String(param.componentProps.extra.dialogTitle ?? t('common.ui.selectTextFile'))"
+          :button-text="String(param.componentProps.extra.buttonText ?? t('common.ui.uploadText'))"
+          :clear-button-text="String(param.componentProps.extra.clearButtonText ?? t('common.ui.clear'))"
           :extensions="Array.isArray(param.componentProps.extra.extensions) ? (param.componentProps.extra.extensions as string[]) : []"
           @update:model-value="handleFileChange(param, $event)"
         />

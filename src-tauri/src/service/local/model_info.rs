@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::Path};
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     Set,
@@ -8,6 +8,7 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use tokio::fs;
 
+use crate::error::{codes, AppError};
 use crate::{
     common::local_paths::{ensure_child_dir, resolve_local_log_dir},
     config::HardwareType,
@@ -184,13 +185,20 @@ impl LocalService {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
         if !model_info.supported_devices.contains(&device) {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                model_info.model_name,
-                model_info.model_version,
-                device,
-                model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    model_info.model_name,
+                    model_info.model_version,
+                    device,
+                    model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", model_info.model_name, model_info.model_version))
+            .with_param("device", device.as_str())
+            .with_param("supported", format!("{:?}", model_info.supported_devices))
+            .into_anyhow());
         }
         let runtime_config = self.runtime_config()?;
         let src_model_root = resolve_src_model_root(self.app_dir())?;
@@ -284,13 +292,20 @@ impl LocalService {
         let row = self.find_model_info_row_by_id(model_id).await?;
         let model_info = map_model_info(row.clone())?;
         if !model_info.supported_devices.contains(&device) {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                model_info.model_name,
-                model_info.model_version,
-                device,
-                model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    model_info.model_name,
+                    model_info.model_version,
+                    device,
+                    model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", model_info.model_name, model_info.model_version))
+            .with_param("device", device.as_str())
+            .with_param("supported", format!("{:?}", model_info.supported_devices))
+            .into_anyhow());
         }
 
         let mut active_model: model_info_entity::ActiveModel = row.into();

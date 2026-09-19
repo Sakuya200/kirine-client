@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowDownTrayIcon, PauseIcon, PlayIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const uiStore = useUiStore();
+const { t } = useI18n();
 const store = useStreamingSpeechStore();
 const replayAudioUrl = ref<string | null>(null);
 const isLoadingReplayAudio = ref(false);
@@ -46,15 +48,15 @@ const { isPlaying, togglePlayback, setAudioPath } = useStreamableAudioPlayer({
   sourceUrl: () => sourceUrl.value,
   hasData,
   onPlaybackError: () => {
-    uiStore.notifyError('音频播放失败，请检查音频数据是否可解码。');
+    uiStore.notifyError(t('common.audio.decodeFailed'));
   }
 });
 
 const actionLabel = computed(() => {
-  if (isPlaying.value) return '暂停播放';
-  if (isLoadingReplayAudio.value) return '加载音频中';
-  if (!hasData.value) return '等待数据';
-  return '播放音频';
+  if (isPlaying.value) return t('common.audio.pause');
+  if (isLoadingReplayAudio.value) return t('common.audio.loadingAudio');
+  if (!hasData.value) return t('common.audio.waitingData');
+  return t('common.audio.play');
 });
 
 const showDownload = computed(() => props.mode === 'stream' && (!!props.audioPath || audioState.value?.streamComplete === true));
@@ -80,7 +82,7 @@ const ensureReplayAudioLoaded = async () => {
   const historyId = message.value?.taskId;
   const messageId = props.messageId;
   if (historyId === undefined || !messageId) {
-    uiStore.notifyWarning('当前没有可播放的音频索引。');
+    uiStore.notifyWarning(t('common.audio.noPlayableIndex'));
     return false;
   }
 
@@ -122,7 +124,7 @@ const downloadAudio = async () => {
     const historyId = message.value?.taskId;
     const messageId = props.messageId;
     if (historyId === undefined || messageId === undefined) {
-      uiStore.notifyWarning('当前没有可下载的音频索引。');
+      uiStore.notifyWarning(t('common.audio.noDownloadIndex'));
       return;
     }
 
@@ -132,11 +134,11 @@ const downloadAudio = async () => {
       messageId
     });
     if (!saved) {
-      uiStore.notifyInfo('已取消下载。', 2200);
+      uiStore.notifyInfo(t('common.audio.downloadCancelled'), 2200);
       return;
     }
 
-    uiStore.notifySuccess('音频已保存。', 2200);
+    uiStore.notifySuccess(t('common.audio.saved'), 2200);
   } catch (error) {
     uiStore.notifyError(error instanceof Error ? error.message : String(error));
   } finally {
@@ -178,8 +180,8 @@ onBeforeUnmount(releaseReplayAudioUrl);
       size="sm"
       :disabled="isDownloading"
       class="h-8 min-h-0 w-8 min-w-0 rounded-full px-0"
-      :title="isDownloading ? '下载中…' : '下载音频'"
-      :aria-label="isDownloading ? '下载中…' : '下载音频'"
+      :title="isDownloading ? t('common.loading') : t('common.audio.downloadLabel')"
+      :aria-label="isDownloading ? t('common.loading') : t('common.audio.downloadLabel')"
       @click="downloadAudio"
     >
       <ArrowDownTrayIcon class="h-4 w-4" :class="isDownloading ? 'opacity-60' : ''" aria-hidden="true" />

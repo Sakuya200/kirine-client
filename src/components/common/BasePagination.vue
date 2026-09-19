@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline';
 
@@ -29,7 +30,9 @@ const emit = defineEmits<{
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.totalItems / props.pageSize)));
 
-const pageSizeOptions = computed(() => props.pageSizeOptions.map(size => ({ label: `${size} 条/页`, value: size })));
+const { t } = useI18n();
+
+const pageSizeOptions = computed(() => props.pageSizeOptions.map(size => ({ label: t('common.ui.perPage', { size }), value: size })));
 
 type PageToken = number | 'ellipsis';
 
@@ -101,8 +104,8 @@ const pageButtonClass =
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center gap-3">
       <span class="text-xs text-stone-500">
-        共 <span class="font-semibold text-stone-700">{{ totalItems }}</span> 条
-        <template v-if="totalItems > 0">· 第 {{ rangeStart }}-{{ rangeEnd }} 条</template>
+        {{ t('common.ui.totalItems', { total: totalItems }) }}
+        <template v-if="totalItems > 0">{{ t('common.ui.range', { start: rangeStart, end: rangeEnd }) }}</template>
       </span>
       <div class="w-32">
         <BaseListbox
@@ -115,14 +118,14 @@ const pageButtonClass =
     </div>
 
     <div class="flex items-center gap-1.5">
-      <button type="button" :disabled="disabled || loading || currentPage <= 1" :class="navButtonClass" aria-label="第一页" @click="goTo(1)">
+      <button type="button" :disabled="disabled || loading || currentPage <= 1" :class="navButtonClass" :aria-label="t('common.ui.firstPage')" @click="goTo(1)">
         <ChevronDoubleLeftIcon class="h-4 w-4" aria-hidden="true" />
       </button>
       <button
         type="button"
         :disabled="disabled || loading || currentPage <= 1"
         :class="navButtonClass"
-        aria-label="上一页"
+        :aria-label="t('common.ui.prevPage')"
         @click="goTo(currentPage - 1)"
       >
         <ChevronLeftIcon class="h-4 w-4" aria-hidden="true" />
@@ -150,7 +153,7 @@ const pageButtonClass =
         type="button"
         :disabled="disabled || loading || currentPage >= totalPages"
         :class="navButtonClass"
-        aria-label="下一页"
+        :aria-label="t('common.ui.nextPage')"
         @click="goTo(currentPage + 1)"
       >
         <ChevronRightIcon class="h-4 w-4" aria-hidden="true" />
@@ -159,14 +162,14 @@ const pageButtonClass =
         type="button"
         :disabled="disabled || loading || currentPage >= totalPages"
         :class="navButtonClass"
-        aria-label="最后一页"
+        :aria-label="t('common.ui.lastPage')"
         @click="goTo(totalPages)"
       >
         <ChevronDoubleRightIcon class="h-4 w-4" aria-hidden="true" />
       </button>
 
       <span class="ml-1 flex items-center gap-1 text-xs text-stone-500">
-        前往
+        {{ t('common.ui.jumpLabelPrefix') }}
         <input
           v-model="jumpInput"
           type="number"
@@ -177,7 +180,7 @@ const pageButtonClass =
           @keyup.enter="commitJump"
           @blur="commitJump"
         />
-        页
+        {{ t('common.ui.jumpLabelSuffix') }}
       </span>
     </div>
   </div>

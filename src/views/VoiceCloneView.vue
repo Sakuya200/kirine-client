@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import BaseButton from '@/components/common/BaseButton.vue';
@@ -97,6 +98,7 @@ const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<s
 
 const uiStore = useUiStore();
 const modelStore = useModelStore();
+const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -123,9 +125,9 @@ const form = reactive({
   text: '',
   modelParams: {} as Record<string, unknown>
 });
-const formatOptions = TEXT_TO_SPEECH_FORMATS;
+const formatOptions = computed(() => TEXT_TO_SPEECH_FORMATS.map(option => ({ ...option, label: t(option.label) })));
 const selectedLanguageOption = ref<{ label: string; value: AppLanguage } | null>(null);
-const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions[0] ?? null);
+const selectedFormatOption = ref<TextToSpeechOption | null>(formatOptions.value[0] ?? null);
 const selectedDeviceOption = ref<{ label: string; value: string } | null>(null);
 const isGenerating = ref(false);
 const isCancelling = ref(false);
@@ -193,11 +195,11 @@ const canCancelActiveTask = computed(() => {
   return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const cloneSummary = computed(() => [
-  `当前模型为 ${modelStore.getModelLabel(form.baseModel)} ${form.modelVersion}。`,
-  `当前设备为 ${HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase()}。`,
-  `当前语言为 ${selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language]}。`,
-  `输出格式为 ${selectedFormatOption.value?.label ?? form.format}。`,
-  `导出名称为 ${form.exportAudioName}。`
+  t('tts.summary.model', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }),
+  t('tts.summary.device', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }),
+  t('voiceClone.summary.language', { language: selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language] }),
+  t('voiceClone.summary.format', { format: selectedFormatOption.value?.label ?? form.format }),
+  t('voiceClone.summary.exportName', { name: form.exportAudioName })
 ]);
 const activeResultMetaText = computed(() => {
   if (!activeResult.value) {
@@ -210,29 +212,29 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
     taskId: item.taskId,
     title: item.refAudioName,
-    subtitle: `任务 ${item.taskId} · ${item.languageLabel} · ${item.fileName}`,
+    subtitle: t('voiceClone.recent.subtitle', { taskId: item.taskId, language: item.languageLabel, fileName: item.fileName }),
     status: item.status
   }))
 );
 const activeTaskBusyLabel = computed(() => {
   if (isCancelling.value) {
-    return '正在发送终止请求，请稍候';
+    return t('tts.busy.cancelling');
   }
 
   if (isCheckingDeviceType.value) {
-    return '正在检查模型环境，请稍候';
+    return t('tts.busy.checkingDevice');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认硬件环境切换';
+    return t('tts.busy.awaitingDeviceConfirm');
   }
 
   if (isGenerating.value) {
-    return '正在创建声音克隆任务，请稍候';
+    return t('voiceClone.busy.creating');
   }
 
   if (activeResult.value?.status === TaskStatus.Pending || activeResult.value?.status === TaskStatus.Running) {
-    return '任务执行中，页面会持续刷新状态';
+    return t('tts.busy.running');
   }
 
   return '';
@@ -240,14 +242,14 @@ const activeTaskBusyLabel = computed(() => {
 const isSubmitPending = computed(() => isGenerating.value || isDeviceGuardPending.value);
 const submitButtonText = computed(() => {
   if (isCheckingDeviceType.value) {
-    return '检查环境中...';
+    return t('tts.submit.checking');
   }
 
   if (isAwaitingDeviceConfirmation.value) {
-    return '等待确认...';
+    return t('tts.submit.awaitingConfirm');
   }
 
-  return isGenerating.value ? '生成中...' : '生成音频';
+  return isGenerating.value ? t('tts.submit.generating') : t('tts.submit.generate');
 });
 
 watch(
@@ -320,7 +322,10 @@ watch(
 );
 
 const findLanguageLabel = (language: AppLanguage) => APP_LANGUAGE_LABELS[language] ?? language;
-const findFormatLabel = (format: TextToSpeechFormat) => TEXT_TO_SPEECH_FORMATS.find(option => option.value === format)?.label ?? format;
+const findFormatLabel = (format: TextToSpeechFormat) => {
+  const found = TEXT_TO_SPEECH_FORMATS.find(option => option.value === format);
+  return found ? t(found.label) : format;
+};
 
 const clearReplayTaskId = async () => {
   if (!(HISTORY_TASK_REPLAY_QUERY_KEY in route.query)) {
@@ -397,7 +402,7 @@ const applyReplayConfig = (result: VoiceCloneResult, refAudioPath: string, notif
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
   uiStore.notifyInfo(notifyMessage, 2800);
 };
@@ -419,7 +424,7 @@ const applyHistoryTaskToForm = (result: VoiceCloneResult, refAudioPath: string, 
   form.text = result.text;
   form.modelParams = normalizeVoiceCloneModelParams(result.baseModel, { ...result.modelParams });
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === result.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === result.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === result.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === result.device) ?? null;
 
   if (setAsActiveResult) {
@@ -442,13 +447,13 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
 
     if (record.taskType !== HistoryTaskType.VoiceClone) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
     const result = mapHistoryRecordToResult(record);
     if (!result) {
-      uiStore.notifyError('历史任务配置解析失败。');
+      uiStore.notifyError(t('tts.notice.parseFailed'));
       return;
     }
 
@@ -456,7 +461,7 @@ const loadSelectedHistoryTask = async (taskId: number) => {
     generationHistory.value = generationHistory.value.map(item => (item.taskId === result.taskId ? result : item));
     await resultCardRef.value?.refreshDetailRecord();
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入声音克隆历史任务配置失败，请检查后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.loadFailed'), error));
   }
 };
 
@@ -485,19 +490,19 @@ const hydrateReplayTaskFromRoute = async () => {
     const record = await invoke<HistoryRecord>('get_history_record', { historyId });
 
     if (record.taskType !== HistoryTaskType.VoiceClone) {
-      uiStore.notifyWarning('目标历史任务与当前页面类型不匹配，无法载入配置。');
+      uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
       return;
     }
 
     const result = mapHistoryRecordToResult(record);
     if (!result) {
-      uiStore.notifyError('历史任务配置解析失败。');
+      uiStore.notifyError(t('tts.notice.parseFailed'));
       return;
     }
 
-    applyReplayConfig(result, record.detail.refAudioPath, `已载入历史任务 ${historyId} 的配置，请重新创建新任务。`);
+    applyReplayConfig(result, record.detail.refAudioPath, t('voiceClone.notice.replayLoaded', { historyId }));
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('载入历史任务配置失败，请检查任务记录是否仍然存在', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.loadGenericFailed'), error));
   } finally {
     await clearReplayTaskId();
   }
@@ -530,10 +535,10 @@ const syncActiveTaskStatusRefresh = () => {
 const selectReferenceAudio = async () => {
   try {
     const selected = await open({
-      title: '选择参考音频',
+      title: t('voiceClone.dialog.selectRefAudio'),
       multiple: false,
       directory: false,
-      filters: [{ name: '音频文件', extensions: [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS] }]
+      filters: [{ name: t('voiceClone.dialog.audioFiles'), extensions: [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS] }]
     });
 
     if (typeof selected !== 'string') {
@@ -546,7 +551,7 @@ const selectReferenceAudio = async () => {
       filePath: selected
     };
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('打开文件选择器失败', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.pickerFailed'), error));
   }
 };
 
@@ -568,11 +573,11 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {})
       .slice(0, 5);
 
     if (notifyOnSuccess) {
-      uiStore.notifySuccess('声音克隆任务状态已刷新。', 2200);
+      uiStore.notifySuccess(t('voiceClone.notice.statusRefreshed'), 2200);
     }
   } catch (error) {
     generationHistory.value = [];
-    uiStore.notifyError(formatErrorMessage('刷新声音克隆历史任务失败，请检查 Rust 后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.refreshFailed'), error));
   } finally {
     isHistoryRefreshInFlight = false;
     if (manual) {
@@ -624,7 +629,7 @@ const refreshActiveTaskStatus = async () => {
       stopActiveTaskStatusRefresh();
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('刷新声音克隆任务状态失败，请检查后端日志', error));
+    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.refreshCurrentFailed'), error));
   } finally {
     if (generation === activeTaskRefreshGeneration) {
       isActiveTaskRefreshInFlight = false;
@@ -648,7 +653,7 @@ const createTask = async () => {
   }
 
   isGenerating.value = true;
-  uiStore.notifyInfo('正在创建声音克隆任务。', 2200);
+  uiStore.notifyInfo(t('voiceClone.notice.submitting'), 2200);
 
   try {
     const payload = await invoke<VoiceCloneTaskResultPayload>('create_voice_clone_task', {
@@ -671,10 +676,10 @@ const createTask = async () => {
     setSelectedHistoryTaskId(result.taskId, true);
     generationHistory.value = [result, ...generationHistory.value.filter(item => item.taskId !== result.taskId)].slice(0, 5);
     syncActiveTaskStatusRefresh();
-    uiStore.notifySuccess(`声音克隆任务已创建，任务 ID ${result.taskId}。`, 3600);
+    uiStore.notifySuccess(t('voiceClone.notice.created', { taskId: result.taskId }), 3600);
   } catch (error) {
-    console.error('创建声音克隆任务失败：', error);
-    uiStore.notifyError(formatErrorMessage('声音克隆任务创建失败', error));
+    console.error(t('voiceClone.notice.createLogFailed'), error);
+    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.createFailed'), error));
   } finally {
     isGenerating.value = false;
   }
@@ -694,15 +699,15 @@ const cancelActiveTask = async () => {
     });
 
     if (!accepted) {
-      uiStore.notifyWarning('当前任务已经提交过终止请求。');
+      uiStore.notifyWarning(t('tts.notice.alreadyCancelling'));
       return;
     }
 
-    uiStore.notifyInfo(`已发送终止请求，任务 ${taskId} 会在后端停止后刷新状态。`, 3600);
+    uiStore.notifyInfo(t('tts.notice.cancelRequested', { taskId }), 3600);
     await refreshActiveTaskStatus();
     await loadRecentTasks();
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('终止任务失败', error));
+    uiStore.notifyError(formatErrorMessage(t('tts.notice.cancelFailed'), error));
   } finally {
     isCancelling.value = false;
   }
@@ -726,16 +731,16 @@ const resetForm = () => {
   form.text = '';
   form.modelParams = {};
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   selectedDeviceOption.value = deviceOptions.value.find(option => option.value === HardwareType.Cpu) ?? null;
-  uiStore.notifyInfo('表单已重置。', 2200);
+  uiStore.notifyInfo(t('voiceClone.notice.formReset'), 2200);
 };
 
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
-  selectedFormatOption.value = formatOptions.find(option => option.value === form.format) ?? null;
+  selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });
@@ -752,38 +757,38 @@ usePollingResume(() => {
 
 <template>
   <div class="space-y-5">
-    <PageHeader title="声音克隆" description="使用参考音频、参考台词和目标文本生成新的语音音频。" eyebrow="Voice-Cloning" />
+    <PageHeader :title="t('voiceClone.title')" :description="t('voiceClone.description')" eyebrow="Voice-Cloning" />
 
     <BaseLoadingBanner v-if="activeTaskBusyLabel" :label="activeTaskBusyLabel" />
 
     <div class="grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <PanelCard title="基础参数" subtitle="参考音频与参考台词必须严格对应，硬件类型按当前任务单独选择。">
+      <PanelCard :title="t('voiceClone.panels.basic')" :subtitle="t('voiceClone.panels.basicSubtitle')">
         <div class="grid gap-4 md:grid-cols-2">
-          <BaseListbox v-model="form.baseModel" label="基础模型" :options="modelOptions" />
-          <BaseListbox v-model="form.modelVersion" label="模型版本" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
+          <BaseListbox v-model="form.baseModel" :label="t('tts.form.baseModel')" :options="modelOptions" />
+          <BaseListbox v-model="form.modelVersion" :label="t('tts.form.modelVersion')" :options="modelVersionOptions" :disabled="modelVersionOptions.length === 0" />
           <BaseListbox
             v-model="form.device"
             v-model:selected-option="selectedDeviceOption"
-            label="设备类型"
+            :label="t('tts.form.deviceType')"
             :options="deviceOptions"
             :disabled="deviceOptions.length === 0"
           />
-          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" label="输出语言" :options="languageOptions" />
-          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" label="输出格式" :options="formatOptions" />
+          <BaseListbox v-model="form.language" v-model:selected-option="selectedLanguageOption" :label="t('tts.form.language')" :options="languageOptions" />
+          <BaseListbox v-model="form.format" v-model:selected-option="selectedFormatOption" :label="t('tts.form.format')" :options="formatOptions" />
           <label class="block text-sm text-slate-700 md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">导出音频名称</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ t('tts.form.exportAudioName') }}</span>
             <input
               v-model="form.exportAudioName"
               class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2"
-              placeholder="例如 clone_demo"
+              :placeholder="t('tts.form.exportNamePlaceholder')"
             />
           </label>
 
           <label class="block md:col-span-2">
-            <span class="mb-1 block text-xs text-stone-500">参考音频</span>
+            <span class="mb-1 block text-xs text-stone-500">{{ t('voiceClone.form.refAudio') }}</span>
             <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
-              <BaseButton tone="ghost" @click="selectReferenceAudio">选择音频</BaseButton>
-              <span>{{ form.refAudioFile?.fileName || '尚未选择参考音频' }}</span>
+              <BaseButton tone="ghost" @click="selectReferenceAudio">{{ t('voiceClone.form.selectAudio') }}</BaseButton>
+              <span>{{ form.refAudioFile?.fileName || t('voiceClone.form.noRefAudio') }}</span>
               <span v-if="form.refAudioFile" class="break-all text-xs text-stone-500">{{ form.refAudioFile?.filePath }}</span>
             </div>
           </label>
@@ -797,72 +802,72 @@ usePollingResume(() => {
           :meta-text="activeResultMetaText"
           :load-audio-asset="loadResultAudioAsset"
           :download-audio="saveResultAudio"
-          empty-text="还没有生成结果。完成参考音频和文本输入后，结果会显示在这里。"
+          :empty-text="t('voiceClone.result.emptyText')"
           @cancel="cancelActiveTask"
         >
           <template #details>
             <div v-if="activeResult" class="space-y-1">
-              <p>任务 ID：{{ activeResult.taskId }}</p>
-              <p>生成时间：{{ activeResult.createdAt }}</p>
-              <p>导出名称：{{ activeResult.exportAudioName }}</p>
-              <p>参考音频：{{ activeResult.refAudioName }}</p>
-              <p v-if="activeResult.refText" class="pt-1 line-clamp-3 text-slate-700">参考台词：{{ activeResult.refText }}</p>
+              <p>{{ t('voiceClone.result.taskId', { id: activeResult.taskId }) }}</p>
+              <p>{{ t('voiceClone.result.createdAt', { time: activeResult.createdAt }) }}</p>
+              <p>{{ t('voiceClone.result.exportName', { name: activeResult.exportAudioName }) }}</p>
+              <p>{{ t('voiceClone.result.refAudio', { name: activeResult.refAudioName }) }}</p>
+              <p v-if="activeResult.refText" class="pt-1 line-clamp-3 text-slate-700">{{ t('voiceClone.result.refText', { text: activeResult.refText }) }}</p>
               <p class="pt-1 line-clamp-4 text-slate-700">{{ activeResult.text }}</p>
             </div>
           </template>
         </GeneratedAudioResultCard>
 
-        <PanelCard title="最近任务" subtitle="展示最近 5 条声音克隆任务，数据来自统一历史记录">
+        <PanelCard :title="t('voiceClone.panels.recent')" :subtitle="t('voiceClone.panels.recentSubtitle')">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ manual: true, notifyOnSuccess: true })">
               <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
-              <span>{{ isRefreshingHistory ? '刷新中...' : '刷新状态' }}</span>
+              <span>{{ isRefreshingHistory ? t('tts.form.refreshing') : t('tts.form.refresh') }}</span>
             </BaseButton>
           </template>
 
           <RecentTaskList
             :items="recentTaskItems"
             v-model:selected-task-id="selectedHistoryTaskId"
-            empty-text="还没有历史任务。生成音频后会自动加入这里。"
-            action-label="查看"
+            :empty-text="t('tts.result.historyEmptyText')"
+            :action-label="t('tts.form.view')"
           />
         </PanelCard>
       </div>
     </div>
 
-    <PanelCard class="z-20" title="生成参数" subtitle="输入目标台词并配置模型特定参数后生成新的语音音频。">
+    <PanelCard class="z-20" :title="t('voiceClone.panels.params')" :subtitle="t('voiceClone.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block">
-          <span class="mb-1 block text-xs text-stone-500">参考台词（可选）</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('voiceClone.form.refText') }}</span>
           <textarea
             v-model="form.refText"
             rows="4"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="可选，填写参考音频中实际说出的文本"
+            :placeholder="t('voiceClone.form.refTextPlaceholder')"
           />
         </label>
 
         <label class="block">
-          <span class="mb-1 block text-xs text-stone-500">目标台词</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('voiceClone.form.text') }}</span>
           <textarea
             v-model="form.text"
             rows="5"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            placeholder="填写要合成为新音频的目标文本"
+            :placeholder="t('voiceClone.form.textPlaceholder')"
           />
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
-            <span>参考台词 {{ trimmedRefText.length }} 字，目标台词 {{ charCount }} 字</span>
+            <span>{{ t('voiceClone.form.charStats', { refChars: trimmedRefText.length, chars: charCount }) }}</span>
           </div>
         </label>
 
         <section class="rounded-2xl border border-brand-200 bg-white/80 p-4">
-          <p class="text-base font-semibold tracking-tight text-slate-900">模型特定参数</p>
+          <p class="text-base font-semibold tracking-tight text-slate-900">{{ t('tts.form.modelParams') }}</p>
           <GenericTaskParamsForm class="mt-4" v-model="form.modelParams" :task-config="activeVoiceCloneTaskConfig" />
         </section>
 
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
-            <p>生成摘要</p>
+            <p>{{ t('tts.form.summary') }}</p>
             <p v-for="tip in cloneSummary" :key="tip" class="mt-1">{{ tip }}</p>
           </div>
 
@@ -874,11 +879,11 @@ usePollingResume(() => {
               </BaseButton>
               <BaseButton tone="quiet" :loading="isCancelling" :disabled="!canCancelActiveTask" @click="cancelActiveTask">
                 <StopCircleIcon v-if="!isCancelling" class="h-4 w-4" aria-hidden="true" />
-                <span>{{ isCancelling ? '终止中...' : '终止任务' }}</span>
+                <span>{{ isCancelling ? t('tts.form.cancelling') : t('tts.form.cancel') }}</span>
               </BaseButton>
               <BaseButton tone="ghost" @click="resetForm">
                 <ArrowPathIcon class="h-4 w-4" aria-hidden="true" />
-                <span>重置表单</span>
+                <span>{{ t('tts.form.resetForm') }}</span>
               </BaseButton>
             </div>
           </div>

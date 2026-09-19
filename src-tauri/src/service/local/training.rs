@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
+use crate::error::{codes, AppError};
 use crate::{
     common::{
         local_paths::{resolve_task_path, serialize_task_path},
@@ -130,13 +131,20 @@ impl LocalService {
             .supported_devices
             .contains(&selected_training_device)
         {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                selected_model_info.model_name,
-                selected_model_info.model_version,
-                selected_training_device,
-                selected_model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    selected_model_info.model_name,
+                    selected_model_info.model_version,
+                    selected_training_device,
+                    selected_model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", selected_model_info.model_name, selected_model_info.model_version))
+            .with_param("device", selected_training_device.as_str())
+            .with_param("supported", format!("{:?}", selected_model_info.supported_devices))
+            .into_anyhow());
         }
         let selected_training_mode_label = if selected_training_device == HardwareType::Cpu {
             "CPU"

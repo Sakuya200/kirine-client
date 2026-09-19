@@ -7,6 +7,7 @@ use sea_orm::{
 use tokio::sync::watch;
 use tracing::warn;
 
+use crate::error::{codes, AppError};
 use crate::{
     common::{
         local_paths::{ensure_child_dir, resolve_task_path, serialize_task_path},
@@ -44,23 +45,30 @@ impl LocalService {
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
         if !selected_model_info.supported_devices.contains(&device) {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                selected_model_info.model_name,
-                selected_model_info.model_version,
-                device,
-                selected_model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    selected_model_info.model_name,
+                    selected_model_info.model_version,
+                    device,
+                    selected_model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", selected_model_info.model_name, selected_model_info.model_version))
+            .with_param("device", device.as_str())
+            .with_param("supported", format!("{:?}", selected_model_info.supported_devices))
+            .into_anyhow());
         }
         let ref_audio_path = payload.ref_audio_path.trim().to_string();
         let ref_text = payload.ref_text.trim().to_string();
         let text = payload.text.trim().to_string();
 
         if ref_audio_path.is_empty() {
-            bail!("参考音频不能为空");
+            return Err(AppError::coded(codes::VALIDATION_REF_AUDIO_REQUIRED, "参考音频不能为空").into_anyhow());
         }
         if text.is_empty() {
-            bail!("目标台词不能为空");
+            return Err(AppError::coded(codes::VALIDATION_TEXT_REQUIRED, "目标台词不能为空").into_anyhow());
         }
         let resolved_ref_audio_path =
             resolve_task_path(Path::new(self.data_dir()), &ref_audio_path);

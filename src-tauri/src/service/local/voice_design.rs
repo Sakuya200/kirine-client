@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use anyhow::bail;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
 use tokio::sync::watch;
 use tracing::warn;
 
+use crate::error::{codes, AppError};
 use crate::{
     common::{
         local_paths::{ensure_child_dir, serialize_task_path},
@@ -46,23 +46,30 @@ impl LocalService {
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
         if !selected_model_info.supported_devices.contains(&device) {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                selected_model_info.model_name,
-                selected_model_info.model_version,
-                device,
-                selected_model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    selected_model_info.model_name,
+                    selected_model_info.model_version,
+                    device,
+                    selected_model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", selected_model_info.model_name, selected_model_info.model_version))
+            .with_param("device", device.as_str())
+            .with_param("supported", format!("{:?}", selected_model_info.supported_devices))
+            .into_anyhow());
         }
 
         let prompt = payload.prompt.trim().to_string();
         if prompt.is_empty() {
-            bail!("音色描述不能为空");
+            return Err(AppError::coded(codes::VALIDATION_PROMPT_REQUIRED, "音色描述不能为空").into_anyhow());
         }
 
         let text = payload.text.trim().to_string();
         if text.is_empty() {
-            bail!("目标台词不能为空");
+            return Err(AppError::coded(codes::VALIDATION_TEXT_REQUIRED, "目标台词不能为空").into_anyhow());
         }
 
         let export_audio_name =

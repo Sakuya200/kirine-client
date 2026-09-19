@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { SpeakerStatus } from '@/enums/status';
 import { useUiStore } from '@/stores/ui';
+import { i18n } from '@/locales';
 import type { BaseModel, SpeakerFilter, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 
 interface CreateSpeakerPayload {
@@ -116,7 +117,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
         totalPages.value = 1;
         stats.value = { readyCount: 0, trainingCount: 0, disabledCount: 0, totalSamples: 0 };
         if (!silent) {
-          uiStore.notifyError(formatErrorMessage('加载说话人列表失败', error));
+          uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.loadFailed'), error));
         }
       } finally {
         if (seed === requestSeed) {
@@ -193,11 +194,11 @@ export const useSpeakerStore = defineStore('speakers', () => {
         })
       );
 
-      uiStore.notifySuccess(`已新增说话人“${created.speakerName}”。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.speakers.created', { name: created.speakerName }), 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('新增说话人失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.createFailed'), error));
       return false;
     }
   };
@@ -214,11 +215,11 @@ export const useSpeakerStore = defineStore('speakers', () => {
         })
       );
 
-      uiStore.notifySuccess(`已更新说话人“${updated.speakerName}”的信息。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.speakers.updated', { name: updated.speakerName }), 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('保存说话人信息失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.updateFailed'), error));
       return false;
     }
   };
@@ -238,11 +239,11 @@ export const useSpeakerStore = defineStore('speakers', () => {
       );
 
       speakers.value = [imported, ...speakers.value.filter(item => item.id !== imported.id)];
-      uiStore.notifySuccess(`已导入说话人“${imported.speakerName}”。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.speakers.imported', { name: imported.speakerName }), 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('导入说话人失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.importFailed'), error));
       return false;
     }
   };
@@ -255,15 +256,15 @@ export const useSpeakerStore = defineStore('speakers', () => {
       const deleted = await invoke<boolean>('delete_speaker_info', { speakerId });
 
       if (!deleted) {
-        uiStore.notifyError('删除说话人失败。');
+        uiStore.notifyError(i18n.global.t('common.store.speakers.deleteFailed'));
         return false;
       }
 
-      uiStore.notifySuccess(`已删除说话人“${speakerName}”。`, 3200);
+      uiStore.notifySuccess(i18n.global.t('common.store.speakers.deleted', { name: speakerName }), 3200);
       await refreshSpeakers({ silent: true });
       return true;
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('删除说话人失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.deleteFailed'), error));
       return false;
     }
   };

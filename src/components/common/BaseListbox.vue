@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Listbox, ListboxButton, ListboxLabel, ListboxOption, ListboxOptions } from '@headlessui/vue';
+import { useI18n } from 'vue-i18n';
 import { ChevronUpDownIcon } from '@heroicons/vue/20/solid';
 
 type ListboxValue = string | number | boolean | null | undefined;
@@ -19,10 +20,12 @@ interface Props {
   teleport?: boolean;
 }
 
+const { t } = useI18n();
+
 const props = withDefaults(defineProps<Props>(), {
   optionLabelKey: 'label',
   optionValueKey: 'value',
-  placeholder: '请选择',
+  placeholder: undefined as unknown as string, // 默认走 i18n 回退
   teleport: false,
 });
 
@@ -112,7 +115,7 @@ onBeforeUnmount(() => {
       <span class="sr-only" aria-hidden="true">{{ syncOpen(open) }}</span>
       <ListboxLabel v-if="label" class="mb-1 block text-xs text-stone-500">{{ label }}</ListboxLabel>
       <ListboxButton :class="[buttonClass, disabled ? disabledButtonClass : '']">
-        <span class="block truncate">{{ selectedOption ? getOptionLabel(selectedOption) : placeholder }}</span>
+        <span class="block truncate">{{ selectedOption ? getOptionLabel(selectedOption) : (placeholder ?? t('common.ui.selectPlaceholder')) }}</span>
         <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
           <ChevronUpDownIcon class="h-5 w-5" :class="disabled ? 'text-stone-400' : 'text-brand-500'" aria-hidden="true" />
         </span>

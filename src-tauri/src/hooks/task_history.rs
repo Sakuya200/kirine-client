@@ -1,5 +1,6 @@
 use tauri::{AppHandle, State};
 
+use crate::error::AppError;
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
@@ -121,68 +122,68 @@ pub async fn delete_history_record(
 pub async fn create_text_to_speech_task(
     payload: CreateTextToSpeechTaskPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<TextToSpeechTaskResult, String> {
+) -> std::result::Result<TextToSpeechTaskResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_text_to_speech_task(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
 pub async fn create_model_training_task(
     payload: CreateModelTrainingTaskPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<ModelTrainingTaskResult, String> {
+) -> std::result::Result<ModelTrainingTaskResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_model_training_task(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
 pub async fn cancel_history_task(
     history_id: i64,
     state: State<'_, ServiceState>,
-) -> std::result::Result<bool, String> {
+) -> std::result::Result<bool, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .cancel_history_task(history_id)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
 pub async fn create_voice_clone_task(
     payload: CreateVoiceCloneTaskPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<VoiceCloneTaskResult, String> {
+) -> std::result::Result<VoiceCloneTaskResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_voice_clone_task(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
 pub async fn create_voice_design_task(
     payload: CreateVoiceDesignTaskPayload,
     state: State<'_, ServiceState>,
-) -> std::result::Result<VoiceDesignTaskResult, String> {
+) -> std::result::Result<VoiceDesignTaskResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .create_voice_design_task(payload)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }

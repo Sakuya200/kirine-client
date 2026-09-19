@@ -1,4 +1,8 @@
 <script setup lang="ts">
+
+
+import { useI18n } from 'vue-i18n';
+
 import BaseButton from '@/components/common/BaseButton.vue';
 import StatusPill from '@/components/common/StatusPill.vue';
 import type { TaskStatus } from '@/enums/status';
@@ -18,9 +22,10 @@ interface Props {
 }
 
 withDefaults(defineProps<Props>(), {
-  actionLabel: '查看',
   selectedTaskId: null
 });
+
+const { t } = useI18n();
 
 const emit = defineEmits<{
   'update:selectedTaskId': [taskId: number | null];
@@ -50,7 +55,7 @@ const emit = defineEmits<{
             emit('select', item.taskId);
           "
         >
-          <span>{{ actionLabel }}</span>
+          <span>{{ actionLabel ?? t('common.recentList.actionLabel') }}</span>
         </BaseButton>
       </div>
     </article>

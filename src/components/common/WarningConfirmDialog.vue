@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
+
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
 
@@ -12,10 +14,12 @@ interface Props {
   loading?: boolean;
 }
 
+const { t } = useI18n();
+
 withDefaults(defineProps<Props>(), {
   detailLines: () => [],
-  confirmLabel: '继续',
-  cancelLabel: '取消',
+  confirmLabel: undefined,
+  cancelLabel: undefined,
   loading: false
 });
 
@@ -36,10 +40,10 @@ const emit = defineEmits<{
 
     <template #footer>
       <BaseButton tone="ghost" :disabled="loading" @click="emit('close')">
-        <span>{{ cancelLabel }}</span>
+        <span>{{ cancelLabel ?? t('common.cancel') }}</span>
       </BaseButton>
       <BaseButton tone="solid" :loading="loading" @click="emit('confirm')">
-        <span>{{ confirmLabel }}</span>
+        <span>{{ confirmLabel ?? t('common.ui.continue') }}</span>
       </BaseButton>
     </template>
   </BaseDialog>

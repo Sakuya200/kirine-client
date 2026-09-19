@@ -24,6 +24,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::error::{codes, AppError};
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
@@ -368,7 +369,7 @@ impl LocalService {
         let controls = self
             .active_task_controls
             .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+            .map_err(|_| AppError::coded(codes::TASK_HANDLE_READ_FAILED, "无法读取运行中任务句柄").into_anyhow())?;
         let control = controls.get(&task_id).ok_or_else(|| {
             anyhow::anyhow!("当前任务没有可用的终止句柄，可能已经结束或应用已重启")
         })?;
@@ -387,7 +388,7 @@ impl LocalService {
         let controls = self
             .active_task_controls
             .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+            .map_err(|_| AppError::coded(codes::TASK_HANDLE_READ_FAILED, "无法读取运行中任务句柄").into_anyhow())?;
         let control = controls.get(&task_id).ok_or_else(|| {
             anyhow::anyhow!("当前任务没有可用的终止句柄，可能已经结束或应用已重启")
         })?;
@@ -404,7 +405,7 @@ impl LocalService {
         control
             .cancel_tx
             .send(true)
-            .map_err(|_| anyhow::anyhow!("任务终止信号发送失败"))?;
+            .map_err(|_| AppError::coded(codes::TASK_TERMINATE_SIGNAL_FAILED, "任务终止信号发送失败").into_anyhow())?;
         info!(task_id, task_type = %task_type.as_str(), "task cancellation signal sent");
         Ok(true)
     }

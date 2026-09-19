@@ -13,6 +13,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::timeout;
 use tracing::{error, info, warn};
 
+use crate::error::{codes, AppError};
 use crate::{
     common::{
         local_paths::{is_serialized_task_path, resolve_task_path, serialize_task_path},
@@ -151,7 +152,7 @@ pub fn validate_streaming_speakers(speakers: &[StreamingSpeakerInput]) -> Result
     for s in speakers {
         let name = s.name.trim();
         if name.is_empty() {
-            bail!("说话人名称不能为空");
+            return Err(AppError::coded(codes::VALIDATION_SPEAKER_NAME_REQUIRED, "说话人名称不能为空").into_anyhow());
         }
         if !seen_names.insert(name.to_string()) {
             bail!("说话人名称重复: {name}");
@@ -300,13 +301,20 @@ impl LocalService {
             .find_supported_model_variant(&base_model, &model_version)
             .await?;
         if !selected_model_info.supported_devices.contains(&device) {
-            bail!(
-                "模型 {} {} 不支持设备 {}，请切换为 {:?}",
-                selected_model_info.model_name,
-                selected_model_info.model_version,
-                device,
-                selected_model_info.supported_devices
-            );
+            return Err(AppError::coded(
+                codes::MODEL_DEVICE_UNSUPPORTED,
+                format!(
+                    "模型 {} {} 不支持设备 {}，请切换为 {:?}",
+                    selected_model_info.model_name,
+                    selected_model_info.model_version,
+                    device,
+                    selected_model_info.supported_devices
+                ),
+            )
+            .with_param("model", format!("{} {}", selected_model_info.model_name, selected_model_info.model_version))
+            .with_param("device", device.as_str())
+            .with_param("supported", format!("{:?}", selected_model_info.supported_devices))
+            .into_anyhow());
         }
         // 说话人基础校验（创建与热更新共用）：非空、trained 约束、参考音频约束。
         validate_streaming_speakers(&payload.speakers)?;
@@ -890,7 +898,7 @@ impl LocalService {
         let controls = self
             .active_task_controls
             .read()
-            .map_err(|_| anyhow::anyhow!("无法读取运行中任务句柄"))?;
+            .map_err(|_| AppError::coded(codes::TASK_HANDLE_READ_FAILED, "无法读取运行中任务句柄").into_anyhow())?;
         Ok(controls
             .get(&task_id)
             .and_then(|c| c.streaming_extra.clone()))

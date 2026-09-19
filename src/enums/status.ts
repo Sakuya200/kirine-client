@@ -12,12 +12,12 @@ export enum SpeakerStatus {
   Disabled = 'disabled'
 }
 
-export const STATUS_TEXT: Record<TaskStatus, string> = {
-  [TaskStatus.Pending]: '待执行',
-  [TaskStatus.Running]: '执行中',
-  [TaskStatus.Completed]: '已完成',
-  [TaskStatus.Cancelled]: '已终止',
-  [TaskStatus.Failed]: '失败'
+export const STATUS_TEXT_KEY: Record<TaskStatus, string> = {
+  [TaskStatus.Pending]: 'common.taskStatus.pending',
+  [TaskStatus.Running]: 'common.taskStatus.running',
+  [TaskStatus.Completed]: 'common.taskStatus.completed',
+  [TaskStatus.Cancelled]: 'common.taskStatus.cancelled',
+  [TaskStatus.Failed]: 'common.taskStatus.failed'
 };
 
 export const STATUS_STYLES: Record<TaskStatus, string> = {
@@ -34,10 +34,10 @@ export enum ModelInstallStatus {
   Failed = 'failed'
 }
 
-export const SPEAKER_STATUS_TEXT: Record<SpeakerStatus, string> = {
-  [SpeakerStatus.Ready]: '可用',
-  [SpeakerStatus.Training]: '训练中',
-  [SpeakerStatus.Disabled]: '已停用'
+export const SPEAKER_STATUS_TEXT_KEY: Record<SpeakerStatus, string> = {
+  [SpeakerStatus.Ready]: 'common.speakerStatus.ready',
+  [SpeakerStatus.Training]: 'common.speakerStatus.training',
+  [SpeakerStatus.Disabled]: 'common.speakerStatus.disabled'
 };
 
 export const SPEAKER_STATUS_STYLES: Record<SpeakerStatus, string> = {
@@ -46,10 +46,10 @@ export const SPEAKER_STATUS_STYLES: Record<SpeakerStatus, string> = {
   [SpeakerStatus.Disabled]: 'border-slate-200 bg-slate-100 text-slate-600'
 };
 
-export const MODEL_INSTALL_STATUS_TEXT: Record<ModelInstallStatus, string> = {
-  [ModelInstallStatus.Installed]: '已安装',
-  [ModelInstallStatus.NotInstalled]: '未安装',
-  [ModelInstallStatus.Failed]: '安装失败'
+export const MODEL_INSTALL_STATUS_TEXT_KEY: Record<ModelInstallStatus, string> = {
+  [ModelInstallStatus.Installed]: 'common.modelInstallStatus.installed',
+  [ModelInstallStatus.NotInstalled]: 'common.modelInstallStatus.notInstalled',
+  [ModelInstallStatus.Failed]: 'common.modelInstallStatus.failed'
 };
 
 export const MODEL_INSTALL_STATUS_STYLES: Record<ModelInstallStatus, string> = {

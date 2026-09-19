@@ -3,6 +3,7 @@ import { ref, watch, type Ref } from 'vue';
 
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
+import { i18n } from '@/locales';
 import type { Page, PageRequest } from '@/types/domain';
 
 interface UsePaginationOptions<TItem, TFilter> {
@@ -60,7 +61,7 @@ export function usePagination<TItem, TFilter>(options: UsePaginationOptions<TIte
       }
       items.value = [];
       total.value = 0;
-      uiStore.notifyError(formatErrorMessage(options.errorLabel ?? '加载列表失败', error));
+      uiStore.notifyError(formatErrorMessage(options.errorLabel ?? i18n.global.t('common.store.pagination.loadFailed'), error));
     } finally {
       if (seed === requestSeed) {
         loading.value = false;

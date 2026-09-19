@@ -39,6 +39,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         streaming::update_streaming_speakers,
         settings::get_settings_config,
         settings::get_ui_config,
-        settings::save_settings_config
+        settings::save_settings_config,
+        settings::save_ui_language
     ])
 }

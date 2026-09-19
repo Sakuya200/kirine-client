@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::error::AppError;
 use crate::{
     config::HardwareType,
     service::{
@@ -27,14 +28,14 @@ pub async fn install_model(
     model_id: i64,
     device: HardwareType,
     state: State<'_, ServiceState>,
-) -> std::result::Result<ModelMutationResult, String> {
+) -> std::result::Result<ModelMutationResult, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .install_model(model_id, device)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }
 
 #[tauri::command]
@@ -71,12 +72,12 @@ pub async fn set_model_current_device(
     model_id: i64,
     device: HardwareType,
     state: State<'_, ServiceState>,
-) -> std::result::Result<ModelInfo, String> {
+) -> std::result::Result<ModelInfo, AppError> {
     state
         .0
         .service()
-        .map_err(|err| err.to_string())?
+        .map_err(AppError::from_anyhow)?
         .set_model_current_device(model_id, device)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(AppError::from_anyhow)
 }

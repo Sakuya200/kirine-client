@@ -3,6 +3,7 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowDownTrayIcon, FolderOpenIcon, XMarkIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import BaseDialog from '@/components/common/BaseDialog.vue';
@@ -29,6 +30,7 @@ const emit = defineEmits<{ close: []; submit: [payload: StreamingSpeakerInput] }
 
 const modelStore = useModelStore();
 const uiStore = useUiStore();
+const { t } = useI18n();
 
 const modelOptions = computed(() =>
   modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
@@ -36,8 +38,8 @@ const modelOptions = computed(() =>
 
 const categoryOptions = computed(() => {
   const options = [
-    { label: '语音克隆', value: 'voice-clone' },
-    { label: '已训练', value: 'trained' }
+    { label: t('streaming.form.categoryVoiceClone'), value: 'voice-clone' },
+    { label: t('streaming.form.categoryTrained'), value: 'trained' }
   ];
   // 会话锁定时 trained 的 checkpoint 已随进程启动固化，不支持运行中新增已训练说话人
   if (props.sessionLocked && form.value.category !== 'trained') {
@@ -46,10 +48,10 @@ const categoryOptions = computed(() => {
   return options;
 });
 
-const sideOptions = [
-  { label: '右侧', value: 'right' },
-  { label: '左侧', value: 'left' }
-];
+const sideOptions = computed(() => [
+  { label: t('streaming.form.sideRight'), value: 'right' },
+  { label: t('streaming.form.sideLeft'), value: 'left' }
+]);
 
 const createEmptyForm = (): StreamingSpeakerInput => ({
   name: '',
@@ -99,7 +101,7 @@ const loadTrainedSpeakers = async () => {
     });
     trainedSpeakers.value = result.items;
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('加载已训练说话人失败', error));
+    uiStore.notifyError(formatErrorMessage(t('streaming.form.loadTrainedFailed'), error));
   }
 };
 
@@ -208,10 +210,10 @@ watch(
 const selectRefAudio = async () => {
   try {
     const selected = await openFileDialog({
-      title: '选择参考音频',
+      title: t('streaming.form.selectRefAudio'),
       multiple: false,
       directory: false,
-      filters: [{ name: '音频文件', extensions: [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS] }]
+      filters: [{ name: t('streaming.form.audioFiles'), extensions: [...MODEL_TRAINING_AUDIO_FILE_EXTENSIONS] }]
     });
     if (typeof selected === 'string' && selected.trim().length > 0) {
       const segments = selected.split(/[/\\]/);
@@ -219,7 +221,7 @@ const selectRefAudio = async () => {
       form.value.refAudioName = segments[segments.length - 1] ?? selected;
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('打开文件选择器失败', error));
+    uiStore.notifyError(formatErrorMessage(t('streaming.form.pickerFailed'), error));
   }
 };
 
@@ -231,10 +233,10 @@ const clearRefAudio = () => {
 const selectAvatar = async () => {
   try {
     const selected = await openFileDialog({
-      title: '选择头像图片',
+      title: t('streaming.form.selectAvatar'),
       multiple: false,
       directory: false,
-      filters: [{ name: '图片文件', extensions: [...IMAGE_FILE_EXTENSIONS] }]
+      filters: [{ name: t('streaming.form.imageFiles'), extensions: [...IMAGE_FILE_EXTENSIONS] }]
     });
     if (typeof selected === 'string' && selected.trim().length > 0) {
       const segments = selected.split(/[/\\]/);
@@ -242,7 +244,7 @@ const selectAvatar = async () => {
       form.value.avatarName = segments[segments.length - 1] ?? selected;
     }
   } catch (error) {
-    uiStore.notifyError(formatErrorMessage('打开文件选择器失败', error));
+    uiStore.notifyError(formatErrorMessage(t('streaming.form.pickerFailed'), error));
   }
 };
 
@@ -275,38 +277,38 @@ const submit = () => {
 <template>
   <BaseDialog
     :open="props.open"
-    :title="isEditing ? '编辑说话人' : '新增说话人'"
+    :title="isEditing ? t('streaming.form.editTitle') : t('streaming.form.addTitle')"
     content-class="max-h-[65vh] overflow-y-auto pr-2"
     @close="emit('close')"
   >
     <div class="space-y-4">
       <label class="block text-sm text-slate-700">
-        <span class="mb-1 block text-xs text-stone-500">说话人名称</span>
+        <span class="mb-1 block text-xs text-stone-500">{{ t('streaming.form.name') }}</span>
         <input
           v-model="form.name"
           :disabled="isEditing"
           class="w-full rounded-xl border border-brand-200 bg-white/90 px-3 py-2 disabled:cursor-not-allowed disabled:bg-stone-50 disabled:text-stone-400"
-          placeholder="为该说话人起个名字"
+          :placeholder="t('streaming.form.namePlaceholder')"
         />
-        <span v-if="isEditing" class="mt-1 block text-xs text-stone-400">会话内不支持修改说话人名称，如需改名请删除后重新添加。</span>
+        <span v-if="isEditing" class="mt-1 block text-xs text-stone-400">{{ t('streaming.form.nameLockedHint') }}</span>
       </label>
 
-      <BaseListbox v-model="form.baseModel" label="对应模型" :options="modelOptions" :disabled="modelOptions.length === 0" />
+      <BaseListbox v-model="form.baseModel" :label="t('streaming.form.baseModel')" :options="modelOptions" :disabled="modelOptions.length === 0" />
 
-      <BaseListbox v-model="form.category" label="说话人类别" :options="categoryOptions" />
+      <BaseListbox v-model="form.category" :label="t('streaming.form.category')" :options="categoryOptions" />
 
-      <BaseListbox v-model="form.side" label="消息显示侧" :options="sideOptions" />
+      <BaseListbox v-model="form.side" :label="t('streaming.form.side')" :options="sideOptions" />
 
       <label class="block text-sm text-slate-700">
-        <span class="mb-1 block text-xs text-stone-500">头像（可选）</span>
+        <span class="mb-1 block text-xs text-stone-500">{{ t('streaming.form.avatar') }}</span>
         <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
           <BaseButton tone="ghost" @click="selectAvatar">
             <FolderOpenIcon class="h-4 w-4" aria-hidden="true" />
-            <span>选择图片</span>
+            <span>{{ t('streaming.form.selectImage') }}</span>
           </BaseButton>
-          <span class="min-w-0 flex-1 break-all">{{ form.avatarName || '尚未选择头像图片' }}</span>
+          <span class="min-w-0 flex-1 break-all">{{ form.avatarName || t('streaming.form.noAvatar') }}</span>
           <button v-if="form.avatarPath" type="button" class="text-xs text-stone-500 transition hover:text-brand-700" @click="clearAvatar">
-            清空
+            {{ t('streaming.form.clear') }}
           </button>
         </div>
       </label>
@@ -314,67 +316,67 @@ const submit = () => {
       <template v-if="isTrained">
         <BaseListbox
           v-model="form.speakerDirName"
-          label="已训练说话人"
+          :label="t('streaming.form.trainedSpeaker')"
           :options="trainedSpeakerOptions"
           :disabled="isTrainedDirLocked || trainedSpeakerOptions.length === 0"
         />
-        <p v-if="isTrainedDirLocked" class="text-xs text-stone-400">模型已在会话启动时加载，运行中不支持更换已训练说话人。</p>
-        <p v-else-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">当前模型暂无可用已训练说话人，请先在模型微调页完成一次微调。</p>
+        <p v-if="isTrainedDirLocked" class="text-xs text-stone-400">{{ t('streaming.form.trainedLockedHint') }}</p>
+        <p v-else-if="trainedSpeakerOptions.length === 0" class="text-xs text-stone-400">{{ t('streaming.form.noTrainedSpeakers') }}</p>
       </template>
 
       <template v-else>
         <label class="block text-sm text-slate-700">
-          <span class="mb-1 block text-xs text-stone-500">参考音频</span>
+          <span class="mb-1 block text-xs text-stone-500">{{ t('streaming.form.refAudio') }}</span>
           <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700">
             <BaseButton tone="ghost" @click="selectRefAudio">
               <FolderOpenIcon class="h-4 w-4" aria-hidden="true" />
-              <span>选择音频</span>
+              <span>{{ t('streaming.form.selectAudio') }}</span>
             </BaseButton>
-            <span class="min-w-0 flex-1 break-all">{{ form.refAudioName || '尚未选择参考音频' }}</span>
+            <span class="min-w-0 flex-1 break-all">{{ form.refAudioName || t('streaming.form.noRefAudio') }}</span>
             <button v-if="form.refAudioPath" type="button" class="text-xs text-stone-500 transition hover:text-brand-700" @click="clearRefAudio">
-              清空
+              {{ t('streaming.form.clear') }}
             </button>
           </div>
         </label>
 
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">
-            参考台词<span v-if="needsRefText" class="text-rose-500"> *必填</span><span v-else class="text-stone-400">（可选）</span>
+            {{ t('streaming.form.refText') }}<span v-if="needsRefText" class="text-rose-500">{{ t('streaming.form.required') }}</span><span v-else class="text-stone-400">{{ t('streaming.form.optional') }}</span>
           </span>
           <textarea
             v-model="form.refText"
             rows="3"
             class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-            :placeholder="needsRefText ? '当前模型需要参考文本，请填写参考音频中实际说出的内容' : '可选，填写参考音频中实际说出的文本'"
+            :placeholder="needsRefText ? t('streaming.form.refTextRequiredPlaceholder') : t('streaming.form.refTextOptionalPlaceholder')"
           />
         </label>
       </template>
 
       <label class="block text-sm text-slate-700">
-        <span class="mb-1 block text-xs text-stone-500">备注（可选）</span>
+        <span class="mb-1 block text-xs text-stone-500">{{ t('streaming.form.description') }}</span>
         <textarea
           v-model="form.description"
           rows="2"
           class="w-full rounded-2xl border border-brand-200 bg-white/90 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
-          placeholder="可填写使用场景或管理备注"
+          :placeholder="t('streaming.form.descriptionPlaceholder')"
         />
       </label>
 
       <div class="rounded-xl border border-brand-100 bg-brand-50/40 px-3 py-2 text-xs text-stone-500">
-        类别：<span class="font-medium text-brand-700">{{ isTrained ? '已训练' : '语音克隆' }}</span>
-        <span v-if="isTrained">（使用微调产出的 checkpoint 合成，无需参考音频）</span>
-        <span v-else>（使用基座模型 + 参考音频克隆音色）</span>
+        {{ t('streaming.form.summaryCategory') }}<span class="font-medium text-brand-700">{{ isTrained ? t('streaming.form.trained') : t('streaming.form.voiceClone') }}</span>
+        <span v-if="isTrained">{{ t('streaming.form.trainedSummary') }}</span>
+        <span v-else>{{ t('streaming.form.cloneSummary') }}</span>
       </div>
     </div>
 
     <template #footer>
       <BaseButton tone="ghost" @click="emit('close')">
         <XMarkIcon class="h-4 w-4" aria-hidden="true" />
-        <span>取消</span>
+        <span>{{ t('common.cancel') }}</span>
       </BaseButton>
       <BaseButton :disabled="!canSubmit" @click="submit">
         <ArrowDownTrayIcon v-if="!isEditing" class="h-4 w-4" aria-hidden="true" />
-        <span>{{ isEditing ? '保存修改' : '添加说话人' }}</span>
+        <span>{{ isEditing ? t('streaming.form.save') : t('streaming.form.add') }}</span>
       </BaseButton>
     </template>
   </BaseDialog>

@@ -4,6 +4,7 @@ import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
+import { i18n } from '@/locales';
 import type { BaseModel } from '@/types/domain';
 
 interface EnsureTaskDeviceInput {
@@ -19,8 +20,7 @@ interface PendingDeviceMismatch {
   selectedDevice: HardwareType;
 }
 
-const WARNING_MESSAGE =
-  '当前选择硬件类型与模型环境当前支持的类型不一致，如果继续，会自动更新当前环境，不会影响任务正常执行，但是会大大延长本次任务执行的时间，是否继续？';
+const warningMessage = () => i18n.global.t('common.deviceGuard.message');
 
 export const useTaskDeviceTypeGuard = () => {
   const modelStore = useModelStore();
@@ -61,7 +61,7 @@ export const useTaskDeviceTypeGuard = () => {
         pendingResolver = resolve;
       });
     } catch (error) {
-      uiStore.notifyError(formatErrorMessage('查询模型当前环境硬件类型失败', error));
+      uiStore.notifyError(formatErrorMessage(i18n.global.t('common.deviceGuard.checkFailed'), error));
       return false;
     } finally {
       isCheckingDeviceType.value = false;
@@ -74,16 +74,16 @@ export const useTaskDeviceTypeGuard = () => {
     }
 
     return [
-      `模型：${modelStore.getModelLabel(pendingMismatch.value.baseModel)} ${pendingMismatch.value.modelVersion}`,
-      `当前环境类型：${HARDWARE_TYPE_TEXT[pendingMismatch.value.currentDevice]}`,
-      `当前选择类型：${HARDWARE_TYPE_TEXT[pendingMismatch.value.selectedDevice]}`
+      i18n.global.t('common.deviceGuard.model', { model: modelStore.getModelLabel(pendingMismatch.value.baseModel), version: pendingMismatch.value.modelVersion }),
+      i18n.global.t('common.deviceGuard.currentEnvType', { device: HARDWARE_TYPE_TEXT[pendingMismatch.value.currentDevice] }),
+      i18n.global.t('common.deviceGuard.selectedType', { device: HARDWARE_TYPE_TEXT[pendingMismatch.value.selectedDevice] })
     ];
   });
 
   return {
     dialogOpen: computed(() => pendingMismatch.value !== null),
-    dialogTitle: '硬件环境确认',
-    dialogMessage: WARNING_MESSAGE,
+    dialogTitle: i18n.global.t('common.deviceGuard.title'),
+    dialogMessage: warningMessage(),
     dialogDetailLines,
     isCheckingDeviceType: computed(() => isCheckingDeviceType.value),
     isAwaitingDeviceConfirmation: computed(() => pendingMismatch.value !== null),
