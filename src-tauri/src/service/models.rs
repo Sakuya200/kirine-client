@@ -377,6 +377,8 @@ pub struct SpeakerInfo {
     pub description: String,
     pub status: SpeakerStatus,
     pub source: SpeakerSource,
+    /// 头像 MIME 类型（如 image/png）；Some 即视为有头像，字节经 get_speaker_avatar 按需单条取。
+    pub avatar_content_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -396,6 +398,12 @@ pub struct UpdateSpeakerPayload {
     pub id: i64,
     pub speaker_name: String,
     pub description: String,
+    /// Some = 用该路径文件覆盖头像；None 且 remove_avatar=false = 保持不变。
+    #[serde(default)]
+    pub avatar_source_path: Option<String>,
+    /// true = 清除头像（两列置 NULL），优先于 avatar_source_path。
+    #[serde(default)]
+    pub remove_avatar: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -406,6 +414,18 @@ pub struct ImportModelAsSpeakerPayload {
     pub source_model_dir_path: String,
     pub speaker_name: String,
     pub description: String,
+    /// 可选：导入时一并设置的头像文件路径。
+    #[serde(default)]
+    pub avatar_source_path: Option<String>,
+}
+
+/// 说话人头像字节资产（前端 Blob URL 显示用；列表接口不携带字节，经此命令按需单条取）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerAvatarAsset {
+    pub speaker_id: i64,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -751,11 +771,15 @@ pub struct StreamingSpeakerInput {
     #[serde(default)]
     pub side: String,
     /// 头像原图绝对路径；创建任务时复制进 sample 目录后存序列化路径。
+    /// 会话覆盖时才有值；未覆盖（用记录头像）时为 None，头像经 speaker_id 从 speakers 表取。
     #[serde(default)]
     pub avatar_path: Option<String>,
     /// 头像原始文件名（展示用）。
     #[serde(default)]
     pub avatar_name: Option<String>,
+    /// speakers 表记录 id：trained/预置说话人记录其来源记录，头像读取回退用。
+    #[serde(default)]
+    pub speaker_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -926,10 +950,11 @@ impl<T> Page<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct SpeakerFilter {
     pub keyword: Option<String>,
     pub status: Option<SpeakerStatus>,
+    pub base_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

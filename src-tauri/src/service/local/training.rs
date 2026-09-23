@@ -165,6 +165,8 @@ impl LocalService {
             description: Set(speaker_description),
             status: Set(SpeakerStatus::Training.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
+            avatar: NotSet,
+            avatar_content_type: NotSet,
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             deleted: Set(0),

@@ -66,6 +66,7 @@ fn streaming_speaker_roundtrip_preserves_category() {
         side: "left".into(),
         avatar_path: Some("%DATA_DIR_PATH%/samples/streaming-speech_9/avatar_1_spk1.png".into()),
         avatar_name: Some("头像.png".into()),
+        speaker_id: None,
     };
     let json = serde_json::to_string(&spk).expect("serialize");
     let back: StreamingSpeaker = serde_json::from_str(&json).expect("deserialize");

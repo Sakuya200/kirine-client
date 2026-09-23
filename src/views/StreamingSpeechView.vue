@@ -14,7 +14,6 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
-import { useModelStore } from '@/stores/models';
 import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
@@ -23,7 +22,6 @@ import type { StreamingSpeakerConfig } from '@/types/streaming';
 
 const store = useStreamingSpeechStore();
 const { t } = useI18n();
-const modelStore = useModelStore();
 const uiConfigStore = useUiConfigStore();
 const uiStore = useUiStore();
 const route = useRoute();
@@ -169,7 +167,7 @@ const hydrateReplayTaskFromRoute = async () => {
 };
 
 onMounted(async () => {
-  await Promise.all([uiConfigStore.ensureLoaded(), modelStore.ensureLoaded()]);
+  await uiConfigStore.ensureLoaded();
   await hydrateReplayTaskFromRoute();
 });
 </script>

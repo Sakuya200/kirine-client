@@ -18,15 +18,37 @@ use crate::{
         local::entity::speaker as speaker_entity,
         models::{
             CreateSpeakerPayload, ImportModelAsSpeakerPayload, ModelDownloadType, ModelInfo,
-            PageRequest, SpeakerFilter, SpeakerInfo, SpeakerPageResult, SpeakerSource,
-            SpeakerStatus, UpdateSpeakerPayload,
+            PageRequest, SpeakerAvatarAsset, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
+            SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
         LocalService,
     },
-    utils::time::now_string,
+    utils::{file_ops::image_content_type, time::now_string},
     Result,
 };
+
+/// 头像文件大小上限：2MB。
+const MAX_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 读取头像文件字节并推断 content type；写入 speakers 表 avatar 列前统一经此校验。
+fn read_avatar_file(source_path: &str) -> Result<(Vec<u8>, String)> {
+    let path = PathBuf::from(source_path.trim());
+    let metadata = fs::metadata(&path).map_err(|err| {
+        io::Error::new(err.kind(), format!("头像文件不存在: {}", path.display()))
+    })?;
+    if !metadata.is_file() {
+        bail!("头像路径不是文件: {}", path.display());
+    }
+    if metadata.len() > MAX_AVATAR_BYTES {
+        bail!("头像文件超过大小上限（2MB）: {}", path.display());
+    }
+    let bytes = fs::read(&path).map_err(|err| {
+        io::Error::new(err.kind(), format!("读取头像文件失败: {}", path.display()))
+    })?;
+    let content_type = image_content_type(&path).to_string();
+    Ok((bytes, content_type))
+}
 
 impl LocalService {
     pub(crate) async fn create_speaker_info_impl(
@@ -47,6 +69,8 @@ impl LocalService {
             description: Set(description.to_string()),
             status: Set(status.as_str().to_string()),
             source: Set(source.as_str().to_string()),
+            avatar: NotSet,
+            avatar_content_type: NotSet,
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             deleted: Set(0),
@@ -78,6 +102,14 @@ impl LocalService {
             }
             if let Some(status) = filter.status {
                 condition = condition.add(speaker_entity::Column::Status.eq(status.as_str()));
+            }
+            if let Some(base_model) = filter
+                .base_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                condition = condition.add(speaker_entity::Column::BaseModel.eq(base_model));
             }
         }
 
@@ -174,6 +206,17 @@ impl LocalService {
         self.find_supported_model_variant(base_model, model_version)
             .await?;
 
+        // 头像可选：导入时一并读入字节（校验失败直接报错，不产生半成品记录）
+        let avatar = match payload
+            .avatar_source_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(path) => Some(read_avatar_file(path)?),
+            None => None,
+        };
+
         let txn = self.orm().begin().await?;
 
         let inserted = speaker_entity::ActiveModel {
@@ -184,6 +227,8 @@ impl LocalService {
             description: Set(description.to_string()),
             status: Set(SpeakerStatus::Ready.as_str().to_string()),
             source: Set(SpeakerSource::Local.as_str().to_string()),
+            avatar: Set(avatar.as_ref().map(|(bytes, _)| bytes.clone())),
+            avatar_content_type: Set(avatar.as_ref().map(|(_, content_type)| content_type.clone())),
             create_time: Set(create_time.clone()),
             modify_time: Set(create_time.clone()),
             deleted: Set(0),
@@ -223,8 +268,46 @@ impl LocalService {
         active_model.description = Set(payload.description.trim().to_string());
         active_model.modify_time = Set(modify_time);
 
+        // 头像语义：remove_avatar 优先（清空两列）；avatar_source_path 有值则覆盖；
+        // 两者均缺省 = 头像保持不变
+        if payload.remove_avatar {
+            active_model.avatar = Set(None);
+            active_model.avatar_content_type = Set(None);
+        } else if let Some(avatar_source_path) = payload
+            .avatar_source_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let (bytes, content_type) = read_avatar_file(avatar_source_path)?;
+            active_model.avatar = Set(Some(bytes));
+            active_model.avatar_content_type = Set(Some(content_type));
+        }
+
         let updated = active_model.update(self.orm()).await?;
         map_speaker_model(updated)
+    }
+
+    /// 读取说话人头像字节（前端 Blob URL 显示用）；未设置头像时报错，由前端回退占位。
+    pub(crate) async fn get_speaker_avatar_impl(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
+        let speaker = speaker_entity::Entity::find_by_id(speaker_id)
+            .filter(speaker_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标说话人"))?;
+
+        let content_type = speaker
+            .avatar_content_type
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("说话人 {} 未设置头像", speaker.speaker_name))?;
+        let bytes = speaker.avatar.clone().unwrap_or_default();
+
+        Ok(SpeakerAvatarAsset {
+            speaker_id,
+            content_type,
+            bytes,
+        })
     }
 
     pub(crate) async fn delete_speaker_info_impl(&self, speaker_id: i64) -> Result<bool> {
@@ -348,5 +431,6 @@ fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
             .source
             .parse::<SpeakerSource>()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+        avatar_content_type: model.avatar_content_type,
     })
 }

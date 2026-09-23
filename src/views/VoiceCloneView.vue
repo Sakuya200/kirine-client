@@ -25,7 +25,7 @@ import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
@@ -97,7 +97,7 @@ const normalizeVoiceCloneModelParams = (baseModel: string, modelParams: Record<s
 };
 
 const uiStore = useUiStore();
-const modelStore = useModelStore();
+const { getModelsByFeature, getModelVersionOptions, getSupportedDevices, getSupportedLanguages, getModelLabel } = useModels();
 const { t } = useI18n();
 const {
   dialogOpen: showDeviceMismatchDialog,
@@ -160,20 +160,20 @@ const effectiveRefAudioName = computed(() => {
   return path ? extractFileName(path) : '';
 });
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.VoiceClone).map(item => ({
+  getModelsByFeature(HistoryTaskType.VoiceClone).map(item => ({
     label: item.modelName,
     value: item.baseModel
   }))
 );
-const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const modelVersionOptions = computed(() => getModelVersionOptions(form.baseModel));
 const deviceOptions = computed(() =>
-  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+  getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
   }))
 );
 const languageOptions = computed(() =>
-  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+  getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
     value: language,
     label: APP_LANGUAGE_LABELS[language] ?? language
   }))
@@ -195,7 +195,7 @@ const canCancelActiveTask = computed(() => {
   return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const cloneSummary = computed(() => [
-  t('tts.summary.model', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }),
+  t('tts.summary.model', { model: getModelLabel(form.baseModel), version: form.modelVersion }),
   t('tts.summary.device', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }),
   t('voiceClone.summary.language', { language: selectedLanguageOption.value?.label ?? APP_LANGUAGE_LABELS[form.language] }),
   t('voiceClone.summary.format', { format: selectedFormatOption.value?.label ?? form.format }),
@@ -206,7 +206,7 @@ const activeResultMetaText = computed(() => {
     return '';
   }
 
-  return `${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
+  return `${getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -738,7 +738,6 @@ const resetForm = () => {
 
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
-  await modelStore.ensureLoaded();
   selectedLanguageOption.value = languageOptions.value.find(option => option.value === form.language) ?? null;
   selectedFormatOption.value = formatOptions.value.find(option => option.value === form.format) ?? null;
   await loadRecentTasks();

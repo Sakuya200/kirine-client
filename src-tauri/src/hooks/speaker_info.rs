@@ -78,3 +78,17 @@ pub async fn delete_speaker_info(
         .await
         .map_err(|err| err.to_string())
 }
+
+#[tauri::command]
+pub async fn get_speaker_avatar(
+    speaker_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<crate::service::models::SpeakerAvatarAsset, String> {
+    state
+        .0
+        .service()
+        .map_err(|err| err.to_string())?
+        .get_speaker_avatar(speaker_id)
+        .await
+        .map_err(|err| err.to_string())
+}

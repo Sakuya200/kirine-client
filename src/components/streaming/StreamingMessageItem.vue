@@ -30,7 +30,10 @@ const store = useStreamingSpeechStore();
 const speaker = computed(() => store.getSpeaker(props.message.speakerId));
 /** 消息展示侧由说话人配置的左右标记决定，缺省视为 right。 */
 const isLeft = computed(() => speaker.value?.side === 'left');
-const hasAvatar = computed(() => Boolean(speaker.value?.avatarPath));
+/** 有头像 = 有会话覆盖头像路径，或关联了说话人记录（记录头像由后端经 speakerId 解析）。 */
+const hasAvatar = computed(
+  () => Boolean(speaker.value?.avatarPath) || Boolean(speaker.value?.avatarContentType) || speaker.value?.speakerId != null
+);
 </script>
 
 <template>

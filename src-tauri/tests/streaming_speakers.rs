@@ -27,6 +27,7 @@ fn voice_clone(name: &str, ref_audio: &str) -> StreamingSpeakerInput {
         side: "right".to_string(),
         avatar_path: None,
         avatar_name: None,
+        speaker_id: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn trained(name: &str, dir: &str) -> StreamingSpeakerInput {
         side: "right".to_string(),
         avatar_path: None,
         avatar_name: None,
+        speaker_id: None,
     }
 }
 

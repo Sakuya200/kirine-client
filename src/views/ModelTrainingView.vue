@@ -44,8 +44,7 @@ import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
-import { useModelStore } from '@/stores/models';
-import { useSpeakerStore } from '@/stores/speakers';
+import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord, ModelTrainingHistoryRecord, ModelTrainingSampleDetail } from '@/types/domain';
@@ -111,8 +110,7 @@ const selectedHistoryTaskId = ref<number | null>(null);
 const isTemplateDialogOpen = ref(false);
 const detailRecordId = ref<number | null>(null);
 const detailReloadToken = ref(0);
-const modelStore = useModelStore();
-const speakerStore = useSpeakerStore();
+const { getModelsByFeature, getModelVersionOptions, getSupportedDevices, getSupportedLanguages, getModelLabel } = useModels();
 const uiStore = useUiStore();
 const { t } = useI18n();
 const {
@@ -149,20 +147,20 @@ const trainingChecklist = computed(() => [
 
 const importedSamples = ref<ImportedSampleItem[]>([]);
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.ModelTraining).map(item => ({
+  getModelsByFeature(HistoryTaskType.ModelTraining).map(item => ({
     label: item.modelName,
     value: item.baseModel
   }))
 );
-const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const modelVersionOptions = computed(() => getModelVersionOptions(form.baseModel));
 const deviceOptions = computed(() =>
-  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+  getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
   }))
 );
 const languageOptions = computed(() =>
-  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+  getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
     value: language,
     label: t(APP_LANGUAGE_SHORT_LABELS_KEY[language]) ?? language
   }))
@@ -201,7 +199,7 @@ const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   recentTrainingHistory.value.map(item => ({
     taskId: item.id,
     title: item.detail.speakerName,
-    subtitle: t('training.recent.subtitle', { taskId: item.id, model: modelStore.getModelLabel(item.detail.baseModel) + ' ' + item.detail.modelVersion }),
+    subtitle: t('training.recent.subtitle', { taskId: item.id, model: getModelLabel(item.detail.baseModel) + ' ' + item.detail.modelVersion }),
     status: item.status
   }))
 );
@@ -653,10 +651,6 @@ const loadRecentTasks = async ({ notifyOnSuccess = false, silentOnError = false,
   }
 };
 
-const syncSpeakerStore = async () => {
-  await speakerStore.refreshSpeakers({ silent: true });
-};
-
 const refreshActiveTaskStatus = async () => {
   if (
     !activeTrainingTask.value ||
@@ -699,7 +693,6 @@ const refreshActiveTaskStatus = async () => {
     );
 
     if (updatedTask.status !== previousStatus) {
-      await syncSpeakerStore();
     }
 
     if (detailRecordId.value === currentTaskId) {
@@ -818,11 +811,10 @@ const startTraining = async () => {
     activeTrainingTask.value = payload;
     syncActiveTaskStatusRefresh();
     setSelectedHistoryTaskId(payload.taskId, true);
-    await syncSpeakerStore();
     await loadRecentTasks({ silentOnError: true });
 
     uiStore.notifySuccess(
-      t('training.notice.created', { speaker: payload.speakerName, taskId: payload.taskId, model: modelStore.getModelLabel(payload.baseModel), version: payload.modelVersion, count: payload.sampleCount }),
+      t('training.notice.created', { speaker: payload.speakerName, taskId: payload.taskId, model: getModelLabel(payload.baseModel), version: payload.modelVersion, count: payload.sampleCount }),
       5200
     );
   } catch (error) {
@@ -834,7 +826,6 @@ const startTraining = async () => {
 
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
-  await modelStore.ensureLoaded();
   await loadRecentTasks({ silentOnError: true });
   await hydrateReplayTaskFromRoute();
 });
@@ -1008,7 +999,7 @@ usePollingResume(() => {
             <div class="mt-4 space-y-2">
               <p>{{ t('training.info.speakerName', { name: currentTrainingInfo.speakerName }) }}</p>
               <p>{{ t('training.info.speakerDescription', { description: currentTrainingInfo.description }) }}</p>
-              <p>{{ t('training.info.model', { model: modelStore.getModelLabel(currentTrainingInfo.baseModel), version: currentTrainingInfo.modelVersion }) }}</p>
+              <p>{{ t('training.info.model', { model: getModelLabel(currentTrainingInfo.baseModel), version: currentTrainingInfo.modelVersion }) }}</p>
               <p>{{ t('training.info.sampleCount', { count: currentTrainingInfo.sampleCount }) }}</p>
             </div>
 
@@ -1101,7 +1092,7 @@ usePollingResume(() => {
           <div class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <p>{{ t('training.form.summary') }}</p>
             <p class="mt-1">{{ t('training.form.summaryData', { total: sampleSummary.total, language: selectedLanguageOption?.label ?? t('training.form.notSelected') }) }}</p>
-            <p class="mt-1">{{ t('training.form.summaryModel', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }) }}</p>
+            <p class="mt-1">{{ t('training.form.summaryModel', { model: getModelLabel(form.baseModel), version: form.modelVersion }) }}</p>
             <p class="mt-1">{{ t('training.form.summaryDevice', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }) }}</p>
             <p class="mt-1">{{ t('training.form.summaryDescription', { description: form.description.trim() || t('training.info.notFilled') }) }}</p>
             <p class="mt-1">{{ t('training.form.summaryBatch') }}</p>

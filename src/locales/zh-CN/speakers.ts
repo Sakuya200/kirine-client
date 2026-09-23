@@ -40,7 +40,16 @@ export default {
     description: '备注',
     descriptionPlaceholder: '请输入使用说明、适用场景或管理备注',
     cancel: '取消',
-    save: '保存修改'
+    save: '保存修改',
+    avatar: '头像',
+    recordAvatar: '当前记录头像',
+    noAvatar: '未设置头像',
+    selectImage: '选择图片',
+    clearSelection: '取消选择',
+    removeAvatar: '移除头像',
+    undoRemove: '撤销移除',
+    selectAvatar: '选择头像图片',
+    imageFiles: '图片文件'
   },
   importDialog: {
     title: '导入外部模型',
@@ -56,7 +65,8 @@ export default {
     speakerDescriptionPlaceholder: '请输入说话人描述或使用场景',
     cancel: '取消',
     confirm: '确认导入',
-    importing: '导入中...'
+    importing: '导入中...',
+    avatarOptional: '头像（可选）'
   },
   deleteDialog: {
     title: '删除说话人',

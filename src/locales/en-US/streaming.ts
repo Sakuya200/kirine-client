@@ -69,6 +69,7 @@ export default {
     avatar: 'Avatar (optional)',
     selectImage: 'Select Image',
     noAvatar: 'No avatar image selected yet',
+    recordAvatar: 'Use the speaker record avatar',
     clear: 'Clear',
     trainedSpeaker: 'Trained Speaker',
     trainedLockedHint: 'The model was loaded when the session started; trained speakers cannot be changed while it is running.',

@@ -40,7 +40,8 @@ use crate::{
             HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
             ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
             PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
-            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
+            SpeakerAvatarAsset, SpeakerPageResult, StreamingReplaySnapshot,
+            StreamingSpeakerAvatarAsset,
             StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
             VoiceCloneTaskResult, VoiceDesignTaskResult,
@@ -111,6 +112,10 @@ impl Service for LocalService {
 
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
         self.delete_speaker_info_impl(speaker_id).await
+    }
+
+    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
+        self.get_speaker_avatar_impl(speaker_id).await
     }
 
     async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {

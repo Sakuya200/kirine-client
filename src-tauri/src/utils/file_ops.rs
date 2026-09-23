@@ -185,3 +185,19 @@ pub fn remove_file_if_exists(path: &Path, description: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// 按图片文件扩展名映射 content type（说话人头像等图片资产的 MIME 推断）。
+pub fn image_content_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => "application/octet-stream",
+    }
+}

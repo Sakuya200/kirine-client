@@ -350,6 +350,19 @@ where
         .await?;
 
     if let Some(row) = existing {
+        // 内容无变化时直接早退，避免每次启动都刷新 modify_time
+        // （否则预置说话人会长期霸占按 modify_time 排序的列表头部）
+        let unchanged = row.deleted == 0
+            && row.speaker_name == definition.name.trim()
+            && row.samples == 0
+            && row.base_model == definition.base_model.trim()
+            && row.description == definition.description.trim()
+            && row.status == SpeakerStatus::Ready.as_str()
+            && row.source == SpeakerSource::Preset.as_str();
+        if unchanged {
+            return Ok(());
+        }
+
         let create_time = row.create_time.clone();
         let mut active_model: speaker_entity::ActiveModel = row.into();
         active_model.speaker_name = Set(definition.name.trim().to_string());
@@ -371,6 +384,8 @@ where
             description: Set(definition.description.trim().to_string()),
             status: Set(SpeakerStatus::Ready.as_str().to_string()),
             source: Set(SpeakerSource::Preset.as_str().to_string()),
+            avatar: sea_orm::ActiveValue::NotSet,
+            avatar_content_type: sea_orm::ActiveValue::NotSet,
             create_time: Set(now.to_string()),
             modify_time: Set(now.to_string()),
             deleted: Set(0),

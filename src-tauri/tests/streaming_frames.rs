@@ -90,6 +90,7 @@ fn context_json_round_trips() {
                     "%DATA_DIR_PATH%/samples/streaming-speech_7/avatar_1_A.png".to_string(),
                 ),
                 avatar_name: Some("A.png".to_string()),
+                speaker_id: None,
             }],
         },
         messages: vec![StreamingMessageEntry {

@@ -11,6 +11,8 @@ pub struct Model {
     pub description: String,
     pub status: String,
     pub source: String,
+    pub avatar: Option<Vec<u8>>,
+    pub avatar_content_type: Option<String>,
     pub create_time: String,
     pub modify_time: String,
     pub deleted: i32,

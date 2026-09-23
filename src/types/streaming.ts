@@ -32,10 +32,14 @@ export interface StreamingSpeakerConfig {
   description?: string;
   /** 消息展示侧；缺省视为 right。 */
   side?: StreamingSpeakerSide;
-  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  /** 头像原图绝对路径（仅会话覆盖时有值；记录头像经 speakerId 由后端按需读取）。 */
   avatarPath?: string;
   /** 头像原始文件名（展示用）。 */
   avatarName?: string;
+  /** speakers 表记录 id（trained/预置说话人记录来源，后端记录头像回退用）。 */
+  speakerId?: number | null;
+  /** 记录头像 MIME 类型（来自 SpeakerProfile，有值即视为有记录头像）。 */
+  avatarContentType?: string | null;
   createTime?: string;
   modifyTime?: string;
 }

@@ -107,11 +107,15 @@ pub struct StreamingSpeaker {
     #[serde(default)]
     pub side: String,
     /// 头像路径（任务创建时复制进 sample 目录后的 %DATA_DIR_PATH% 序列化路径）。
+    /// 仅会话覆盖时有值；记录头像经 speaker_id 从 speakers 表按需读取。
     #[serde(default)]
     pub avatar_path: Option<String>,
     /// 头像原始文件名（展示用）。
     #[serde(default)]
     pub avatar_name: Option<String>,
+    /// speakers 表记录 id（旧 context.json 无此字段，反序列化为 None）。
+    #[serde(default)]
+    pub speaker_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

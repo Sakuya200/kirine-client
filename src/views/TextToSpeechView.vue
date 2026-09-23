@@ -17,18 +17,17 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage, APP_LANGUAGE_LABELS } from '@/enums/language';
-import { TaskStatus } from '@/enums/status';
+import { SpeakerStatus, TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption, type TextToSpeechSpeakerOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
-import { useModelStore } from '@/stores/models';
-import { useSpeakerStore } from '@/stores/speakers';
+import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
+import type { HistoryRecord, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
@@ -118,8 +117,16 @@ const generationHistory = ref<TtsResult[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const showClearDialog = ref(false);
 const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
-const speakerStore = useSpeakerStore();
-const modelStore = useModelStore();
+// 说话人选项按 baseModel 直连后端取数（后端过滤 ready + baseModel），
+// 不再消费说话人管理页共享的分页/筛选状态
+const speakers = ref<SpeakerProfile[]>([]);
+const {
+  getModelsByFeature,
+  getModelVersionOptions,
+  getSupportedDevices,
+  getSupportedLanguages,
+  getModelLabel
+} = useModels();
 const uiStore = useUiStore();
 const {
   dialogOpen: showDeviceMismatchDialog,
@@ -151,20 +158,20 @@ const dynamicRefAudioPath = computed(() => String(form.modelParams.refAudioPath 
 const dynamicRefTextPath = computed(() => String(form.modelParams.refTextPath ?? '').trim());
 
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
+  getModelsByFeature(HistoryTaskType.TextToSpeech).map(item => ({
     label: item.modelName,
     value: item.baseModel
   }))
 );
-const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(form.baseModel));
+const modelVersionOptions = computed(() => getModelVersionOptions(form.baseModel));
 const deviceOptions = computed(() =>
-  modelStore.getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
+  getSupportedDevices(form.baseModel, form.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
   }))
 );
 const languageOptions = computed(() =>
-  modelStore.getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
+  getSupportedLanguages(form.baseModel, form.modelVersion).map(language => ({
     value: language,
     label: APP_LANGUAGE_LABELS[language] ?? language
   }))
@@ -176,13 +183,11 @@ const speakerOptions = computed<TextToSpeechSpeakerOption[]>(() => [
     label: t('tts.speaker.autoSelect'),
     description: t('tts.speaker.autoSelectDesc')
   },
-  ...speakerStore.speakers
-    .filter(speaker => speaker.status === 'ready' && speaker.baseModel === form.baseModel)
-    .map(speaker => ({
-      value: speaker.id,
-      label: speaker.speakerName,
-      description: speaker.description || t('tts.speaker.noDescription')
-    }))
+  ...speakers.value.map(speaker => ({
+    value: speaker.id,
+    label: speaker.speakerName,
+    description: speaker.description || t('tts.speaker.noDescription')
+  }))
 ]);
 const charCount = computed(() => trimmedText.value.length);
 const paragraphCount = computed(() => trimmedText.value.split(/\n+/).filter(Boolean).length || 0);
@@ -209,7 +214,7 @@ const canCancelActiveTask = computed(() => {
   return [TaskStatus.Pending, TaskStatus.Running].includes(result.status) && !isCancelling.value;
 });
 const generationTips = computed(() => [
-  t('tts.summary.model', { model: modelStore.getModelLabel(form.baseModel), version: form.modelVersion }),
+  t('tts.summary.model', { model: getModelLabel(form.baseModel), version: form.modelVersion }),
   t('tts.summary.device', { device: HARDWARE_TYPE_TEXT[form.device as HardwareType] ?? form.device.toUpperCase() }),
   isDynamicReferenceModel.value
     ? t('tts.summary.dynamicReference')
@@ -222,7 +227,7 @@ const activeResultMetaText = computed(() => {
     return '';
   }
 
-  return `${activeResult.value.speakerLabel} · ${modelStore.getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
+  return `${activeResult.value.speakerLabel} · ${getModelLabel(activeResult.value.baseModel)} · ${activeResult.value.modelVersion} · ${activeResult.value.languageLabel} · ${activeResult.value.formatLabel}`;
 });
 const recentTaskItems = computed<RecentTaskListItem[]>(() =>
   generationHistory.value.map(item => ({
@@ -349,6 +354,34 @@ watch(
   () => form.baseModel,
   nextBaseModel => {
     form.modelParams = normalizeTtsModelParams(nextBaseModel, form.modelParams);
+  },
+  { immediate: true }
+);
+
+const loadSpeakers = async () => {
+  try {
+    const result = await invoke<SpeakerPagedResult>('list_speaker_infos', {
+      request: {
+        page: 1,
+        pageSize: 500,
+        filter: { keyword: null, status: SpeakerStatus.Ready, baseModel: form.baseModel || null }
+      }
+    });
+    speakers.value = Array.isArray(result?.items) ? result.items : [];
+  } catch (error) {
+    speakers.value = [];
+    uiStore.notifyError(formatErrorMessage(t('common.store.speakers.loadFailed'), error));
+  }
+};
+
+watch(
+  () => form.baseModel,
+  nextBaseModel => {
+    if (nextBaseModel) {
+      void loadSpeakers();
+    } else {
+      speakers.value = [];
+    }
   },
   { immediate: true }
 );
@@ -768,8 +801,6 @@ usePollingResume(() => {
 
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
-  await modelStore.ensureLoaded();
-  await speakerStore.ensureLoaded({ force: true });
   await loadRecentTasks();
   await hydrateReplayTaskFromRoute();
 });

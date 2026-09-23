@@ -10,8 +10,8 @@ use crate::{
             CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
             HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
             ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
-            SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
+            PageRequest, SendStreamingMessagePayload, SpeakerAvatarAsset, SpeakerFilter,
+            SpeakerInfo, SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
             StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
             UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
             VoiceCloneTaskResult, VoiceDesignTaskResult,
@@ -20,7 +20,7 @@ use crate::{
     },
     Result,
 };
-use anyhow::Context;
+use anyhow::{bail, Context};
 
 #[derive(Debug, Clone)]
 pub struct RemoteService {
@@ -68,6 +68,10 @@ impl Service for RemoteService {
 
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
         self.client.delete_speaker_info(speaker_id).await
+    }
+
+    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
+        bail!("远程模式暂不支持读取说话人头像: {speaker_id}")
     }
 
     async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {

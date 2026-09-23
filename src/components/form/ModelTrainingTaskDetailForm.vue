@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import type { ModelTrainingHistoryRecord } from '@/types/domain';
 
 interface Props {
@@ -14,8 +14,8 @@ interface Props {
 const { t } = useI18n();
 
 const props = defineProps<Props>();
-const modelStore = useModelStore();
-const modelLabel = computed(() => modelStore.getModelLabel(props.record.detail.baseModel));
+const { getModelLabel } = useModels();
+const modelLabel = computed(() => getModelLabel(props.record.detail.baseModel));
 const trainingParamsSummary = computed(() => {
   const params = props.record.detail.modelParams ?? {};
   const batchSize = Number(params.batchSize ?? 0);

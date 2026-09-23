@@ -17,6 +17,8 @@ CREATE TABLE
         description TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
         source TEXT NOT NULL,
+        avatar BLOB,
+        avatar_content_type TEXT,
         create_time TEXT NOT NULL,
         modify_time TEXT NOT NULL,
         deleted INTEGER NOT NULL DEFAULT 0

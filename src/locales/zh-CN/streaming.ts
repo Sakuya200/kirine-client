@@ -69,6 +69,7 @@ export default {
     avatar: '头像（可选）',
     selectImage: '选择图片',
     noAvatar: '尚未选择头像图片',
+    recordAvatar: '使用说话人记录头像',
     clear: '清空',
     trainedSpeaker: '已训练说话人',
     trainedLockedHint: '模型已在会话启动时加载，运行中不支持更换已训练说话人。',
