@@ -977,7 +977,7 @@ usePollingResume(() => {
       </PanelCard>
 
       <div class="space-y-5">
-        <PanelCard class="z-0" :title="t('training.panels.checklist')" :subtitle="t('training.panels.checklistSubtitle')">
+        <PanelCard :title="t('training.panels.checklist')" :subtitle="t('training.panels.checklistSubtitle')">
           <ul class="space-y-2 text-sm text-slate-700">
             <li v-for="item in trainingChecklist" :key="item" class="flex gap-2">
               <CheckCircleIcon class="mt-0.5 h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
@@ -986,7 +986,7 @@ usePollingResume(() => {
           </ul>
         </PanelCard>
 
-        <PanelCard class="z-0" :title="t('training.panels.taskInfo')" :subtitle="t('training.panels.taskInfoSubtitle')">
+        <PanelCard :title="t('training.panels.taskInfo')" :subtitle="t('training.panels.taskInfoSubtitle')">
           <div v-if="currentTrainingInfo" class="rounded-2xl border border-brand-200 bg-white/80 p-4 text-xs text-stone-600">
             <div class="flex items-start justify-between gap-3">
               <div>
@@ -1016,7 +1016,7 @@ usePollingResume(() => {
           </div>
         </PanelCard>
 
-        <PanelCard class="z-0" :title="t('training.panels.recent')" :subtitle="t('training.panels.recentSubtitle')">
+        <PanelCard :title="t('training.panels.recent')" :subtitle="t('training.panels.recentSubtitle')">
           <template #actions>
             <BaseButton tone="ghost" size="sm" :loading="isRefreshingHistory" @click="loadRecentTasks({ notifyOnSuccess: true, manual: true })">
               <ArrowPathIcon v-if="!isRefreshingHistory" class="h-4 w-4" aria-hidden="true" />
@@ -1036,7 +1036,7 @@ usePollingResume(() => {
       </div>
     </div>
 
-    <PanelCard class="z-20" :title="t('training.panels.params')" :subtitle="t('training.panels.paramsSubtitle')">
+    <PanelCard :title="t('training.panels.params')" :subtitle="t('training.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label class="block xl:col-span-1">

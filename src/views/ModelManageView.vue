@@ -255,7 +255,6 @@ onMounted(async () => {
                     :options="deviceOptions(item)"
                     :disabled="deviceSelectDisabled(item)"
                     :placeholder="t('modelManage.table.devicePlaceholder')"
-                    teleport
                     @update:model-value="handleDeviceChange(item, $event as HardwareType)"
                   />
                 </div>

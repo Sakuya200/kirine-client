@@ -834,7 +834,7 @@ usePollingResume(() => {
       </div>
     </div>
 
-    <PanelCard class="z-20" :title="t('voiceClone.panels.params')" :subtitle="t('voiceClone.panels.paramsSubtitle')">
+    <PanelCard :title="t('voiceClone.panels.params')" :subtitle="t('voiceClone.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block">
           <span class="mb-1 block text-xs text-stone-500">{{ t('voiceClone.form.refText') }}</span>

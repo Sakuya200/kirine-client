@@ -732,7 +732,7 @@ usePollingResume(() => {
       </div>
     </div>
 
-    <PanelCard class="z-20" :title="t('voiceDesign.panels.params')" :subtitle="t('voiceDesign.panels.paramsSubtitle')">
+    <PanelCard :title="t('voiceDesign.panels.params')" :subtitle="t('voiceDesign.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block">
           <span class="mb-1 block text-xs text-stone-500">{{ t('voiceDesign.form.prompt') }}</span>

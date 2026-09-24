@@ -888,7 +888,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <PanelCard class="z-20" :title="t('tts.panels.params')" :subtitle="t('tts.panels.paramsSubtitle')">
+    <PanelCard :title="t('tts.panels.params')" :subtitle="t('tts.panels.paramsSubtitle')">
       <div class="space-y-5 text-sm text-slate-700">
         <label class="block text-sm text-slate-700">
           <span class="mb-1 block text-xs text-stone-500">{{ t('tts.form.inputText') }}</span>
