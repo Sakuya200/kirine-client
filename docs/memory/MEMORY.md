@@ -19,6 +19,7 @@
 - [Data Flow & Types](data-flow-and-types.md) - 前后端通信、完整命令列表、统一生成音频来源、类型与枚举对应、UI 配置类型、远程模式
 - [DB Schema Sync Rule](db-schema-sync-rule.md) - 表结构变更须同时更新 db/tables.sql 与 db/tables_pgsql.sql
 - [HistoryTaskType Sync Rule](history-task-type-sync-rule.md) - 前端 HistoryTaskType 枚举须与 Rust 端逐一对齐，新增任务类型两侧同步
+- [Remote API YAML Sync Rule](remote-api-yaml-sync-rule.md) - 后端接口（client::ApiClient 远端方法/payload）改动须同步更新 docs/remote-api.yaml
 - [Don't Borrow Feature Config](dont-borrow-feature-config.md) - 特性未就绪时勿借用其它特性实现填充，保持代码路径独立
 - [Time Field Naming Rule](time-field-naming-rule.md) - 实体时间字段一律 createTime/modifyTime，类型 string
 - [Retain Future-Use Fields](retain-future-use-fields.md) - 勿为消警告删预留待用字段（如 ResolvedStreamingPaths 的 base_model/model_version）
