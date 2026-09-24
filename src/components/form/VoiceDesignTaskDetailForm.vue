@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { TEXT_TO_SPEECH_FORMATS } from '@/enums/textToSpeech';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import type { VoiceDesignHistoryRecord } from '@/types/domain';
 
 interface Props {
@@ -13,10 +13,10 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const modelStore = useModelStore();
+const { getModelLabel } = useModels();
 const { t } = useI18n();
 
-const baseModelLabel = computed(() => modelStore.getModelLabel(props.record.detail.baseModel));
+const baseModelLabel = computed(() => getModelLabel(props.record.detail.baseModel));
 const formatLabel = computed(() => {
   const found = TEXT_TO_SPEECH_FORMATS.find(option => option.value === props.record.detail.format);
   return found ? t(found.label) : props.record.detail.format;

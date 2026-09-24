@@ -12,7 +12,7 @@ import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { SpeakerStatus } from '@/enums/status';
 import { HistoryTaskType } from '@/enums/task';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import { useUiStore } from '@/stores/ui';
 import { requiresRefText, type StreamingSpeakerInput } from '@/stores/streamingSpeech';
 import { IMAGE_FILE_EXTENSIONS, type StreamingSpeakerConfig } from '@/types/streaming';
@@ -28,12 +28,12 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { speaker: null, sessionLocked: false });
 const emit = defineEmits<{ close: []; submit: [payload: StreamingSpeakerInput] }>();
 
-const modelStore = useModelStore();
+const { getModelsByFeature } = useModels();
 const uiStore = useUiStore();
 const { t } = useI18n();
 
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
+  getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
 );
 
 const categoryOptions = computed(() => {
@@ -65,7 +65,9 @@ const createEmptyForm = (): StreamingSpeakerInput => ({
   speakerDirName: '',
   side: 'right',
   avatarPath: '',
-  avatarName: ''
+  avatarName: '',
+  speakerId: null,
+  avatarContentType: null
 });
 
 const form = ref<StreamingSpeakerInput>(createEmptyForm());
@@ -97,7 +99,11 @@ const canSubmit = computed(() => {
 const loadTrainedSpeakers = async () => {
   try {
     const result = await invoke<SpeakerPagedResult>('list_speaker_infos', {
-      request: { page: 1, pageSize: 1000, filter: { status: SpeakerStatus.Ready } }
+      request: {
+        page: 1,
+        pageSize: 1000,
+        filter: { keyword: null, status: SpeakerStatus.Ready, baseModel: form.value.baseModel || null }
+      }
     });
     trainedSpeakers.value = result.items;
   } catch (error) {
@@ -124,7 +130,9 @@ const hydrateFromSpeaker = (speaker: StreamingSpeakerConfig | null) => {
       speakerDirName: speaker.speakerDirName ?? '',
       side: speaker.side ?? 'right',
       avatarPath: speaker.avatarPath ?? '',
-      avatarName: speaker.avatarName ?? ''
+      avatarName: speaker.avatarName ?? '',
+      speakerId: speaker.speakerId ?? null,
+      avatarContentType: speaker.avatarContentType ?? null
     };
     if (speaker.category === 'trained') {
       loadTrainedSpeakers();
@@ -157,7 +165,8 @@ watch(
   { immediate: true }
 );
 
-// 切换类别：trained 清空 ref 音频/台词并加载已训练说话人；voice-clone 清空 speakerDirName。
+// 切换类别：trained 清空 ref 音频/台词并加载已训练说话人；voice-clone 清空 speakerDirName
+// 与说话人记录关联（记录头像随 speakerId 一并失效）。
 // flush:'sync' + isHydrating guard：确保 hydrate 回填的值不被清空。
 watch(
   () => form.value.category,
@@ -173,12 +182,14 @@ watch(
       loadTrainedSpeakers();
     } else {
       form.value.speakerDirName = '';
+      form.value.speakerId = null;
+      form.value.avatarContentType = null;
     }
   },
   { flush: 'sync' }
 );
 
-// trained 模式下切换模型时重新加载已训练说话人列表，并清空失效的 speakerDirName。
+// trained 模式下切换模型时重新加载已训练说话人列表，并清空失效的 speakerDirName 与记录关联。
 watch(
   () => form.value.baseModel,
   () => {
@@ -189,11 +200,14 @@ watch(
       loadTrainedSpeakers();
     }
     form.value.speakerDirName = '';
+    form.value.speakerId = null;
+    form.value.avatarContentType = null;
   },
   { flush: 'sync' }
 );
 
-// 选中已训练说话人时，名称为空则自动填充。
+// 选中已训练说话人时，名称为空则自动填充，并带出记录关联（id + 记录头像 MIME）。
+// 记录头像即默认头像（avatarPath 为空表示未覆盖）；用户手动选图则为会话覆盖。
 watch(
   () => form.value.speakerDirName,
   val => {
@@ -201,9 +215,14 @@ watch(
       return;
     }
     const spk = trainedSpeakers.value.find(s => String(s.id) === val);
-    if (spk && !form.value.name.trim()) {
+    if (!spk) {
+      return;
+    }
+    if (!form.value.name.trim()) {
       form.value.name = spk.speakerName;
     }
+    form.value.speakerId = spk.id;
+    form.value.avatarContentType = spk.avatarContentType;
   }
 );
 
@@ -248,6 +267,8 @@ const selectAvatar = async () => {
   }
 };
 
+// 清除会话头像覆盖：有记录头像时回退记录头像（speakerId/avatarContentType 保持），
+// 无记录关联时即为清空。
 const clearAvatar = () => {
   form.value.avatarPath = '';
   form.value.avatarName = '';
@@ -269,7 +290,8 @@ const submit = () => {
     speakerDirName: isTrained.value ? form.value.speakerDirName : undefined,
     side: form.value.side ?? 'right',
     avatarPath: form.value.avatarPath || undefined,
-    avatarName: form.value.avatarName || undefined
+    avatarName: form.value.avatarName || undefined,
+    speakerId: form.value.speakerId ?? undefined
   });
 };
 </script>
@@ -306,7 +328,9 @@ const submit = () => {
             <FolderOpenIcon class="h-4 w-4" aria-hidden="true" />
             <span>{{ t('streaming.form.selectImage') }}</span>
           </BaseButton>
-          <span class="min-w-0 flex-1 break-all">{{ form.avatarName || t('streaming.form.noAvatar') }}</span>
+          <span class="min-w-0 flex-1 break-all">
+            {{ form.avatarName || (form.avatarContentType ? t('streaming.form.recordAvatar') : t('streaming.form.noAvatar')) }}
+          </span>
           <button v-if="form.avatarPath" type="button" class="text-xs text-stone-500 transition hover:text-brand-700" @click="clearAvatar">
             {{ t('streaming.form.clear') }}
           </button>

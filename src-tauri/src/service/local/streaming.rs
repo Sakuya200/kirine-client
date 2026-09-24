@@ -6,7 +6,7 @@ use std::{io, path::Path};
 use anyhow::{bail, Context};
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait,
-    EntityTrait, QueryFilter, TransactionTrait,
+    EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use tauri::ipc::Channel;
 use tokio::sync::{oneshot, watch};
@@ -25,6 +25,7 @@ use crate::{
     config::{BaseModel, HardwareType},
     service::{
         local::entity::{
+            speaker as speaker_entity,
             streaming_task as streaming_task_entity, task_history as task_history_entity,
         },
         models::{
@@ -40,7 +41,7 @@ use crate::{
         pipeline::streaming_transport::encode_speakers_update_frame,
         LocalService,
     },
-    utils::time::now_string,
+    utils::{file_ops::image_content_type, time::now_string},
     Result,
 };
 
@@ -78,6 +79,30 @@ fn streaming_avatar_target_file_name(
         super::sanitize_path_segment(speaker_name),
         ext
     ))
+}
+
+/// 按优先级定位流式说话人的 speakers 表记录：先按 speaker_id 精确查找，
+/// 未命中（旧任务无 id / 记录被删）时按 name 查最近一条兜底（重名场景取 modify_time 最新）。
+async fn find_speaker_record_for_avatar(
+    db: &sea_orm::DatabaseConnection,
+    speaker_id: Option<i64>,
+    speaker_name: &str,
+) -> Result<Option<speaker_entity::Model>> {
+    if let Some(id) = speaker_id {
+        if let Some(row) = speaker_entity::Entity::find_by_id(id)
+            .filter(speaker_entity::Column::Deleted.eq(0))
+            .one(db)
+            .await?
+        {
+            return Ok(Some(row));
+        }
+    }
+    Ok(speaker_entity::Entity::find()
+        .filter(speaker_entity::Column::Deleted.eq(0))
+        .filter(speaker_entity::Column::SpeakerName.eq(speaker_name))
+        .order_by_desc(speaker_entity::Column::ModifyTime)
+        .one(db)
+        .await?)
 }
 
 /// 头像复制进任务 sample 目录（同 voice-clone 参考音频模式）；未配置头像跳过。
@@ -123,22 +148,6 @@ pub fn ingest_streaming_speaker_avatars(
         avatar_paths.push(serialized);
     }
     Ok(avatar_paths)
-}
-
-/// 按头像文件扩展名映射响应 content type。
-fn streaming_avatar_content_type(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        _ => "application/octet-stream",
-    }
 }
 
 /// 流式说话人基础校验（创建任务与运行中热更新共用）：非空、name 非空且唯一、
@@ -261,6 +270,7 @@ impl LocalService {
                 side: speaker.side,
                 avatar_path: speaker.avatar_path,
                 avatar_name: speaker.avatar_name,
+                speaker_id: speaker.speaker_id,
             })
             .collect::<Vec<_>>();
 
@@ -391,6 +401,7 @@ impl LocalService {
                         side: s.side.clone(),
                         avatar_path: speaker_avatar_paths[idx].clone(),
                         avatar_name: s.avatar_name.clone(),
+                        speaker_id: s.speaker_id,
                     })
                     .collect(),
             },
@@ -636,8 +647,10 @@ impl LocalService {
         self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)
     }
 
-    /// 读取说话人头像字节（前端 Blob URL 显示用）。头像文件在任务创建时已复制进
-    /// sample 目录，路径以 %DATA_DIR_PATH% 序列化形式存于 context.json 的 speaker 条目。
+    /// 读取说话人头像字节（前端 Blob URL 显示用）。读取优先级：
+    /// ① 会话覆盖头像——sample 目录文件（context.json 的 avatar_path，旧任务回退同样走此路）；
+    /// ② 记录头像——按 speaker_id（fallback 按 name）查 speakers 表 avatar 列。
+    /// 两路都没有才报"未配置头像"。
     pub(crate) async fn read_streaming_speaker_avatar_impl(
         &self,
         history_id: i64,
@@ -660,32 +673,56 @@ impl LocalService {
             .into_iter()
             .find(|s| s.name == speaker_name)
             .ok_or_else(|| anyhow::anyhow!("说话人不存在: {speaker_name}"))?;
-        let avatar_path = speaker
-            .avatar_path
-            .filter(|p| !p.trim().is_empty())
-            .ok_or_else(|| anyhow::anyhow!("说话人 {speaker_name} 未配置头像"))?;
 
-        let resolved_avatar_path = resolve_task_path(data_dir, &avatar_path);
-        let bytes = tokio::fs::read(&resolved_avatar_path)
-            .await
-            .map_err(|err| {
-                io::Error::new(
-                    err.kind(),
-                    format!("读取说话人头像失败: {}", resolved_avatar_path.display()),
-                )
-            })?;
-        let file_name = speaker.avatar_name.unwrap_or_else(|| {
-            resolved_avatar_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "avatar".to_string())
-        });
+        // 优先级 ①：会话覆盖头像文件（存在性由记录决定，旧任务回退共用）
+        if let Some(avatar_path) = speaker
+            .avatar_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            let resolved_avatar_path = resolve_task_path(data_dir, avatar_path);
+            let bytes = tokio::fs::read(&resolved_avatar_path)
+                .await
+                .map_err(|err| {
+                    io::Error::new(
+                        err.kind(),
+                        format!("读取说话人头像失败: {}", resolved_avatar_path.display()),
+                    )
+                })?;
+            let file_name = speaker.avatar_name.clone().unwrap_or_else(|| {
+                resolved_avatar_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "avatar".to_string())
+            });
+            return Ok(StreamingSpeakerAvatarAsset {
+                history_id,
+                speaker_name: speaker_name.to_string(),
+                file_name,
+                content_type: image_content_type(&resolved_avatar_path).to_string(),
+                bytes,
+            });
+        }
+
+        // 优先级 ②：记录头像（speakers 表）。优先 speaker_id 精确定位；无 id（旧任务）按 name 查。
+        let record = find_speaker_record_for_avatar(self.orm(), speaker.speaker_id, speaker_name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("说话人 {speaker_name} 未配置头像"))?;
+        let content_type = record
+            .avatar_content_type
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("说话人 {speaker_name} 未配置头像"))?;
+        let bytes = record.avatar.unwrap_or_default();
 
         Ok(StreamingSpeakerAvatarAsset {
             history_id,
             speaker_name: speaker_name.to_string(),
-            file_name,
-            content_type: streaming_avatar_content_type(&resolved_avatar_path).to_string(),
+            file_name: speaker
+                .avatar_name
+                .clone()
+                .unwrap_or_else(|| record.speaker_name.clone()),
+            content_type,
             bytes,
         })
     }
@@ -829,6 +866,7 @@ impl LocalService {
                 side: input.side.clone(),
                 avatar_path: avatar_path.clone(),
                 avatar_name: avatar_name.clone(),
+                speaker_id: input.speaker_id,
             });
         }
 
@@ -936,6 +974,7 @@ impl LocalService {
                 side: s.side,
                 avatar_path: s.avatar_path,
                 avatar_name: s.avatar_name,
+                speaker_id: s.speaker_id,
             })
             .collect();
 

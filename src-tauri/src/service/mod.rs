@@ -10,7 +10,8 @@ use crate::{
         HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
         ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
         SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-        StreamingReplaySnapshot, StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult,
+        SpeakerAvatarAsset, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
+        StreamingSpeechTaskResult,
         TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateStreamingSpeakersPayload,
         UpdateStreamingSpeakersResult, UpdateTaskStatusPayload, VoiceCloneTaskResult,
         VoiceDesignTaskResult,
@@ -61,6 +62,7 @@ pub trait Service: Send + Sync {
     ) -> Result<SpeakerPageResult>;
     async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
     async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
+    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset>;
     async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>>;
     async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType>;
     async fn install_model(

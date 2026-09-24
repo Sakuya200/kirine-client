@@ -20,6 +20,8 @@ create table if not exists speakers
     description  text     default ''::text not null,
     status       varchar(20)               not null,
     source       varchar(20)               not null,
+    avatar       bytea,
+    avatar_content_type varchar(50),
     create_time  timestamp                 not null,
     modify_time  timestamp                 not null,
     deleted      smallint default 0        not null

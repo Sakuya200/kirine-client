@@ -257,6 +257,8 @@ impl LocalServiceHarness {
                 id,
                 speaker_name: "Updated Speaker".to_string(),
                 description: "updated by test".to_string(),
+                avatar_source_path: None,
+                remove_avatar: false,
             })
             .await
     }

@@ -2,6 +2,7 @@ import { computed, ref } from 'vue';
 
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { useModels } from '@/hooks/useModels';
 import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
 import { i18n } from '@/locales';
@@ -24,6 +25,7 @@ const warningMessage = () => i18n.global.t('common.deviceGuard.message');
 
 export const useTaskDeviceTypeGuard = () => {
   const modelStore = useModelStore();
+  const { getModelLabel } = useModels();
   const uiStore = useUiStore();
   const isCheckingDeviceType = ref(false);
   const pendingMismatch = ref<PendingDeviceMismatch | null>(null);
@@ -74,7 +76,7 @@ export const useTaskDeviceTypeGuard = () => {
     }
 
     return [
-      i18n.global.t('common.deviceGuard.model', { model: modelStore.getModelLabel(pendingMismatch.value.baseModel), version: pendingMismatch.value.modelVersion }),
+      i18n.global.t('common.deviceGuard.model', { model: getModelLabel(pendingMismatch.value.baseModel), version: pendingMismatch.value.modelVersion }),
       i18n.global.t('common.deviceGuard.currentEnvType', { device: HARDWARE_TYPE_TEXT[pendingMismatch.value.currentDevice] }),
       i18n.global.t('common.deviceGuard.selectedType', { device: HARDWARE_TYPE_TEXT[pendingMismatch.value.selectedDevice] })
     ];

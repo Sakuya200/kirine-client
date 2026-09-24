@@ -18,6 +18,8 @@ interface UsePaginationOptions<TItem, TFilter> {
   debounceMs?: number;
   /** 错误提示前缀 */
   errorLabel?: string;
+  /** 查询成功后的原始响应回调（用于读取响应中 Page 之外的扩展字段，如统计） */
+  onResult?: (result: Page<TItem>) => void;
 }
 
 /**
@@ -55,6 +57,7 @@ export function usePagination<TItem, TFilter>(options: UsePaginationOptions<TIte
       const rawItems = Array.isArray(result?.items) ? result.items : [];
       items.value = options.normalize ? rawItems.map(options.normalize) : rawItems;
       total.value = typeof result?.total === 'number' ? result.total : 0;
+      options.onResult?.(result);
     } catch (error) {
       if (seed !== requestSeed) {
         return;

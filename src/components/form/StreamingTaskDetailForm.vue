@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n';
 
 import { APP_LANGUAGE_LABELS } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import type { StreamingSpeechHistoryRecord } from '@/types/domain';
 
 interface Props {
@@ -14,9 +14,9 @@ interface Props {
 const { t } = useI18n();
 
 const props = defineProps<Props>();
-const modelStore = useModelStore();
+const { getModelLabel } = useModels();
 
-const baseModelLabel = computed(() => modelStore.getModelLabel(props.record.detail.baseModel));
+const baseModelLabel = computed(() => getModelLabel(props.record.detail.baseModel));
 const modelParamsText = computed(() => JSON.stringify(props.record.detail.modelParams ?? {}, null, 2));
 </script>
 

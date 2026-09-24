@@ -40,7 +40,16 @@ export default {
     description: 'Notes',
     descriptionPlaceholder: 'Enter usage notes, applicable scenarios or management notes',
     cancel: 'Cancel',
-    save: 'Save Changes'
+    save: 'Save Changes',
+    avatar: 'Avatar',
+    recordAvatar: 'Current record avatar',
+    noAvatar: 'No avatar set',
+    selectImage: 'Choose image',
+    clearSelection: 'Clear selection',
+    removeAvatar: 'Remove avatar',
+    undoRemove: 'Undo remove',
+    selectAvatar: 'Select avatar image',
+    imageFiles: 'Image files'
   },
   importDialog: {
     title: 'Import External Model',
@@ -56,7 +65,8 @@ export default {
     speakerDescriptionPlaceholder: 'Enter the speaker description or use case',
     cancel: 'Cancel',
     confirm: 'Confirm Import',
-    importing: 'Importing...'
+    importing: 'Importing...',
+    avatarOptional: 'Avatar (optional)'
   },
   deleteDialog: {
     title: 'Delete Speaker',

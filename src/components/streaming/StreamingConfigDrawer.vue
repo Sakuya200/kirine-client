@@ -11,7 +11,7 @@ import StreamingSpeakerForm from '@/components/streaming/StreamingSpeakerForm.vu
 import { APP_LANGUAGE_LABELS, AppLanguage } from '@/enums/language';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { HistoryTaskType } from '@/enums/task';
-import { useModelStore } from '@/stores/models';
+import { useModels } from '@/hooks/useModels';
 import { useStreamingSpeechStore, type StreamingSpeakerInput } from '@/stores/streamingSpeech';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<Props>(), { width: 460 });
 const emit = defineEmits<{ close: []; 'update:width': [value: number] }>();
 
 const store = useStreamingSpeechStore();
-const modelStore = useModelStore();
+const { getModelsByFeature, getModelVersionOptions, getSupportedDevices, getSupportedLanguages } = useModels();
 const uiConfigStore = useUiConfigStore();
 const uiStore = useUiStore();
 const { t } = useI18n();
@@ -38,17 +38,17 @@ const isFormOpen = ref(false);
 const editingSpeaker = ref<StreamingSpeakerConfig | null>(null);
 
 const modelOptions = computed(() =>
-  modelStore.getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
+  getModelsByFeature(HistoryTaskType.StreamingSpeech).map(item => ({ label: item.modelName, value: item.baseModel }))
 );
-const modelVersionOptions = computed(() => modelStore.getModelVersionOptions(store.sessionConfig.baseModel));
+const modelVersionOptions = computed(() => getModelVersionOptions(store.sessionConfig.baseModel));
 const deviceOptions = computed(() =>
-  modelStore.getSupportedDevices(store.sessionConfig.baseModel, store.sessionConfig.modelVersion).map(device => ({
+  getSupportedDevices(store.sessionConfig.baseModel, store.sessionConfig.modelVersion).map(device => ({
     value: device,
     label: HARDWARE_TYPE_TEXT[device as HardwareType] ?? device.toUpperCase()
   }))
 );
 const languageOptions = computed(() =>
-  modelStore.getSupportedLanguages(store.sessionConfig.baseModel, store.sessionConfig.modelVersion).map(language => ({
+  getSupportedLanguages(store.sessionConfig.baseModel, store.sessionConfig.modelVersion).map(language => ({
     value: language,
     label: APP_LANGUAGE_LABELS[language] ?? language
   }))

@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: Kirine Client 远端 API
-  version: 0.12.0
+  version: 0.13.1
   description: |
     Kirine Client 远端存储模式（`RemoteService`）经由 `client::ApiClient` 调用的 HTTP 接口契约。
-    与 `Service` trait 的 21 个业务方法一一对应；字段命名遵循 `camelCase`
+    与 `client::ApiClient` 的 22 个远端方法一一对应；字段命名遵循 `camelCase`
     （Rust 层 `#[serde(rename_all = "camelCase")]`），与前端 `src/types/domain.ts` 对齐。
 
     统一响应信封 `CommonResponse<T>`：`{ code, data, message }`，`code=200` 表示成功。
@@ -235,6 +235,30 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/ModelMutationResult', nullable: true }
+
+  /api/models/{id}/current-device:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    put:
+      tags: [Model]
+      operationId: setModelCurrentDevice
+      summary: 设置模型当前推理设备
+      parameters:
+        - name: device
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/HardwareType' }
+      responses:
+        '200':
+          description: 更新后的模型信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelInfo', nullable: true }
 
   # ================================ History ================================
   /api/history:
@@ -661,7 +685,22 @@ components:
         downloaded: { type: boolean }
         createTime: { type: string }
         modifyTime: { type: string }
-      required: [id, baseModel, modelName, modelVersion, downloadType, requiredModelNameList, requiredModelRepoIdList, supportedFeatureList, supportedDevices, supportedLanguages, downloaded, createTime, modifyTime]
+      required:
+        [
+          id,
+          baseModel,
+          modelName,
+          modelVersion,
+          downloadType,
+          requiredModelNameList,
+          requiredModelRepoIdList,
+          supportedFeatureList,
+          supportedDevices,
+          supportedLanguages,
+          downloaded,
+          createTime,
+          modifyTime
+        ]
     ModelMutationResult:
       type: object
       properties:
@@ -799,7 +838,23 @@ components:
         createdAt: { type: string }
         status: { $ref: '#/components/schemas/TaskStatus' }
         outputFilePath: { type: string }
-      required: [taskId, fileName, speakerLabel, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, text, modelParams, createdAt, status, outputFilePath]
+      required:
+        [
+          taskId,
+          fileName,
+          speakerLabel,
+          baseModel,
+          modelVersion,
+          language,
+          format,
+          exportAudioName,
+          durationSeconds,
+          text,
+          modelParams,
+          createdAt,
+          status,
+          outputFilePath
+        ]
     ModelTrainingTaskResult:
       type: object
       properties:
@@ -830,7 +885,24 @@ components:
         createdAt: { type: string }
         status: { $ref: '#/components/schemas/TaskStatus' }
         outputFilePath: { type: string }
-      required: [taskId, fileName, refAudioName, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, refText, text, modelParams, createdAt, status, outputFilePath]
+      required:
+        [
+          taskId,
+          fileName,
+          refAudioName,
+          baseModel,
+          modelVersion,
+          language,
+          format,
+          exportAudioName,
+          durationSeconds,
+          refText,
+          text,
+          modelParams,
+          createdAt,
+          status,
+          outputFilePath
+        ]
     VoiceDesignTaskResult:
       type: object
       properties:
@@ -848,7 +920,23 @@ components:
         createdAt: { type: string }
         status: { $ref: '#/components/schemas/TaskStatus' }
         outputFilePath: { type: string }
-      required: [taskId, fileName, baseModel, modelVersion, language, format, exportAudioName, durationSeconds, prompt, text, modelParams, createdAt, status, outputFilePath]
+      required:
+        [
+          taskId,
+          fileName,
+          baseModel,
+          modelVersion,
+          language,
+          format,
+          exportAudioName,
+          durationSeconds,
+          prompt,
+          text,
+          modelParams,
+          createdAt,
+          status,
+          outputFilePath
+        ]
 
     # ---------------- 音频资源 ----------------
     TextToSpeechAudioAsset:

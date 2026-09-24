@@ -11,13 +11,15 @@ import BasePagination from '@/components/common/BasePagination.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import PanelCard from '@/components/common/PanelCard.vue';
 import { HISTORY_TASK_TYPE_TEXT_KEY, HistoryTaskType } from '@/enums/task';
-import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT_KEY, ModelInstallStatus } from '@/enums/status';
+import { MODEL_INSTALL_STATUS_STYLES, MODEL_INSTALL_STATUS_TEXT_KEY } from '@/enums/status';
 import { HardwareType, HARDWARE_TYPE_TEXT } from '@/enums/settings';
+import { useModels } from '@/hooks/useModels';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useModelStore } from '@/stores/models';
 import type { ModelInfo } from '@/types/domain';
 
 const modelStore = useModelStore();
+const { items, isLoading, load, installStatusOf } = useModels();
 const { t } = useI18n();
 const isMutating = ref(false);
 const mutatingModelId = ref<number | null>(null);
@@ -26,15 +28,15 @@ const uninstallTargetId = ref<number | null>(null);
 // 正在持久化当前设备的模型 id：写入期间禁用该行下拉，避免并发覆盖。
 const deviceUpdatingId = ref<number | null>(null);
 
-// 模型目录数量有限，采用前端分页：loadModels 仍经 PageRequest 与 Rust 交互取全，
-// 此处仅对已加载的 items 做切片展示，不破坏 modelStore getter（业务页依赖全量）。
+// 模型目录数量有限，采用前端分页：load 仍经 PageRequest 与 Rust 交互取全，
+// 此处仅对已加载的 items 做切片展示。
 const page = ref(1);
 const pageSize = ref(10);
 const pagedItems = computed(() => {
   const start = (page.value - 1) * pageSize.value;
-  return modelStore.items.slice(start, start + pageSize.value);
+  return items.value.slice(start, start + pageSize.value);
 });
-const totalItems = computed(() => modelStore.items.length);
+const totalItems = computed(() => items.value.length);
 
 const onSetPage = (next: number) => {
   page.value = next;
@@ -44,13 +46,13 @@ const onSetPageSize = (next: number) => {
   page.value = 1;
 };
 
-const uninstallTarget = computed(() => modelStore.items.find(item => item.id === uninstallTargetId.value) ?? null);
+const uninstallTarget = computed(() => items.value.find(item => item.id === uninstallTargetId.value) ?? null);
 const modelBusyLabel = computed(() => {
   if (isMutating.value) {
     return t('modelManage.busy.mutating');
   }
 
-  if (modelStore.isLoading) {
+  if (isLoading.value) {
     return t('modelManage.busy.loading');
   }
 
@@ -67,10 +69,8 @@ const featureLabelMap = computed<Record<string, string>>(() => ({
 }));
 
 const refreshModels = async () => {
-  await modelStore.loadModels();
+  await load();
 };
-
-const installStatusOf = (item: ModelInfo): ModelInstallStatus => modelStore.installStatusOf(item);
 
 // 单设备模型选择器只读（无可选余地），展示回退到唯一支持设备；
 // 后端 sync 不写默认设备，currentDevice 由用户选择或任务执行前探测回填。多设备需用户主动选择。
@@ -94,14 +94,17 @@ const handleDeviceChange = async (item: ModelInfo, device: HardwareType) => {
   if (item.currentDevice === device) return;
   deviceUpdatingId.value = item.id;
   try {
-    await modelStore.setCurrentDevice(item.id, device);
+    const next = await modelStore.setCurrentDevice(item.id, device);
+    if (next) {
+      await load({ silent: true });
+    }
   } finally {
     deviceUpdatingId.value = null;
   }
 };
 
 const handleInstall = async (modelId: number) => {
-  const target = modelStore.items.find(item => item.id === modelId);
+  const target = items.value.find(item => item.id === modelId);
   const device = target ? effectiveDevice(target) : null;
   // 多设备模型未选设备时按钮已禁用；此处兜底，避免空设备进入安装。
   if (!target || device === null) {
@@ -112,11 +115,17 @@ const handleInstall = async (modelId: number) => {
   mutatingAction.value = target.downloaded ? 'reinstall' : 'install';
   try {
     if (target.downloaded) {
-      await modelStore.reinstallModel(modelId, device);
+      const installed = await modelStore.reinstallModel(modelId, device);
+      if (installed) {
+        await load({ silent: true });
+      }
       return;
     }
 
-    await modelStore.installModel(modelId, device);
+    const installed = await modelStore.installModel(modelId, device);
+    if (installed) {
+      await load({ silent: true });
+    }
   } finally {
     isMutating.value = false;
     mutatingModelId.value = null;
@@ -141,7 +150,10 @@ const confirmUninstall = async () => {
   mutatingModelId.value = uninstallTarget.value.id;
   mutatingAction.value = 'uninstall';
   try {
-    await modelStore.uninstallModel(uninstallTarget.value.id);
+    const uninstalled = await modelStore.uninstallModel(uninstallTarget.value.id);
+    if (uninstalled) {
+      await load({ silent: true });
+    }
     closeUninstallDialog();
   } finally {
     isMutating.value = false;
@@ -154,10 +166,10 @@ const confirmUninstall = async () => {
 // 可能被系统睡眠冻结而卡住 isMutating；安装也可能在睡眠期间已完成。这里重拉
 // 列表，并在后端状态已达到预期时复位 isMutating，避免加载条与按钮永久卡死。
 usePollingResume(async () => {
-  await modelStore.loadModels();
+  await load({ silent: true });
 
   if (isMutating.value && mutatingModelId.value !== null) {
-    const target = modelStore.items.find(item => item.id === mutatingModelId.value) ?? null;
+    const target = items.value.find(item => item.id === mutatingModelId.value) ?? null;
     const action = mutatingAction.value;
     const reached = target
       ? action === 'install' || action === 'reinstall'
@@ -180,7 +192,7 @@ usePollingResume(async () => {
 });
 
 onMounted(async () => {
-  await modelStore.ensureLoaded();
+  await load({ silent: true });
 });
 </script>
 
@@ -192,13 +204,13 @@ onMounted(async () => {
 
     <PanelCard :title="t('modelManage.panel.title')" :subtitle="t('modelManage.panel.subtitle')" class="relative">
       <template #actions>
-        <BaseButton tone="ghost" :loading="modelStore.isLoading" :disabled="isMutating" @click="refreshModels">
-          <ArrowPathIcon v-if="!modelStore.isLoading" class="h-4 w-4" aria-hidden="true" />
-          <span>{{ modelStore.isLoading ? t('modelManage.panel.refreshing') : t('modelManage.panel.refresh') }}</span>
+        <BaseButton tone="ghost" :loading="isLoading" :disabled="isMutating" @click="refreshModels">
+          <ArrowPathIcon v-if="!isLoading" class="h-4 w-4" aria-hidden="true" />
+          <span>{{ isLoading ? t('modelManage.panel.refreshing') : t('modelManage.panel.refresh') }}</span>
         </BaseButton>
       </template>
 
-      <div v-if="modelStore.items.length > 0" class="overflow-x-auto">
+      <div v-if="items.length > 0" class="overflow-x-auto">
         <table class="w-full min-w-[1080px] text-left text-sm">
           <thead>
             <tr class="border-b border-brand-100 text-xs uppercase tracking-wide text-stone-500">
@@ -243,7 +255,6 @@ onMounted(async () => {
                     :options="deviceOptions(item)"
                     :disabled="deviceSelectDisabled(item)"
                     :placeholder="t('modelManage.table.devicePlaceholder')"
-                    teleport
                     @update:model-value="handleDeviceChange(item, $event as HardwareType)"
                   />
                 </div>
@@ -292,16 +303,16 @@ onMounted(async () => {
       </div>
 
       <div v-else class="rounded-2xl border border-dashed border-brand-200 bg-white/85 p-5 text-sm text-stone-500">
-        {{ modelStore.isLoading ? t('modelManage.panel.loading') : t('modelManage.panel.empty') }}
+        {{ isLoading ? t('modelManage.panel.loading') : t('modelManage.panel.empty') }}
       </div>
 
-      <div v-if="modelStore.items.length > 0" class="mt-4">
+      <div v-if="items.length > 0" class="mt-4">
         <BasePagination
           :current-page="page"
           :page-size="pageSize"
           :total-items="totalItems"
           :disabled="isMutating"
-          :loading="modelStore.isLoading"
+          :loading="isLoading"
           @update:current-page="onSetPage"
           @update:page-size="onSetPageSize"
         />

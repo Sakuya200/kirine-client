@@ -19,8 +19,9 @@ mod m20260706_000010_rename_speakers_name_to_speaker_name;
 mod m20260718_000011_add_streaming_tasks;
 mod m20260723_000012_add_model_current_device;
 mod m20260801_000013_clear_model_current_device;
+mod m20260923_000014_add_speakers_avatar;
 
-const LOCAL_SCHEMA_VERSION: &str = "30";
+const LOCAL_SCHEMA_VERSION: &str = "31";
 
 pub(crate) struct Migrator;
 
@@ -47,6 +48,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260718_000011_add_streaming_tasks::Migration),
             Box::new(m20260723_000012_add_model_current_device::Migration),
             Box::new(m20260801_000013_clear_model_current_device::Migration),
+            Box::new(m20260923_000014_add_speakers_avatar::Migration),
         ]
     }
 }

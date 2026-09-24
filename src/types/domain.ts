@@ -19,6 +19,8 @@ export interface SpeakerProfile {
   description: string;
   status: SpeakerStatus;
   source: SpeakerSource;
+  /** 头像 MIME 类型；有值即视为已设置头像（字节经 get_speaker_avatar 按需取） */
+  avatarContentType: string | null;
 }
 
 export interface HistoryRecordBase {
@@ -150,10 +152,12 @@ export interface StreamingSpeakerPayload {
   speakerDirName?: string;
   /** 消息展示侧；缺省视为 right。 */
   side?: 'left' | 'right';
-  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  /** 头像原图绝对路径（仅会话覆盖时有值；记录头像经 speakerId 由后端按需读取）。 */
   avatarPath?: string;
   /** 头像原始文件名（展示用）。 */
   avatarName?: string;
+  /** speakers 表记录 id（后端记录头像回退用；旧 context.json 无此字段）。 */
+  speakerId?: number | null;
 }
 
 export interface CreateStreamingSpeechTaskPayload {
@@ -257,6 +261,7 @@ export interface Page<T> {
 export interface SpeakerFilter {
   keyword?: string | null;
   status?: SpeakerStatus | null;
+  baseModel?: string | null;
 }
 
 export interface ModelFilter {

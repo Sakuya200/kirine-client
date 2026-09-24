@@ -16,7 +16,7 @@ interface Props {
   optionValueKey?: string;
   placeholder?: string;
   disabled?: boolean;
-  /** 将下拉面板 Teleport 到 body 并以 fixed 定位跟随触发按钮，避免被表格 overflow 等祖先裁切。默认 false（保持原内联行为）。 */
+  /** 下拉面板是否 Teleport 到 body 并以 fixed 定位跟随触发按钮。默认 true：内联面板会被 backdrop-blur 卡片等祖先的层叠上下文盖住或被 overflow 裁剪，teleport 可彻底逃逸。 */
   teleport?: boolean;
 }
 
@@ -26,7 +26,7 @@ const props = withDefaults(defineProps<Props>(), {
   optionLabelKey: 'label',
   optionValueKey: 'value',
   placeholder: undefined as unknown as string, // 默认走 i18n 回退
-  teleport: false,
+  teleport: true,
 });
 
 const emit = defineEmits<{

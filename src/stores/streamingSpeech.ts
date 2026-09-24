@@ -37,10 +37,14 @@ export interface StreamingSpeakerInput {
   speakerDirName?: string;
   /** 消息展示侧，缺省视为 right。 */
   side?: StreamingSpeakerSide;
-  /** 头像原图绝对路径（创建任务时由后端复制进任务 sample 目录）。 */
+  /** 头像原图绝对路径（仅会话覆盖时有值；记录头像经 speakerId 由后端按需读取）。 */
   avatarPath?: string;
   /** 头像原始文件名（展示用）。 */
   avatarName?: string;
+  /** speakers 表记录 id（trained/预置说话人记录来源，后端记录头像回退用）。 */
+  speakerId?: number | null;
+  /** 记录头像 MIME 类型（表单内部状态：有值且无 avatarPath 覆盖 = 使用记录头像）。 */
+  avatarContentType?: string | null;
 }
 
 interface AudioState {
@@ -74,7 +78,8 @@ const toSpeakerPayload = (s: StreamingSpeakerConfig) => ({
   speakerDirName: s.speakerDirName,
   side: s.side,
   avatarPath: s.avatarPath,
-  avatarName: s.avatarName
+  avatarName: s.avatarName,
+  speakerId: s.speakerId ?? null
 });
 
 export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
@@ -85,8 +90,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const activeTaskId = ref<number | null>(null);
   /** 回放模式下的历史任务 id（回放不占用 activeTaskId，但头像同步仍需定位任务）。 */
   const replayTaskId = ref<number | null>(null);
-  /** 头像缓存版本：clearAvatarUrls 递增，驱动已挂载的头像组件 watch 重载（替代旧的 messagesVersion 整列表重挂载）。 */
-  const avatarCacheVersion = ref(0);
   const isStartingSession = ref(false);
   const sessionConfig = reactive<StreamingSessionConfig>({
     baseModel: '',
@@ -183,42 +186,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     audioUrls.value.set(messageId, { url: convertFileSrc(audioPath), length: -1 });
   };
 
-  /** 说话人头像 Blob URL 缓存：key 为 `${taskId}::${speakerName}`，值空串表示已确认无头像/加载失败。 */
-  const avatarUrls = ref(new Map<string, string>());
-
-  const clearAvatarUrls = () => {
-    for (const url of avatarUrls.value.values()) {
-      if (url) {
-        URL.revokeObjectURL(url);
-      }
-    }
-    avatarUrls.value.clear();
-    // 缓存已整体失效，递增版本号让已挂载的头像组件 watch 重载
-    avatarCacheVersion.value += 1;
-  };
-
-  const ensureSpeakerAvatar = async (taskId: number, speakerName: string): Promise<string | null> => {
-    const key = `${taskId}::${speakerName}`;
-    const cached = avatarUrls.value.get(key);
-    if (cached !== undefined) {
-      return cached || null;
-    }
-    try {
-      const asset = await invoke<{ fileName: string; contentType: string; bytes: number[] }>('get_streaming_speaker_avatar', {
-        historyId: taskId,
-        speakerName
-      });
-      const blob = new Blob([Uint8Array.from(asset.bytes)], { type: asset.contentType });
-      const url = URL.createObjectURL(blob);
-      avatarUrls.value.set(key, url);
-      return url;
-    } catch {
-      // 失败缓存空串，避免多消息场景下重复 invoke
-      avatarUrls.value.set(key, '');
-      return null;
-    }
-  };
-
   /** 说话人列表持久化进行中标记（乐观更新已生效、后端写入未完成）。 */
   const persistingSpeakers = ref(false);
 
@@ -240,8 +207,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           speakers: speakers.value.map(toSpeakerPayload)
         }
       });
-      // 头像可能被替换/清空：失效缓存让已挂载头像组件重载（version 驱动 watch）
-      clearAvatarUrls();
     } catch (error) {
       speakers.value = snapshot;
       uiStore.notifyError(i18n.global.t('streaming.store.syncSpeakersFailed', { message: error instanceof Error ? error.message : String(error) }));
@@ -264,7 +229,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       description: payload.description,
       side: payload.side ?? 'right',
       avatarPath: payload.avatarPath,
-      avatarName: payload.avatarName
+      avatarName: payload.avatarName,
+      speakerId: payload.speakerId ?? null
     };
     const snapshot = speakers.value;
     speakers.value = [...speakers.value, speaker];
@@ -444,7 +410,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     for (const message of messages.value) {
       clearAudioForMessage(message.id);
     }
-    clearAvatarUrls();
     messages.value = [];
     activeTaskId.value = null;
     replayTaskId.value = null;
@@ -454,7 +419,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     for (const message of messages.value) {
       clearAudioForMessage(message.id);
     }
-    clearAvatarUrls();
     replayTaskId.value = snapshot.taskId;
 
     speakers.value = snapshot.speakers.map(
@@ -472,7 +436,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           description: speaker.description,
           side: speaker.side ?? 'right',
           avatarPath: speaker.avatarPath,
-          avatarName: speaker.avatarName
+          avatarName: speaker.avatarName,
+          speakerId: speaker.speakerId ?? null
         }) as StreamingSpeakerConfig
     );
 
@@ -532,8 +497,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     updateMessageStatus,
     clearMessages,
     getAudioUrl,
-    setAudioPathForMessage,
-    ensureSpeakerAvatar,
-    avatarCacheVersion
+    setAudioPathForMessage
   };
 });
