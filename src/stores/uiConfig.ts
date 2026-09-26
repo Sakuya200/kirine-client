@@ -153,6 +153,16 @@ export const useUiConfigStore = defineStore('ui-config', () => {
 
   const getTaskConfig = (baseModel: string, task: HistoryTaskType) => taskConfigMap.value.get(`${baseModel}:${task}`) ?? null;
 
+  // 与 GenericTaskParamsForm 的可见性判定保持一致：仅当前可见的参数才参与 required 校验，
+  // 避免条件隐藏的必填参数（如 IndexTTS 的 emoAudioPath / emoText）把表单永久卡在无效状态。
+  const isParamVisible = (param: ParamDefinition, modelParams: Record<string, unknown>): boolean => {
+    const rule = param.componentProps.visibleWhen;
+    if (!rule) {
+      return true;
+    }
+    return JSON.stringify(modelParams[rule.field]) === JSON.stringify(rule.equals);
+  };
+
   const validateModelParams = (baseModel: string, task: HistoryTaskType, modelParams: Record<string, unknown>): boolean => {
     const taskConfig = getTaskConfig(baseModel, task);
     if (!taskConfig) {
@@ -161,7 +171,7 @@ export const useUiConfigStore = defineStore('ui-config', () => {
     const paramDefinitionsMap = new Map<string, ParamDefinition>(taskConfig.params.map(param => [param.name, param]));
     for (const [key, value] of Object.entries(modelParams)) {
       const paramDefinition = paramDefinitionsMap.get(key);
-      if (!paramDefinition || !paramDefinition.required) {
+      if (!paramDefinition || !paramDefinition.required || !isParamVisible(paramDefinition, modelParams)) {
         continue;
       }
 
