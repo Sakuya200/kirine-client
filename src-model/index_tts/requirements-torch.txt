@@ -1,6 +1,0 @@
-# Torch 运行时（ensure_torch_runtime 按 CPU/CUDA index-url 安装对应轮子）。
-# 上游 index-tts 锁定 torch==2.8.*（CUDA 12.8）；torchvision 虽不在上游依赖中，
-# 但运行时校验脚本要求 import torchvision 可用，故一并锁定匹配版本（2.8 ↔ 0.23）。
-torch==2.8.*
-torchaudio==2.8.*
-torchvision==0.23.*

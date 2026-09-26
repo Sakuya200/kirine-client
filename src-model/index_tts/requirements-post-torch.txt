@@ -1,7 +1,0 @@
-# 依赖 torch 的运行时依赖（init_task_runtime 在 torch 安装完成后执行本文件）。
-# - accelerate：上游锁定版本；
-# - descript-audiotools：indextts/s2mel/dac 导入链需要（backends/trt 依赖注释明确说明）；
-# - openai-whisper：indextts/utils/tokenizer.py 顶层 `from whisper.tokenizer import Tokenizer`（2.5 必需）。
-accelerate==1.8.1
-descript-audiotools==0.7.2
-openai-whisper>=20231117
