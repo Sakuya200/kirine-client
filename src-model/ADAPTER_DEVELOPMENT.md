@@ -444,5 +444,6 @@ tts.py main()
 | `vox_cpm2` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` + `train_voxcpm_finetune.py` | HF-Like（无 `download.py`） | 本地维护训练入口副本 |
 | `moss_tts_local` | `tts.py` | `voice_clone.py` | — | `training.py` | `download.py` | v0.11.2 重构为标准脚本调用模式 |
 | `gpt_sovits_cpufast` | `tts.py` | `voice_clone.py` | — | — | `download.py` + `inference_bridge.py` | 仅 CPU；无训练；多版本（V1/V2/V2Pro/V2ProPlus） |
+| `index_tts` | `tts.py` | `voice_clone.py` | — | — | `download.py` | 多版本（2.0/2.5）；进程内直调 Python API（infer_v2 / infer_v2_5）；版本自包含产物目录（index_tts_2 / index_tts_25）隔离卸载；aux 模型由 download.py 预取到 checkpoints/hf_cache/；含 `requirements-post-torch.txt` |
 
 新增适配器建议以 `irodori_tts_v3` 为模板，按上游能力裁剪入口脚本。

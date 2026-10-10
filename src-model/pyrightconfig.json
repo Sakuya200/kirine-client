@@ -1,16 +1,6 @@
 {
-  "include": ["qwen3_tts", "vox_cpm2", "moss_tts_local", "gpt_sovits_cpufast", "dots_tts"],
-  "exclude": [
-    "venv",
-    "qwen3_tts/venv",
-    "vox_cpm2/venv",
-    "moss_tts_local/venv",
-    "gpt_sovits_cpufast/venv",
-    "dots_tts/venv",
-    "**/__pycache__",
-    "**/node_modules",
-    "**/.*"
-  ],
+  "include": ["qwen3_tts", "vox_cpm2", "moss_tts_local", "gpt_sovits_cpufast", "dots_tts", "moss_tts_realtime", "index_tts"],
+  "exclude": ["**/venv", "**/conda_env", "**/__pycache__", "**/node_modules", "**/.*"],
   "extraPaths": ["."],
   "typeCheckingMode": "basic",
   "executionEnvironments": [
@@ -32,6 +22,14 @@
     },
     {
       "root": "dots_tts",
+      "extraPaths": ["."]
+    },
+    {
+      "root": "moss_tts_realtime",
+      "extraPaths": ["."]
+    },
+    {
+      "root": "index_tts",
       "extraPaths": ["."]
     }
   ]

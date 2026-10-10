@@ -19,3 +19,6 @@
 [submodule "src-model/moss_tts_realtime"]
 	path = src-model/moss_tts_realtime
 	url = https://github.com/Sakuya200/kirine-client-moss-realtime-adapter.git
+[submodule "src-model/index_tts"]
+	path = src-model/index_tts
+	url = https://github.com/Sakuya200/kirine-client-index-tts-adapter.git

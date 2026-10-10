@@ -5,16 +5,17 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 477b1f78-1d15-4316-9e8d-45edad057e8b
+  modified: 2026-09-26T00:40:14.345Z
 ---
 
 # 模型适配器架构
 
-> 状态截至 2026-09-01 · 分支 `v.0.12.0`
+> 状态截至 2026-09-26 · 分支 `v0.13.1`
 
 ## 模型体系
 项目采用 **Git 子模块 + 配置驱动** 的模型适配器架构。每个模型作为独立 Git 子模块存在于 `src-model/` 目录，通过标准化的命令行接口（`--params-file`）与后端 Pipeline 通信。
 
-## 支持的模型（7 个）
+## 支持的模型（8 个）
 
 | 模型 | 版本 | 子模块路径 | TTS | 声音克隆 | 微调 | 音色设计 | 设备 | 说明 |
 |------|------|-----------|-----|---------|------|---------|------|------|
@@ -25,6 +26,7 @@ metadata:
 | **moss_tts_local** | 1.7B | `src-model/moss_tts_local` | ✅ | ✅ | ✅ | ❌ | CPU/CUDA | MOSS-TTS Local，标准脚本调用模式（`tts.py`/`voice_clone.py`/`training.py` + `--params-file`） |
 | **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ❌ | ❌ | CUDA/CPU | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech`），上游 OpenMOSS/MOSS-TTS |
 | **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，固定上游 main `d3e5875`（G2PW pth 权重已纳入下载清单） |
+| **index_tts** | 2.0/2.5 | `src-model/index_tts` | ✅ | ✅ | ❌ | ❌ | CUDA/CPU | 上游 index-tts/IndexTTS，仅 TTS+克隆；进程内直调 `infer_v2`/`infer_v2_5`（不用官方 CLI）；版本自包含产物目录（`index_tts_2`/`index_tts_25`）隔离卸载 |
 
 > 特性矩阵、设备支持与支持语言以各子模块 `configs/model-config.json` 的 `supportedFeatureList` / `supportedDevices` / `supportedLanguages` 为准（应用启动时扫描）。
 
@@ -151,6 +153,16 @@ src-model/dots_tts/
 - 入口脚本: `streaming.py` / `download.py` / `common.py` / `params.py` / `params_entity.py`（含 `StreamingSpeech` TaskKind，显式映射 `TaskKind -> args 嵌套键`，因 kind="StreamingSpeech" 而 args 键="Streaming"）。
 - 适配器纯逻辑单测: `src-model/moss_tts_realtime/tests/`（pytest，覆盖 configs/common/params_entity/params/wav_frames）。
 - **打包与许可**：已纳入 Windows src-model 打包脚本 `scripts/windows/package_src_model.ps1`（`modelDirectories` 含 `moss_tts_realtime`）；子模块带 Apache 2.0 `LICENSE`（上游 OpenMOSS 许可）。
+
+## index_tts 模型详解
+
+- 上游: GitHub `index-tts/index-tts`（克隆到各版本产物目录内，sys.path 导入 `indextts` 包，不 pip 安装）；权重 HF `IndexTeam/IndexTTS-2` / `IndexTeam/IndexTTS-2.5`。**版本自包含产物目录**：`base-models/index_tts_2` 与 `index_tts_25` 各含 `index-tts/`（代码）+ `checkpoints/`（权重）+ `checkpoints/hf_cache/`（辅助模型），卸载一版本不波及另一版本。
+- 仅 `text-to-speech` + `voice-clone`（`tts.py`/`voice_clone.py`），无训练/音色设计/流式。语言：2.0 声明中/英，2.5 声明中/英/日（`lang` 仅 2.5 传参）。
+- **进程内直调上游 Python API**（官方 `indextts2` CLI 仅支持 2.0 且写用户级配置，弃用）：`model_version` 路由 `indextts.infer_v2` / `infer_v2_5`，延迟导入；`halfPrecision` 按版本映射 `use_fp16` / `use_bf16`。
+- **情感控制四模式** `emotionSource`: none/audio/text/vector 互斥；八维向量字段顺序对齐上游 [高兴,愤怒,悲伤,恐惧,厌恶,忧郁,惊讶,平静]，每值 0–1 且总和 ≤0.8；text 模式需 QwenEmotion（`use_qwen_emo` 仅此时为 True 以省显存）。2.0 构造时显式传 `aux_paths` 绕过上游联网检测。
+- **辅助模型由 download.py 预取**到 `checkpoints/hf_cache/`（w2v-bert-2.0 / CAMPPlus / BigVGAN，MaskGCT semantic codec 仅 2.0），任务期零联网；HF 受限环境走 `HF_ENDPOINT=https://hf-mirror.com`。
+- `durationFactor`（0.5–2.0）仅 2.5 生效，2.0 忽略不报错。
+- 首个带 `requirements-post-torch.txt` 的适配器（accelerate / descript-audiotools / openai-whisper 依赖 torch，torch 装完后安装）；Python 3.12 兼容（上游 `<3.12` 仅约束其包元数据，sys.path 导入不受影响）。
 
 ## 关联记忆
 - [[project-overview]] - 项目全貌
