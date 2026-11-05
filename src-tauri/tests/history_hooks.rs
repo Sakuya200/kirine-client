@@ -310,7 +310,7 @@ async fn update_task_status_persists_transition() -> Result<()> {
         .await?;
     harness.seed_tts_detail(40, BASE, VERSION, None).await?;
 
-    let updated = harness
+    harness
         .service()
         .update_task_status(UpdateTaskStatusPayload {
             task_id: 40,
@@ -318,11 +318,10 @@ async fn update_task_status_persists_transition() -> Result<()> {
             duration_seconds: Some(12),
         })
         .await?;
-    assert_eq!(updated.id, 40);
-    assert_eq!(updated.status, TaskStatus::Completed);
 
     // 落库校验
     let record = harness.get_history_record(40).await?;
+    assert_eq!(record.id, 40);
     assert_eq!(record.status, TaskStatus::Completed);
 
     harness.shutdown().await

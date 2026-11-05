@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
-    fs::OpenOptions,
-    io::Write,
+    fs::{File, OpenOptions},
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
     process::Stdio,
     sync::OnceLock,
@@ -152,11 +152,40 @@ fn decode_output(bytes: &[u8]) -> String {
     trim_error_snippet(&String::from_utf8_lossy(bytes))
 }
 
-fn read_task_log_tail(task_log_path: &Path) -> String {
-    match std::fs::read_to_string(task_log_path) {
-        Ok(content) => trim_error_snippet(&content),
-        Err(_) => String::new(),
+/// 任务日志 tail 读取上限：失败消息只需要结尾片段，无需整个文件（训练日志可达数 MB）。
+const MAX_TASK_LOG_TAIL_BYTES: u64 = 64 * 1024;
+
+pub fn read_task_log_tail(task_log_path: &Path) -> String {
+    let Ok(mut file) = File::open(task_log_path) else {
+        return String::new();
+    };
+    let len = match file.metadata() {
+        Ok(meta) => meta.len(),
+        Err(_) => return String::new(),
+    };
+    let start = len.saturating_sub(MAX_TASK_LOG_TAIL_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return String::new();
     }
+
+    let mut buffer = Vec::new();
+    if file.read_to_end(&mut buffer).is_err() {
+        return String::new();
+    }
+
+    let text = String::from_utf8_lossy(&buffer);
+    // 从中间起读时首行可能被截断，对齐到下一个完整行；
+    // 窗口内无换行说明最后一行本身超长，此时保留窗口内容（trim 到末尾片段）与旧行为一致
+    let aligned: &str = if start > 0 {
+        match text.find('\n') {
+            Some(index) => &text[index + 1..],
+            None => text.as_ref(),
+        }
+    } else {
+        text.as_ref()
+    };
+
+    trim_error_snippet(aligned)
 }
 
 fn windows_status_hint(status: std::process::ExitStatus) -> Option<&'static str> {
@@ -309,18 +338,70 @@ pub fn append_task_log_text(task_log_path: &Path, text: &str) -> crate::Result<(
     Ok(())
 }
 
+/// 以追加模式打开任务日志并包一层 BufWriter：流式采集期间只 open 一次，
+/// 避免每个 8KB chunk 一次 open/write/close 的句柄风暴。
+fn open_task_log_writer(task_log_path: &Path) -> crate::Result<BufWriter<File>> {
+    ensure_parent_dir(task_log_path, "task log")?;
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(task_log_path)
+        .with_context(|| {
+            format!(
+                "failed to open task log file for buffered writing: {}",
+                task_log_path.display()
+            )
+        })?;
+
+    Ok(BufWriter::new(file))
+}
+
+fn write_tagged_chunk(
+    writer: &mut BufWriter<File>,
+    tag: &[u8],
+    chunk: &[u8],
+    task_log_path: &Path,
+) -> crate::Result<()> {
+    writer.write_all(tag).with_context(|| {
+        format!(
+            "failed to write tag into task log file: {}",
+            task_log_path.display()
+        )
+    })?;
+    writer.write_all(chunk).with_context(|| {
+        format!(
+            "failed to write subprocess output into task log file: {}",
+            task_log_path.display()
+        )
+    })?;
+    if !chunk.ends_with(b"\n") {
+        writer.write_all(b"\n").with_context(|| {
+            format!(
+                "failed to write line break into task log file: {}",
+                task_log_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 async fn append_stream_to_task_log<R>(mut stream: R, task_log_path: &Path) -> crate::Result<()>
 where
     R: AsyncReadExt + Unpin,
 {
+    let mut writer = open_task_log_writer(task_log_path)?;
     let mut buffer = [0u8; 8192];
     loop {
         let n = stream.read(&mut buffer).await?;
         if n == 0 {
             break;
         }
-        append_process_output(task_log_path, &[], &buffer[..n])?;
+        write_tagged_chunk(&mut writer, b"[stderr]\n", &buffer[..n], task_log_path)?;
     }
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush task log file: {}", task_log_path.display()))?;
     Ok(())
 }
 
@@ -331,14 +412,18 @@ async fn append_stream_to_task_log_stdout<R>(
 where
     R: AsyncReadExt + Unpin,
 {
+    let mut writer = open_task_log_writer(task_log_path)?;
     let mut buffer = [0u8; 8192];
     loop {
         let n = stream.read(&mut buffer).await?;
         if n == 0 {
             break;
         }
-        append_process_output(task_log_path, &buffer[..n], &[])?;
+        write_tagged_chunk(&mut writer, b"[stdout]\n", &buffer[..n], task_log_path)?;
     }
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush task log file: {}", task_log_path.display()))?;
     Ok(())
 }
 

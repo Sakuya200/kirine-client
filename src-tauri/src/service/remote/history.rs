@@ -5,8 +5,8 @@ use crate::{
     service::{
         history::HistoryService,
         models::{
-            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType, Page,
-            PageRequest, UpdateTaskStatusPayload,
+            HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType, Page, PageRequest,
+            UpdateTaskStatusPayload,
         },
     },
     Result,
@@ -38,7 +38,7 @@ impl HistoryService for RemoteService {
             .await
     }
 
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<()> {
         self.client.update_task_status(payload).await
     }
 

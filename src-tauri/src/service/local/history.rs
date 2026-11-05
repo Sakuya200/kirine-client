@@ -11,6 +11,8 @@ use crate::{
     common::{local_paths::resolve_task_path, task_paths::task_log_file_path},
     config::{resolve_base_log_dir, HardwareType},
     service::{
+        generated_audio::GeneratedAudioService,
+        history::HistoryService,
         local::entity::{
             streaming_task as streaming_task_entity, task_history as task_history_entity,
             training_task as training_task_entity, tts_task as tts_task_entity,
@@ -19,13 +21,13 @@ use crate::{
         },
         models::{
             GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter, HistoryRecord,
-            HistoryRecordSummary,
-            HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
-            StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
-            TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
-            VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
+            HistoryRecordSummary, HistoryTaskType, ModelTrainingSampleInput,
+            ModelTrainingTaskDetail, Page, PageRequest, StreamingTaskDetail, TaskStatus,
+            TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
+            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
+            VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
-        generated_audio::GeneratedAudioService, history::HistoryService, LocalService,
+        LocalService,
     },
     utils::{
         audio::{content_type_for_format, save_existing_audio_file_as},
@@ -446,7 +448,7 @@ impl LocalService {
     pub(crate) async fn update_task_status_impl(
         &self,
         payload: UpdateTaskStatusPayload,
-    ) -> Result<HistoryRecord> {
+    ) -> Result<()> {
         let modify_time = now_string()?;
         let duration_seconds = payload.duration_seconds.unwrap_or(0);
         let finished_time = if payload.status.is_finished() {
@@ -473,7 +475,7 @@ impl LocalService {
         active.finished_time = sea_orm::ActiveValue::Set(finished_time);
         active.update(self.orm()).await?;
 
-        self.get_history_record_impl(payload.task_id).await
+        Ok(())
     }
 
     pub(crate) async fn get_history_record_impl(&self, history_id: i64) -> Result<HistoryRecord> {
@@ -640,7 +642,9 @@ impl LocalService {
         history_id: i64,
         message_id: &str,
     ) -> Result<crate::service::models::StreamingSpeechAudioAsset> {
-        let (file_name, audio_path) = self.resolve_streaming_audio_file(history_id, message_id).await?;
+        let (file_name, audio_path) = self
+            .resolve_streaming_audio_file(history_id, message_id)
+            .await?;
         let bytes = tokio::fs::read(&audio_path).await.map_err(|err| {
             io::Error::new(
                 err.kind(),
@@ -846,7 +850,7 @@ impl HistoryService for LocalService {
         self.delete_history_record_impl(history_id, task_type).await
     }
 
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<()> {
         self.update_task_status_impl(payload).await
     }
 

@@ -197,10 +197,7 @@ impl ApiClient {
         self.placeholder("DELETE", &path, &params).await
     }
 
-    pub async fn update_task_status(
-        &self,
-        payload: UpdateTaskStatusPayload,
-    ) -> Result<HistoryRecord> {
+    pub async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<()> {
         let path = paths::with_id(paths::HISTORY_STATUS, payload.task_id);
         self.placeholder("PUT", &path, &Self::json(&payload)).await
     }

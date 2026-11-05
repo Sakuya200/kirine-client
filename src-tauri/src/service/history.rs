@@ -20,6 +20,6 @@ pub trait HistoryService: Send + Sync {
         history_id: i64,
         task_type: HistoryTaskType,
     ) -> Result<bool>;
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord>;
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<()>;
     async fn cancel_history_task(&self, history_id: i64) -> Result<bool>;
 }
