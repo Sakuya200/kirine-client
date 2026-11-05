@@ -300,6 +300,38 @@ impl LocalService {
     pub(crate) fn ui_config(&self) -> &UiConfigCatalog {
         &self.ui_config
     }
+
+    /// `copy_model_param_files` 的异步包装：模型参数文件拷贝（可能是数十 MB 的
+    /// 参考音频/文本文件）经 spawn_blocking 执行，避免阻塞 async runtime worker。
+    pub(crate) async fn copy_model_param_files_async(
+        &self,
+        base_model: &str,
+        task_kind: HistoryTaskType,
+        model_params: &mut serde_json::Value,
+        sample_dir: &Path,
+    ) -> Result<()> {
+        let data_dir = PathBuf::from(self.data_dir());
+        let ui_config = Arc::clone(&self.ui_config);
+        let sample_dir = sample_dir.to_path_buf();
+        let base_model = base_model.to_string();
+        let mut params = model_params.clone();
+
+        let updated = crate::utils::blocking::run_blocking(move || {
+            copy_model_param_files(
+                &base_model,
+                task_kind,
+                &mut params,
+                &sample_dir,
+                &data_dir,
+                &ui_config,
+            )?;
+            Ok(params)
+        })
+        .await?;
+
+        *model_params = updated;
+        Ok(())
+    }
 }
 
 /// Copies any model-specific file-picker param values (componentType: input-audio-file or

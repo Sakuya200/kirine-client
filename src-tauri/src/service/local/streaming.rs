@@ -365,14 +365,13 @@ impl LocalService {
             &sample_dir,
             &payload.speakers,
         )?;
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::StreamingSpeech,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
 
         let context_json_path = streaming_context_json_path(&sample_dir);
         let input_cache_path = streaming_input_cache_path(&sample_dir);

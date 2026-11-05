@@ -139,6 +139,32 @@ pub fn save_existing_file_as(
     Ok(true)
 }
 
+/// `save_existing_audio_file_as` 的异步包装：内部含模态对话框同步等待
+/// （`blocking_save_file`，用户选择文件前可长达数十秒）与大文件落盘，
+/// 异步上下文必须经 spawn_blocking 调用，避免占死 async runtime worker。
+pub async fn save_existing_audio_file_as_async(
+    app: AppHandle,
+    file_name: String,
+    source_path: PathBuf,
+) -> std::result::Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_existing_audio_file_as(&app, &file_name, &source_path)
+    })
+    .await
+    .map_err(|err| format!("另存为任务执行失败: {err}"))?
+}
+
+/// `save_audio_bytes_as` 的异步包装：语义同 [`save_existing_audio_file_as_async`]。
+pub async fn save_audio_bytes_as_async(
+    app: AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> std::result::Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || save_audio_bytes_as(&app, &file_name, &bytes))
+        .await
+        .map_err(|err| format!("另存为任务执行失败: {err}"))?
+}
+
 fn select_save_output_path(
     app: &AppHandle,
     file_name: &str,

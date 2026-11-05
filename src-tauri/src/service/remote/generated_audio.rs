@@ -55,17 +55,20 @@ impl GeneratedAudioService for RemoteService {
         match source {
             GeneratedAudioSource::TextToSpeech { history_id } => {
                 let asset = self.client.read_text_to_speech_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                crate::utils::audio::save_audio_bytes_as_async(app, asset.file_name, asset.bytes)
+                    .await
                     .map_err(|err| anyhow::anyhow!(err))
             }
             GeneratedAudioSource::VoiceClone { history_id } => {
                 let asset = self.client.read_voice_clone_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                crate::utils::audio::save_audio_bytes_as_async(app, asset.file_name, asset.bytes)
+                    .await
                     .map_err(|err| anyhow::anyhow!(err))
             }
             GeneratedAudioSource::VoiceDesign { history_id } => {
                 let asset = self.client.read_voice_design_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
+                crate::utils::audio::save_audio_bytes_as_async(app, asset.file_name, asset.bytes)
+                    .await
                     .map_err(|err| anyhow::anyhow!(err))
             }
             GeneratedAudioSource::StreamingSpeech { .. } => {

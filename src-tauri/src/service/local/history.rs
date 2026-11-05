@@ -30,7 +30,7 @@ use crate::{
         LocalService,
     },
     utils::{
-        audio::{content_type_for_format, save_existing_audio_file_as},
+        audio::content_type_for_format,
         time::now_string,
     },
     Result,
@@ -117,8 +117,13 @@ impl LocalService {
         app: &tauri::AppHandle,
     ) -> Result<bool> {
         let (file_name, source_path) = self.resolve_generated_audio_file(source).await?;
-        save_existing_audio_file_as(app, &file_name, &source_path)
-            .map_err(|err| anyhow::anyhow!(err))
+        crate::utils::audio::save_existing_audio_file_as_async(
+            app.clone(),
+            file_name,
+            source_path,
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!(err))
     }
 
     async fn resolve_generated_audio_file(

@@ -107,14 +107,13 @@ impl LocalService {
             task_id,
         )?;
 
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::VoiceDesign,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
 
         let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);

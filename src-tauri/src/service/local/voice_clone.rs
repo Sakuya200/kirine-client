@@ -122,23 +122,28 @@ impl LocalService {
         let output_path = output_dir.join(&file_name);
         let ref_audio_target_path =
             sample_dir.join(super::build_task_audio_file_name(&resolved_ref_audio_path));
-        fs::copy(&resolved_ref_audio_path, &ref_audio_target_path).with_context(|| {
-            format!(
-                "failed to copy reference audio from {} to {}",
-                resolved_ref_audio_path.display(),
-                ref_audio_target_path.display()
-            )
-        })?;
+        let ref_audio_target = ref_audio_target_path.clone();
+        let resolved_ref_audio = resolved_ref_audio_path.clone();
+        crate::utils::blocking::run_blocking(move || {
+            fs::copy(&resolved_ref_audio, &ref_audio_target).with_context(|| {
+                format!(
+                    "failed to copy reference audio from {} to {}",
+                    resolved_ref_audio.display(),
+                    ref_audio_target.display()
+                )
+            })?;
+            Ok(())
+        })
+        .await?;
         let serialized_ref_audio_path =
             serialize_task_path(Path::new(self.data_dir()), &ref_audio_target_path);
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::VoiceClone,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
 
         voice_clone_task_entity::Entity::insert(voice_clone_task_entity::ActiveModel {

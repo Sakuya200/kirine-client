@@ -199,8 +199,27 @@ impl LocalService {
         .await?;
         let task_id = task_history.id;
 
-        let prepared =
-            self.prepare_training_data(task_id, &base_model, &mut model_params, &payload.samples)?;
+        // prepare_training_data 含大文件拷贝与 zip 解压（数据集可达 GB 级），
+        // 整体调度到阻塞线程池执行，避免占死 async runtime worker。
+        let prepared = {
+            let service = self.clone();
+            let base_model = base_model.clone();
+            let mut prepared_model_params = model_params.clone();
+            let samples = payload.samples.clone();
+            let (updated_params, prepared) =
+                crate::utils::blocking::run_blocking(move || {
+                    let prepared = service.prepare_training_data(
+                        task_id,
+                        &base_model,
+                        &mut prepared_model_params,
+                        &samples,
+                    )?;
+                    Ok((prepared_model_params, prepared))
+                })
+                .await?;
+            model_params = updated_params;
+            prepared
+        };
         let mut speaker_active_model: speaker_entity::ActiveModel = speaker.into();
         speaker_active_model.samples = Set(prepared.index_entries.len() as i64);
         speaker_active_model.update(&txn).await?;
