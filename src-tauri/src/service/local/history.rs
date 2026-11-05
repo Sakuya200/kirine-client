@@ -1,5 +1,7 @@
 use std::{io, path::Path};
 
+use async_trait::async_trait;
+
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, TransactionTrait,
@@ -16,13 +18,14 @@ use crate::{
             voice_design_task as voice_design_task_entity,
         },
         models::{
-            GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary,
+            GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter, HistoryRecord,
+            HistoryRecordSummary,
             HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
             StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
             TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
-        LocalService,
+        generated_audio::GeneratedAudioService, history::HistoryService, LocalService,
     },
     utils::{
         audio::{content_type_for_format, save_existing_audio_file_as},
@@ -820,4 +823,52 @@ fn parse_task_status(value: &str) -> Result<TaskStatus> {
     value
         .parse::<TaskStatus>()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
+}
+
+#[async_trait]
+impl HistoryService for LocalService {
+    async fn list_history_records(
+        &self,
+        request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>> {
+        self.list_history_records_impl(request).await
+    }
+
+    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
+        self.get_history_record_impl(history_id).await
+    }
+
+    async fn delete_history_record(
+        &self,
+        history_id: i64,
+        task_type: HistoryTaskType,
+    ) -> Result<bool> {
+        self.delete_history_record_impl(history_id, task_type).await
+    }
+
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
+        self.update_task_status_impl(payload).await
+    }
+
+    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
+        self.cancel_task_impl(history_id).await
+    }
+}
+
+#[async_trait]
+impl GeneratedAudioService for LocalService {
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        self.read_generated_audio_impl(source).await
+    }
+
+    async fn save_generated_audio_as(
+        &self,
+        source: GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool> {
+        self.save_generated_audio_as_impl(source, &app).await
+    }
 }

@@ -28,25 +28,15 @@ use crate::error::{codes, AppError};
 use crate::{
     common::local_paths::{resolve_task_path, serialize_task_path},
     config::{
-        load_ui_configs, resolve_storage_dir, EnvConfig, HardwareType, UiComponentType,
+        load_ui_configs, resolve_storage_dir, EnvConfig, UiComponentType,
         UiConfigCatalog,
     },
     migration,
     service::{
-        models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
-            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
-            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo,
-            SpeakerAvatarAsset, SpeakerPageResult, StreamingReplaySnapshot,
-            StreamingSpeakerAvatarAsset,
-            StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
-            VoiceCloneTaskResult, VoiceDesignTaskResult,
-        },
-        Service,
+        generated_audio::GeneratedAudioService, history::HistoryService, model::ModelService,
+        models::HistoryTaskType, speaker::SpeakerService, streaming::StreamingSpeechService,
+        training::ModelTrainingService, tts::TextToSpeechService, voice_clone::VoiceCloneService,
+        voice_design::VoiceDesignService, Service,
     },
     Result,
 };
@@ -88,175 +78,40 @@ impl Service for LocalService {
         Ok(())
     }
 
-    async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
-        self.create_speaker_info_impl(payload).await
+    fn speaker_service(&self) -> &dyn SpeakerService {
+        self
     }
 
-    async fn import_model_as_speaker(
-        &self,
-        payload: ImportModelAsSpeakerPayload,
-    ) -> Result<SpeakerInfo> {
-        self.import_model_as_speaker_impl(payload).await
+    fn model_service(&self) -> &dyn ModelService {
+        self
     }
 
-    async fn list_speaker_infos(
-        &self,
-        request: PageRequest<SpeakerFilter>,
-    ) -> Result<SpeakerPageResult> {
-        self.list_speaker_infos_impl(request).await
+    fn history_service(&self) -> &dyn HistoryService {
+        self
     }
 
-    async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
-        self.update_speaker_info_impl(payload).await
+    fn generated_audio_service(&self) -> &dyn GeneratedAudioService {
+        self
     }
 
-    async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
-        self.delete_speaker_info_impl(speaker_id).await
+    fn text_to_speech_service(&self) -> &dyn TextToSpeechService {
+        self
     }
 
-    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
-        self.get_speaker_avatar_impl(speaker_id).await
+    fn model_training_service(&self) -> &dyn ModelTrainingService {
+        self
     }
 
-    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
-        self.list_model_infos_impl(request).await
+    fn voice_clone_service(&self) -> &dyn VoiceCloneService {
+        self
     }
 
-    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
-        self.get_device_type_impl(base_model, model_version).await
+    fn voice_design_service(&self) -> &dyn VoiceDesignService {
+        self
     }
 
-    async fn install_model(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelMutationResult> {
-        self.install_model_impl(model_id, device).await
-    }
-
-    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
-        self.uninstall_model_impl(model_id).await
-    }
-
-    async fn set_model_current_device(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelInfo> {
-        self.set_model_current_device_impl(model_id, device).await
-    }
-
-    async fn list_history_records(
-        &self,
-        request: PageRequest<HistoryFilter>,
-    ) -> Result<Page<HistoryRecordSummary>> {
-        self.list_history_records_impl(request).await
-    }
-
-    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
-        self.get_history_record_impl(history_id).await
-    }
-
-    async fn read_generated_audio(
-        &self,
-        source: GeneratedAudioSource,
-    ) -> Result<GeneratedAudioAsset> {
-        self.read_generated_audio_impl(source).await
-    }
-
-    async fn save_generated_audio_as(
-        &self,
-        source: crate::service::models::GeneratedAudioSource,
-        app: tauri::AppHandle,
-    ) -> Result<bool> {
-        self.save_generated_audio_as_impl(source, &app).await
-    }
-
-    async fn delete_history_record(
-        &self,
-        history_id: i64,
-        task_type: HistoryTaskType,
-    ) -> Result<bool> {
-        self.delete_history_record_impl(history_id, task_type).await
-    }
-
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
-        self.update_task_status_impl(payload).await
-    }
-
-    async fn create_text_to_speech_task(
-        &self,
-        payload: CreateTextToSpeechTaskPayload,
-    ) -> Result<TextToSpeechTaskResult> {
-        self.create_text_to_speech_task_impl(payload).await
-    }
-
-    async fn create_model_training_task(
-        &self,
-        payload: CreateModelTrainingTaskPayload,
-    ) -> Result<ModelTrainingTaskResult> {
-        self.create_model_training_task_impl(payload).await
-    }
-
-    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
-        self.cancel_task_impl(history_id).await
-    }
-
-    async fn create_voice_clone_task(
-        &self,
-        payload: CreateVoiceCloneTaskPayload,
-    ) -> Result<VoiceCloneTaskResult> {
-        self.create_voice_clone_task_impl(payload).await
-    }
-
-    async fn create_voice_design_task(
-        &self,
-        payload: CreateVoiceDesignTaskPayload,
-    ) -> Result<VoiceDesignTaskResult> {
-        self.create_voice_design_task_impl(payload).await
-    }
-
-    async fn create_streaming_speech_task(
-        &self,
-        payload: CreateStreamingSpeechTaskPayload,
-    ) -> Result<StreamingSpeechTaskResult> {
-        self.create_streaming_speech_task_impl(payload).await
-    }
-
-    async fn send_streaming_message(
-        &self,
-        payload: SendStreamingMessagePayload,
-        on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
-    ) -> Result<()> {
-        self.send_streaming_message_impl(payload, on_event).await
-    }
-
-    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool> {
-        self.cancel_streaming_task_impl(task_id).await
-    }
-
-    async fn get_streaming_replay_snapshot(
-        &self,
-        history_id: i64,
-    ) -> Result<StreamingReplaySnapshot> {
-        self.get_streaming_replay_snapshot_impl(history_id).await
-    }
-
-    async fn read_streaming_speaker_avatar(
-        &self,
-        history_id: i64,
-        speaker_name: String,
-    ) -> Result<StreamingSpeakerAvatarAsset> {
-        self.read_streaming_speaker_avatar_impl(history_id, &speaker_name)
-            .await
-    }
-
-    async fn update_streaming_speakers(
-        &self,
-        payload: UpdateStreamingSpeakersPayload,
-    ) -> Result<UpdateStreamingSpeakersResult> {
-        self.update_streaming_speakers_impl(payload.history_id, &payload.speakers)
-            .await
+    fn streaming_speech_service(&self) -> &dyn StreamingSpeechService {
+        self
     }
 }
 

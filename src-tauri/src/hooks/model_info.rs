@@ -15,9 +15,10 @@ pub async fn list_model_infos(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<Page<ModelInfo>, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .model_service()
         .list_model_infos(request)
         .await
         .map_err(|err| err.to_string())
@@ -30,9 +31,10 @@ pub async fn install_model(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<ModelMutationResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .model_service()
         .install_model(model_id, device)
         .await
         .map_err(AppError::from_anyhow)
@@ -45,9 +47,10 @@ pub async fn get_device_type(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<HardwareType, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .model_service()
         .get_device_type(&base_model, &model_version)
         .await
         .map_err(|err| err.to_string())
@@ -59,9 +62,10 @@ pub async fn uninstall_model(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<ModelMutationResult, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .model_service()
         .uninstall_model(model_id)
         .await
         .map_err(|err| err.to_string())
@@ -74,9 +78,10 @@ pub async fn set_model_current_device(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<ModelInfo, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .model_service()
         .set_model_current_device(model_id, device)
         .await
         .map_err(AppError::from_anyhow)

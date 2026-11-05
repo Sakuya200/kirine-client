@@ -1,28 +1,37 @@
 pub(crate) mod local;
 pub mod models;
+pub(crate) mod pipeline;
 mod remote;
-use crate::{
-    config::{EnvConfig, HardwareType, StorageMode},
-    service::models::{
-        CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
-        CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload, CreateVoiceDesignTaskPayload,
-        GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter, HistoryRecord,
-        HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload, ModelFilter, ModelInfo,
-        ModelMutationResult, ModelTrainingTaskResult, Page, PageRequest,
-        SendStreamingMessagePayload, SpeakerFilter, SpeakerInfo, SpeakerPageResult,
-        SpeakerAvatarAsset, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
-        StreamingSpeechTaskResult,
-        TextToSpeechTaskResult, UpdateSpeakerPayload, UpdateStreamingSpeakersPayload,
-        UpdateStreamingSpeakersResult, UpdateTaskStatusPayload, VoiceCloneTaskResult,
-        VoiceDesignTaskResult,
-    },
-    Result,
-};
-use async_trait::async_trait;
+
+// 各业务服务接口定义
+mod generated_audio;
+mod history;
+mod model;
+mod speaker;
+mod streaming;
+mod training;
+mod tts;
+mod voice_clone;
+mod voice_design;
+
+use anyhow::Error;
 pub(crate) use local::entity;
 pub use local::LocalService;
 pub use remote::RemoteService;
-pub(crate) mod pipeline;
+
+pub use generated_audio::GeneratedAudioService;
+pub use history::HistoryService;
+pub use model::ModelService;
+pub use speaker::SpeakerService;
+pub use streaming::StreamingSpeechService;
+pub use training::ModelTrainingService;
+pub use tts::TextToSpeechService;
+pub use voice_clone::VoiceCloneService;
+pub use voice_design::VoiceDesignService;
+
+use crate::config::{EnvConfig, StorageMode};
+use crate::{service, Result};
+use async_trait::async_trait;
 
 #[derive(Debug, Clone)]
 pub enum ServiceImpl {
@@ -30,7 +39,26 @@ pub enum ServiceImpl {
     Remote(RemoteService),
 }
 
-pub struct ServiceState(pub ServiceImpl);
+pub struct ServiceState {
+    service: ServiceImpl,
+}
+
+impl ServiceState {
+    pub fn new(service: ServiceImpl) -> Self {
+        Self { service }
+    }
+
+    pub fn service(&self) -> Result<&(dyn Service + Send + Sync)> {
+        self.service.service()
+    }
+
+    pub fn local_service(&self) -> Result<&LocalService> {
+        match &self.service {
+            ServiceImpl::Local(local) => Ok(local),
+            ServiceImpl::Remote(_) => Err(Error::msg("Not a local service")),
+        }
+    }
+}
 
 impl ServiceImpl {
     pub fn service(&self) -> Result<&(dyn Service + Send + Sync)> {
@@ -40,102 +68,87 @@ impl ServiceImpl {
         }
     }
 
-    pub async fn close(&self) -> Result<()> {
-        self.service()?.close().await
+    pub fn speaker_service(&self) -> Result<&dyn SpeakerService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.speaker_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.speaker_service()),
+        }
+    }
+
+    pub fn model_service(&self) -> Result<&dyn ModelService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.model_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.model_service()),
+        }
+    }
+
+    pub fn history_service(&self) -> Result<&dyn HistoryService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.history_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.history_service()),
+        }
+    }
+
+    pub fn generated_audio_service(&self) -> Result<&dyn GeneratedAudioService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.generated_audio_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.generated_audio_service()),
+        }
+    }
+
+    pub fn text_to_speech_service(&self) -> Result<&dyn TextToSpeechService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.text_to_speech_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.text_to_speech_service()),
+        }
+    }
+
+    pub fn model_training_service(&self) -> Result<&dyn ModelTrainingService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.model_training_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.model_training_service()),
+        }
+    }
+
+    pub fn voice_clone_service(&self) -> Result<&dyn VoiceCloneService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.voice_clone_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.voice_clone_service()),
+        }
+    }
+
+    pub fn voice_design_service(&self) -> Result<&dyn VoiceDesignService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.voice_design_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.voice_design_service()),
+        }
+    }
+
+    pub fn streaming_speech_service(&self) -> Result<&dyn StreamingSpeechService> {
+        match self {
+            ServiceImpl::Local(local) => Ok(local.streaming_speech_service()),
+            ServiceImpl::Remote(remote) => Ok(remote.streaming_speech_service()),
+        }
     }
 }
 
+/// 生命周期入口：只负责构造/关闭具体实现，业务能力一律经各域服务接口访问。
 #[async_trait]
 pub trait Service: Send + Sync {
     async fn new(config: &EnvConfig) -> Result<Self>
     where
         Self: Sized;
     async fn close(&self) -> Result<()>;
-    async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo>;
-    async fn import_model_as_speaker(
-        &self,
-        payload: ImportModelAsSpeakerPayload,
-    ) -> Result<SpeakerInfo>;
-    async fn list_speaker_infos(
-        &self,
-        request: PageRequest<SpeakerFilter>,
-    ) -> Result<SpeakerPageResult>;
-    async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo>;
-    async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool>;
-    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset>;
-    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>>;
-    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType>;
-    async fn install_model(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelMutationResult>;
-    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult>;
-    async fn set_model_current_device(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelInfo>;
-    async fn list_history_records(
-        &self,
-        request: PageRequest<HistoryFilter>,
-    ) -> Result<Page<HistoryRecordSummary>>;
-    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;
-    async fn read_generated_audio(
-        &self,
-        source: GeneratedAudioSource,
-    ) -> Result<GeneratedAudioAsset>;
-    async fn save_generated_audio_as(
-        &self,
-        source: GeneratedAudioSource,
-        app: tauri::AppHandle,
-    ) -> Result<bool>;
-    async fn delete_history_record(
-        &self,
-        history_id: i64,
-        task_type: HistoryTaskType,
-    ) -> Result<bool>;
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord>;
-    async fn create_text_to_speech_task(
-        &self,
-        payload: CreateTextToSpeechTaskPayload,
-    ) -> Result<TextToSpeechTaskResult>;
-    async fn create_model_training_task(
-        &self,
-        payload: CreateModelTrainingTaskPayload,
-    ) -> Result<ModelTrainingTaskResult>;
-    async fn cancel_history_task(&self, history_id: i64) -> Result<bool>;
-    async fn create_voice_clone_task(
-        &self,
-        payload: CreateVoiceCloneTaskPayload,
-    ) -> Result<VoiceCloneTaskResult>;
-    async fn create_voice_design_task(
-        &self,
-        payload: CreateVoiceDesignTaskPayload,
-    ) -> Result<VoiceDesignTaskResult>;
-    async fn create_streaming_speech_task(
-        &self,
-        payload: CreateStreamingSpeechTaskPayload,
-    ) -> Result<StreamingSpeechTaskResult>;
-    async fn send_streaming_message(
-        &self,
-        payload: SendStreamingMessagePayload,
-        on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
-    ) -> Result<()>;
-    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool>;
-    async fn get_streaming_replay_snapshot(
-        &self,
-        history_id: i64,
-    ) -> Result<StreamingReplaySnapshot>;
-    async fn read_streaming_speaker_avatar(
-        &self,
-        history_id: i64,
-        speaker_name: String,
-    ) -> Result<StreamingSpeakerAvatarAsset>;
-    async fn update_streaming_speakers(
-        &self,
-        payload: UpdateStreamingSpeakersPayload,
-    ) -> Result<UpdateStreamingSpeakersResult>;
+
+    fn speaker_service(&self) -> &dyn SpeakerService;
+    fn model_service(&self) -> &dyn ModelService;
+    fn history_service(&self) -> &dyn HistoryService;
+    fn generated_audio_service(&self) -> &dyn GeneratedAudioService;
+    fn text_to_speech_service(&self) -> &dyn TextToSpeechService;
+    fn model_training_service(&self) -> &dyn ModelTrainingService;
+    fn voice_clone_service(&self) -> &dyn VoiceCloneService;
+    fn voice_design_service(&self) -> &dyn VoiceDesignService;
+    fn streaming_speech_service(&self) -> &dyn StreamingSpeechService;
 }
 
 pub async fn init_service(config: EnvConfig) -> Result<ServiceImpl> {

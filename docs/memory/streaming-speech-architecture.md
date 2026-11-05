@@ -25,9 +25,9 @@ metadata:
 - `send_streaming_message` 的 `on_event: Channel<tauri::ipc::InvokeResponseBody>`：控制事件 `InvokeResponseBody::Json`（serde JSON 字符串），chunk 为 `InvokeResponseBody::Raw(Vec<u8>)`。>1024 字节载荷走 Tauri 2.10 fetch 快速路径，JS `channel.onmessage` 收到 **ArrayBuffer**（无 JSON number[] ~4 倍膨胀）。
 - 6 个命令：`create_streaming_speech_task` / `send_streaming_message`（带 `on_event: Channel`）/ `cancel_streaming_task` / `get_streaming_replay_snapshot`（历史回放恢复）/ `get_streaming_speaker_avatar` / `update_streaming_speakers`（说话人列表全量更新，会话运行中经 0x11 帧热重建），注册于 `hooks/mod.rs`。
 
-## Service trait（`service/mod.rs`）
+## 流式服务接口（`service/streaming.rs` 的 StreamingSpeechService）
 
-含 6 个流式方法：`create_streaming_speech_task` / `send_streaming_message` / `cancel_streaming_task` / `get_streaming_replay_snapshot` / `read_streaming_speaker_avatar` / `update_streaming_speakers`（Service trait 共 27 业务方法）。`RemoteService` 的流式五方法（含回放与说话人更新）均 `bail!("远程存储模式暂不支持流式语音…")`（Remote 模式不支持流式；create/send/cancel 三方法为既有 bail）。
+`StreamingSpeechService` 接口含 6 个流式方法：`create_streaming_speech_task` / `send_streaming_message` / `cancel_streaming_task` / `get_streaming_replay_snapshot` / `read_streaming_speaker_avatar` / `update_streaming_speakers`（接口隔离重构后 `Service` trait 只含生命周期与各域访问方法）。`RemoteService` 的流式五方法（含回放与说话人更新）均 `bail!("远程存储模式暂不支持流式语音…")`（Remote 模式不支持流式；create/send/cancel 三方法为既有 bail）。
 
 ## LocalService 会话层（`service/local/streaming.rs`）
 

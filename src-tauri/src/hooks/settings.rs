@@ -120,38 +120,29 @@ pub fn save_settings_config(
     let next_log_dir = normalized_path(&payload.log_cache_dir);
     let next_model_dir = normalized_path(&payload.model_dir);
 
-    let current_data_dir =
-        resolve_storage_dir(persisted_config.data_dir(), "data")?;
-    let current_log_dir =
-        resolve_base_log_dir(persisted_config.log_dir())?;
-    let current_model_dir = resolve_storage_dir(persisted_config.model_dir(), "models")
-        ?;
+    let current_data_dir = resolve_storage_dir(persisted_config.data_dir(), "data")?;
+    let current_log_dir = resolve_base_log_dir(persisted_config.log_dir())?;
+    let current_model_dir = resolve_storage_dir(persisted_config.model_dir(), "models")?;
 
-    let resolved_next_data_dir =
-        resolve_storage_dir(next_data_dir.as_deref(), "data")?;
-    let resolved_next_log_dir =
-        resolve_base_log_dir(next_log_dir.as_deref())?;
-    let resolved_next_model_dir =
-        resolve_storage_dir(next_model_dir.as_deref(), "models")?;
+    let resolved_next_data_dir = resolve_storage_dir(next_data_dir.as_deref(), "data")?;
+    let resolved_next_log_dir = resolve_base_log_dir(next_log_dir.as_deref())?;
+    let resolved_next_model_dir = resolve_storage_dir(next_model_dir.as_deref(), "models")?;
 
     let mut migrated_directories = Vec::new();
     let mut removable_directories = Vec::new();
     let data_migrated =
-        migrate_directory(&current_data_dir, &resolved_next_data_dir, "数据", false)
-            ?;
+        migrate_directory(&current_data_dir, &resolved_next_data_dir, "数据", false)?;
     push_migrated_directory(&mut migrated_directories, data_migrated, "数据目录");
     if data_migrated {
         removable_directories.push(current_data_dir.display().to_string());
     }
-    let log_migrated = migrate_directory(&current_log_dir, &resolved_next_log_dir, "日志", false)
-        ?;
+    let log_migrated = migrate_directory(&current_log_dir, &resolved_next_log_dir, "日志", false)?;
     push_migrated_directory(&mut migrated_directories, log_migrated, "日志目录");
     if log_migrated {
         removable_directories.push(current_log_dir.display().to_string());
     }
     let model_migrated =
-        migrate_directory(&current_model_dir, &resolved_next_model_dir, "模型", true)
-            ?;
+        migrate_directory(&current_model_dir, &resolved_next_model_dir, "模型", true)?;
     push_migrated_directory(&mut migrated_directories, model_migrated, "模型目录");
 
     let next_config = EnvConfig {
@@ -160,7 +151,10 @@ pub fn save_settings_config(
             data_dir: Some(resolved_next_data_dir.to_string_lossy().to_string()),
             log_dir: Some(resolved_next_log_dir.to_string_lossy().to_string()),
             model_dir: Some(resolved_next_model_dir.to_string_lossy().to_string()),
-            language: payload.language.clone().or(persisted_config.basic.language.clone()),
+            language: payload
+                .language
+                .clone()
+                .or(persisted_config.basic.language.clone()),
         },
         remote: Some(RemoteConfig {
             api_url: Some(payload.api_url.trim().to_string()),
@@ -174,10 +168,8 @@ pub fn save_settings_config(
 
     save_configs(&next_config)?;
     *config = next_config.clone();
-    if let ServiceImpl::Local(local) = &service_state.0 {
-        local
-            .replace_runtime_config(next_config.clone())
-            ?;
+    if let Ok(local) = &service_state.inner().local_service() {
+        local.replace_runtime_config(next_config.clone())?;
     }
 
     Ok(SettingsPayload {

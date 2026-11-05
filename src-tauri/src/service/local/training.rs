@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{bail, Context};
+use async_trait::async_trait;
 use calamine::{open_workbook_auto, Reader};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
@@ -38,6 +39,7 @@ use crate::{
             ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
         },
         pipeline::{resolve_model_task_pipeline, TrainingPipelineRequest},
+        training::ModelTrainingService,
         LocalService,
     },
     utils::time::{generate_unique_token, now_string},
@@ -1001,5 +1003,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ModelTrainingService for LocalService {
+    async fn create_model_training_task(
+        &self,
+        payload: CreateModelTrainingTaskPayload,
+    ) -> Result<ModelTrainingTaskResult> {
+        self.create_model_training_task_impl(payload).await
     }
 }

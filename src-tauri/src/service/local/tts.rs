@@ -1,5 +1,7 @@
 use std::{io, path::Path};
 
+use async_trait::async_trait;
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
     TransactionTrait,
@@ -24,6 +26,7 @@ use crate::{
             TextToSpeechTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, TtsPipelineRequest},
+        tts::TextToSpeechService,
         LocalService,
     },
     utils::time::now_string,
@@ -199,5 +202,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl TextToSpeechService for LocalService {
+    async fn create_text_to_speech_task(
+        &self,
+        payload: CreateTextToSpeechTaskPayload,
+    ) -> Result<TextToSpeechTaskResult> {
+        self.create_text_to_speech_task_impl(payload).await
     }
 }

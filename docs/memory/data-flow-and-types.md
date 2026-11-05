@@ -194,7 +194,7 @@ runner (run_streaming_session, 长期存活):
 ## speakers 字段 speakerName + 远程存储模式
 
 - **speaker 字段**：`SpeakerProfile.speakerName`（对齐后端 `SpeakerInfo.speaker_name`）。create/update/import 三处 `invoke` payload key 统一为 `speakerName`。
-- **远程存储模式**：后端 `Service` trait 含 `RemoteService` 实现，`StorageMode::Remote` 时启用，经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`Service` trait 共 **27 业务方法** + `new`/`close`（含流式 6 方法：create/send/cancel/replay snapshot/头像读写）。`ApiClient` 当前为占位实现，Remote 模式不可用；流式各方法直接 bail 不支持。`set_model_current_device` 对应远端 `PUT /api/models/{id}/current-device`。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
+- **远程存储模式**：后端按域拆分的 9 个业务服务接口（`SpeakerService`/`ModelService`/`HistoryService`/`GeneratedAudioService`/`TextToSpeechService`/`ModelTrainingService`/`VoiceCloneService`/`VoiceDesignService`/`StreamingSpeechService`，定义在 `service/<域>.rs`）由 `LocalService`/`RemoteService` 分别实现；`Service` trait 只含 `new`/`close` + 域访问方法，`StorageMode::Remote` 时经 `client::ApiClient` 调用远端 HTTP API。新增 Rust 类型（前端复用 `domain.ts`，无独立 TS 接口）：`TextToSpeechAudioAsset`/`VoiceCloneAudioAsset`/`VoiceDesignAudioAsset`（`{ taskId, fileName, contentType, bytes: Vec<u8> }`）、`UpdateTaskStatusPayload`（`{ taskId, status, durationSeconds? }`）、各 `*TaskResult`。`ApiClient` 当前为占位实现，Remote 模式不可用；流式各方法直接 bail 不支持。`set_model_current_device` 对应远端 `PUT /api/models/{id}/current-device`。完整契约见 `docs/remote-api.yaml`。详见 [[tech-stack-backend]]。
 
 ## UI 配置类型
 

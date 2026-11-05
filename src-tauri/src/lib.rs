@@ -80,9 +80,9 @@ pub fn run() {
             }
 
             let service_state = app_handle.state::<ServiceState>();
-            if let Err(err) =
-                tauri::async_runtime::block_on(async { service_state.0.close().await })
-            {
+            if let Err(err) = tauri::async_runtime::block_on(async {
+                service_state.inner().service()?.close().await
+            }) {
                 error!(error = %err, "failed to close service during app shutdown");
             }
         }
@@ -91,11 +91,7 @@ pub fn run() {
 
 #[cfg(windows)]
 fn show_error_dialog(message: &str) {
-    use std::{
-        ffi::OsStr,
-        iter::once,
-        os::windows::ffi::OsStrExt,
-    };
+    use std::{ffi::OsStr, iter::once, os::windows::ffi::OsStrExt};
 
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND,
@@ -163,7 +159,7 @@ async fn init(app: &mut tauri::App) -> Result<()> {
         }
     }
 
-    app.manage(ServiceState(service));
+    app.manage(ServiceState::new(service));
 
     Ok(())
 }

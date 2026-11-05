@@ -5,6 +5,8 @@ use std::{
 
 use anyhow::{bail, Context};
 
+use async_trait::async_trait;
+
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait,
     Condition, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -22,7 +24,7 @@ use crate::{
             SpeakerSource, SpeakerStatus, UpdateSpeakerPayload,
         },
         pipeline::model_paths::speaker_model_dir,
-        LocalService,
+        LocalService, SpeakerService,
     },
     utils::{file_ops::image_content_type, time::now_string},
     Result,
@@ -433,4 +435,37 @@ fn map_speaker_model(model: speaker_entity::Model) -> Result<SpeakerInfo> {
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
         avatar_content_type: model.avatar_content_type,
     })
+}
+
+#[async_trait]
+impl SpeakerService for LocalService {
+    async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
+        self.create_speaker_info_impl(payload).await
+    }
+
+    async fn import_model_as_speaker(
+        &self,
+        payload: ImportModelAsSpeakerPayload,
+    ) -> Result<SpeakerInfo> {
+        self.import_model_as_speaker_impl(payload).await
+    }
+
+    async fn list_speaker_infos(
+        &self,
+        request: PageRequest<SpeakerFilter>,
+    ) -> Result<SpeakerPageResult> {
+        self.list_speaker_infos_impl(request).await
+    }
+
+    async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
+        self.update_speaker_info_impl(payload).await
+    }
+
+    async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
+        self.delete_speaker_info_impl(speaker_id).await
+    }
+
+    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
+        self.get_speaker_avatar_impl(speaker_id).await
+    }
 }

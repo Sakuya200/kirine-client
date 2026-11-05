@@ -26,9 +26,10 @@ pub async fn create_streaming_speech_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<StreamingSpeechTaskResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .streaming_speech_service()
         .create_streaming_speech_task(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -41,9 +42,10 @@ pub async fn send_streaming_message(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<(), String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .streaming_speech_service()
         .send_streaming_message(payload, on_event)
         .await
         .map_err(|err| err.to_string())
@@ -55,9 +57,10 @@ pub async fn cancel_streaming_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .streaming_speech_service()
         .cancel_streaming_task(task_id)
         .await
         .map_err(AppError::from_anyhow)
@@ -69,9 +72,10 @@ pub async fn get_streaming_replay_snapshot(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<StreamingReplaySnapshot, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .streaming_speech_service()
         .get_streaming_replay_snapshot(history_id)
         .await
         .map_err(|err| err.to_string())
@@ -84,9 +88,10 @@ pub async fn get_streaming_speaker_avatar(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<StreamingSpeakerAvatarAsset, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .streaming_speech_service()
         .read_streaming_speaker_avatar(history_id, speaker_name)
         .await
         .map_err(|err| err.to_string())
@@ -98,9 +103,10 @@ pub async fn update_streaming_speakers(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<UpdateStreamingSpeakersResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .streaming_speech_service()
         .update_streaming_speakers(payload)
         .await
         .map_err(AppError::from_anyhow)

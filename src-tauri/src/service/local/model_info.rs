@@ -1,6 +1,7 @@
 use std::{collections::HashSet, path::Path};
 
 use anyhow::Context;
+use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     Set,
@@ -26,7 +27,7 @@ use crate::{
             validate_and_download, validate_and_init, PipelineBootstrapPaths,
             DOWNLOAD_MODEL_ARTIFACTS_LABEL, INIT_MODEL_RUNTIME_LABEL,
         },
-        LocalService,
+        LocalService, ModelService,
     },
     utils::{
         process::{run_logged_command, run_logged_command_with_output},
@@ -545,4 +546,35 @@ async fn remove_dir_if_exists(path: &Path) -> Result<bool> {
         .await
         .with_context(|| format!("failed to remove directory: {}", path.display()))?;
     Ok(true)
+}
+
+#[async_trait]
+impl ModelService for LocalService {
+    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
+        self.list_model_infos_impl(request).await
+    }
+
+    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
+        self.get_device_type_impl(base_model, model_version).await
+    }
+
+    async fn install_model(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelMutationResult> {
+        self.install_model_impl(model_id, device).await
+    }
+
+    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
+        self.uninstall_model_impl(model_id).await
+    }
+
+    async fn set_model_current_device(
+        &self,
+        model_id: i64,
+        device: HardwareType,
+    ) -> Result<ModelInfo> {
+        self.set_model_current_device_impl(model_id, device).await
+    }
 }

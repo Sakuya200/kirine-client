@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use anyhow::{bail, Context};
+use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
@@ -20,6 +21,7 @@ use crate::{
         },
         models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
         pipeline::{resolve_model_task_pipeline, VoiceClonePipelineRequest},
+        voice_clone::VoiceCloneService,
         LocalService,
     },
     utils::time::now_string,
@@ -215,5 +217,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VoiceCloneService for LocalService {
+    async fn create_voice_clone_task(
+        &self,
+        payload: CreateVoiceCloneTaskPayload,
+    ) -> Result<VoiceCloneTaskResult> {
+        self.create_voice_clone_task_impl(payload).await
     }
 }

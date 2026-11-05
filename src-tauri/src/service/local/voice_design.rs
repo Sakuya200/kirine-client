@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use async_trait::async_trait;
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
@@ -21,6 +23,7 @@ use crate::{
             CreateVoiceDesignTaskPayload, HistoryTaskType, TaskStatus, VoiceDesignTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, VoiceDesignPipelineRequest},
+        voice_design::VoiceDesignService,
         LocalService,
     },
     utils::time::now_string,
@@ -190,5 +193,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VoiceDesignService for LocalService {
+    async fn create_voice_design_task(
+        &self,
+        payload: CreateVoiceDesignTaskPayload,
+    ) -> Result<VoiceDesignTaskResult> {
+        self.create_voice_design_task_impl(payload).await
     }
 }

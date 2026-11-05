@@ -37,7 +37,9 @@ pub use crate::service::local::streaming::{
     ingest_streaming_speaker_avatars, validate_streaming_speakers,
     validate_streaming_speakers_hot_update,
 };
-pub use crate::service::{LocalService, Service};
+pub use crate::service::{
+    GeneratedAudioService, HistoryService, LocalService, ModelService, Service, SpeakerService,
+};
 
 /// 临时库测试设施：每个 `LocalServiceHarness::new` 在 `std::env::temp_dir` 下创建独立
 /// 临时目录，经 `LocalService::from_paths` 走「建库 → 全量迁移 → sync 模型目录」链路，

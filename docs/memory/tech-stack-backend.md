@@ -58,10 +58,19 @@ src-tauri/src/
 │   └── m20260723_000012_add_model_current_device.rs  # schema 28->29
 │
 ├── service/
-│   ├── mod.rs                     # Service trait (25 业务方法) + ServiceImpl(Local/Remote) 分发
+│   ├── mod.rs                     # Service trait (生命周期 new/close + 9 个 *_service() 域访问方法) + ServiceImpl(Local/Remote) 分发
+│   ├── speaker.rs                 # SpeakerService 接口（各域服务接口按业务单文件定义）
+│   ├── model.rs                   # ModelService 接口
+│   ├── history.rs                 # HistoryService 接口
+│   ├── generated_audio.rs         # GeneratedAudioService 接口 (read/save_generated_audio)
+│   ├── tts.rs                     # TextToSpeechService 接口
+│   ├── training.rs                # ModelTrainingService 接口
+│   ├── voice_clone.rs             # VoiceCloneService 接口
+│   ├── voice_design.rs            # VoiceDesignService 接口
+│   ├── streaming.rs               # StreamingSpeechService 接口
 │   ├── models.rs                  # 所有业务模型枚举与结构体统一定义 (含流式 payload/result/头像资产)
 │   ├── local/                     # 本地业务逻辑层
-│   │   ├── mod.rs                 # LocalService 定义 + impl Service 委托 + 通用任务句柄方法
+│   │   ├── mod.rs                 # LocalService 定义 + impl Service (生命周期+域访问) + 通用任务句柄方法
 │   │   ├── db.rs                  # DB 连接管理
 │   │   ├── entity/                # SeaORM Entity 定义
 │   │   │   ├── model_info.rs
@@ -82,7 +91,9 @@ src-tauri/src/
 │   │   ├── training.rs            # 微调任务创建 + start_training
 │   │   └── streaming.rs           # 流式会话 LocalService 层 (create/send/cancel/replay/头像 + 会话句柄 + sweep)
 │   ├── remote/                    # 远程服务层 (开发中)
-│   │   └── mod.rs                 # RemoteService 实现 Service trait, 委托 ApiClient; 流式三方法 bail 不支持
+│   │   ├── mod.rs                 # RemoteService 定义 + impl Service (生命周期+域访问)
+│   │   └── speaker/model/history/generated_audio/tts/training/voice_clone/voice_design/streaming.rs
+│   │                              # 各域 impl XxxService for RemoteService, 委托 ApiClient; 流式各方法 bail 不支持
 │   └── pipeline/                  # 任务执行管线
 │       ├── mod.rs                 # ModelTaskPipeline trait + 公共工具函数 + StreamingPipelineRequest
 │       ├── api/mod.rs             # PythonScriptInvocationSpec (参数文件驱动) + StreamingArgs/StreamingSpeakerArg
@@ -146,9 +157,9 @@ Pipeline 通过 shell 脚本包装器 `begin_llm_task` 执行 Python 脚本（�
 `src-tauri/windows/prepare-dependencies/common.nsh` 的 `MergeBundledZipArchiveContents`：先解压到 `%TEMP%` 临时目录，再逐文件 `Copy-Item` 合并到目标（不删除既有文件），保留 venv 与 conda_env。（旧实现解压前 `Remove-Item` 目标目录下除 `venv`/`.venv` 外内容，会误删 `conda_env`。）
 
 ### 远程存储模式 (RemoteService / ApiClient) - 开发中
-后端第二种存储后端 `RemoteService`，与 `LocalService` 并列实现同一 `Service` trait。
+后端第二种存储后端 `RemoteService`，与 `LocalService` 并列实现同一组域服务接口。
 
-- **`Service` trait** (`service/mod.rs`)：27 个业务方法 + `new`/`close` 生命周期（含流式 6 方法：`create_streaming_speech_task`/`send_streaming_message`/`cancel_streaming_task`/`get_streaming_replay_snapshot`/`read_streaming_speaker_avatar`/`update_streaming_speaker_avatar`；含模型当前设备 `set_model_current_device`）。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
+- **接口隔离结构**（2026-11 重构后）：`Service` trait (`service/mod.rs`) 只保留 `new`/`close` 生命周期 + 9 个域访问方法（`speaker_service()`/`model_service()`/`history_service()`/`generated_audio_service()`/`text_to_speech_service()`/`model_training_service()`/`voice_clone_service()`/`voice_design_service()`/`streaming_speech_service()`），业务方法分布在 `service/<域>.rs` 的独立接口（`SpeakerService`/`ModelService`/`HistoryService`/`GeneratedAudioService`/`TextToSpeechService`/`ModelTrainingService`/`VoiceCloneService`/`VoiceDesignService`/`StreamingSpeechService`，均 `: Send + Sync`）。Local 在 `local/<域>.rs` 实现（trait impl 转发到固有 `*_impl` 方法，pipeline 内部仍直调固有方法）；Remote 在 `remote/<域>.rs` 实现（委托 ApiClient）。hooks 命令调用链：`state.0.service()?.speaker_service().create_speaker_info(...)`。`ServiceImpl` 枚举（`Local(LocalService)` / `Remote(RemoteService)`）+ `init_service(config)` 按 `config.mode()` 分发。
 - **`client::ApiClient`** (`client/mod.rs`)：持有 `api_url` + 可选 `api_token`，方法签名与 `Service` trait 业务方法一一对应。**当前为占位实现**--`placeholder()` 打印 method/url/params 后 `bail!("client HTTP 调用尚未接入")`，即 Remote 模式当前会报错，不可用。
 - **`client::paths`** / **`client::entity`**：远端 API 路径常量 + `CommonResponse<T>`/分页响应边界转换。
 - **`utils::HttpClient`** (`utils/http.rs`)：封装 `reqwest::Client`（30s 超时 + Bearer Token），`#[allow(dead_code)]` 前瞻基础设施。

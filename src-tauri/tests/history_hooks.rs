@@ -14,7 +14,7 @@ use kirine_client_lib::test_support::{
     models::{
         GeneratedAudioSource, HistoryFilter, HistoryTaskType, TaskStatus, UpdateTaskStatusPayload,
     },
-    LocalServiceHarness, PageRequest, Service,
+    GeneratedAudioService, HistoryService, LocalServiceHarness, PageRequest,
 };
 use kirine_client_lib::Result;
 

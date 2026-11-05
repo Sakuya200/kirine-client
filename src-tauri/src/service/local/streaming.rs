@@ -9,6 +9,7 @@ use sea_orm::{
     EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use tauri::ipc::Channel;
+use async_trait::async_trait;
 use tokio::sync::{oneshot, watch};
 use tokio::time::timeout;
 use tracing::{error, info, warn};
@@ -32,13 +33,15 @@ use crate::{
             CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
             StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
             StreamingSpeakerInput, StreamingSpeechTaskResult, TaskStatus,
-            UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
+            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
+            UpdateTaskStatusPayload,
         },
         pipeline::streaming::{
             serialize_input_entry, MessageChannel, StreamingContextBasic, StreamingContextJson,
             StreamingMessageEntry, StreamingSpeaker,
         },
         pipeline::streaming_transport::encode_speakers_update_frame,
+        streaming::StreamingSpeechService,
         LocalService,
     },
     utils::{file_ops::image_content_type, time::now_string},
@@ -1067,4 +1070,50 @@ pub(crate) async fn sweep_stale_streaming_sessions_on_orm(
             .await;
     }
     Ok(())
+}
+
+#[async_trait]
+impl StreamingSpeechService for LocalService {
+    async fn create_streaming_speech_task(
+        &self,
+        payload: CreateStreamingSpeechTaskPayload,
+    ) -> Result<StreamingSpeechTaskResult> {
+        self.create_streaming_speech_task_impl(payload).await
+    }
+
+    async fn send_streaming_message(
+        &self,
+        payload: SendStreamingMessagePayload,
+        on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+    ) -> Result<()> {
+        self.send_streaming_message_impl(payload, on_event).await
+    }
+
+    async fn cancel_streaming_task(&self, task_id: i64) -> Result<bool> {
+        self.cancel_streaming_task_impl(task_id).await
+    }
+
+    async fn get_streaming_replay_snapshot(
+        &self,
+        history_id: i64,
+    ) -> Result<StreamingReplaySnapshot> {
+        self.get_streaming_replay_snapshot_impl(history_id).await
+    }
+
+    async fn read_streaming_speaker_avatar(
+        &self,
+        history_id: i64,
+        speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarAsset> {
+        self.read_streaming_speaker_avatar_impl(history_id, &speaker_name)
+            .await
+    }
+
+    async fn update_streaming_speakers(
+        &self,
+        payload: UpdateStreamingSpeakersPayload,
+    ) -> Result<UpdateStreamingSpeakersResult> {
+        self.update_streaming_speakers_impl(payload.history_id, &payload.speakers)
+            .await
+    }
 }

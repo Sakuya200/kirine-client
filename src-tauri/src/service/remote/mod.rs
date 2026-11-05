@@ -1,32 +1,25 @@
+mod generated_audio;
+mod history;
+mod model;
+mod speaker;
+mod streaming;
+mod training;
+mod tts;
+mod voice_clone;
+mod voice_design;
+
 use async_trait::async_trait;
 
-use crate::{
-    client::ApiClient,
-    config::{EnvConfig, HardwareType},
-    service::{
-        models::{
-            CreateModelTrainingTaskPayload, CreateSpeakerPayload, CreateStreamingSpeechTaskPayload,
-            CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-            CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
-            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ImportModelAsSpeakerPayload,
-            ModelFilter, ModelInfo, ModelMutationResult, ModelTrainingTaskResult, Page,
-            PageRequest, SendStreamingMessagePayload, SpeakerAvatarAsset, SpeakerFilter,
-            SpeakerInfo, SpeakerPageResult, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
-            StreamingSpeechTaskResult, TextToSpeechTaskResult, UpdateSpeakerPayload,
-            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult, UpdateTaskStatusPayload,
-            VoiceCloneTaskResult, VoiceDesignTaskResult,
-        },
-        Service,
-    },
-    Result,
-};
-use anyhow::{bail, Context};
+use anyhow::Context as _;
+
+use crate::{client::ApiClient, config::EnvConfig, service::Service, Result};
 
 #[derive(Debug, Clone)]
 pub struct RemoteService {
     client: ApiClient,
 }
 
+/// 远程模式暂只覆盖部分业务域；流式语音等能力在此层直接返回占位错误。
 #[async_trait]
 impl Service for RemoteService {
     async fn new(config: &EnvConfig) -> Result<RemoteService> {
@@ -41,230 +34,39 @@ impl Service for RemoteService {
         Ok(())
     }
 
-    async fn create_speaker_info(&self, payload: CreateSpeakerPayload) -> Result<SpeakerInfo> {
-        self.client.create_speaker_info(payload).await
+    fn speaker_service(&self) -> &dyn crate::service::SpeakerService {
+        self
     }
 
-    async fn import_model_as_speaker(
-        &self,
-        payload: ImportModelAsSpeakerPayload,
-    ) -> Result<SpeakerInfo> {
-        self.client.import_model_as_speaker(payload).await
+    fn model_service(&self) -> &dyn crate::service::ModelService {
+        self
     }
 
-    async fn list_speaker_infos(
-        &self,
-        request: PageRequest<SpeakerFilter>,
-    ) -> Result<SpeakerPageResult> {
-        self.client
-            .list_speaker_infos(request.into())
-            .await
-            .map(Into::into)
+    fn history_service(&self) -> &dyn crate::service::HistoryService {
+        self
     }
 
-    async fn update_speaker_info(&self, payload: UpdateSpeakerPayload) -> Result<SpeakerInfo> {
-        self.client.update_speaker_info(payload).await
+    fn generated_audio_service(&self) -> &dyn crate::service::GeneratedAudioService {
+        self
     }
 
-    async fn delete_speaker_info(&self, speaker_id: i64) -> Result<bool> {
-        self.client.delete_speaker_info(speaker_id).await
+    fn text_to_speech_service(&self) -> &dyn crate::service::TextToSpeechService {
+        self
     }
 
-    async fn get_speaker_avatar(&self, speaker_id: i64) -> Result<SpeakerAvatarAsset> {
-        bail!("远程模式暂不支持读取说话人头像: {speaker_id}")
+    fn model_training_service(&self) -> &dyn crate::service::ModelTrainingService {
+        self
     }
 
-    async fn list_model_infos(&self, request: PageRequest<ModelFilter>) -> Result<Page<ModelInfo>> {
-        self.client
-            .list_model_infos(request.into())
-            .await
-            .map(Into::into)
+    fn voice_clone_service(&self) -> &dyn crate::service::VoiceCloneService {
+        self
     }
 
-    async fn get_device_type(&self, base_model: &str, model_version: &str) -> Result<HardwareType> {
-        self.client.get_device_type(base_model, model_version).await
+    fn voice_design_service(&self) -> &dyn crate::service::VoiceDesignService {
+        self
     }
 
-    async fn install_model(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelMutationResult> {
-        self.client.install_model(model_id, device).await
-    }
-
-    async fn uninstall_model(&self, model_id: i64) -> Result<ModelMutationResult> {
-        self.client.uninstall_model(model_id).await
-    }
-
-    async fn set_model_current_device(
-        &self,
-        model_id: i64,
-        device: HardwareType,
-    ) -> Result<ModelInfo> {
-        self.client.set_model_current_device(model_id, device).await
-    }
-
-    async fn list_history_records(
-        &self,
-        request: PageRequest<HistoryFilter>,
-    ) -> Result<Page<HistoryRecordSummary>> {
-        self.client
-            .list_history_records(request.into())
-            .await
-            .map(Into::into)
-    }
-
-    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
-        self.client.get_history_record(history_id).await
-    }
-
-    async fn read_generated_audio(
-        &self,
-        source: GeneratedAudioSource,
-    ) -> Result<GeneratedAudioAsset> {
-        match source {
-            GeneratedAudioSource::TextToSpeech { history_id } => {
-                let asset = self.client.read_text_to_speech_audio(history_id).await?;
-                Ok(GeneratedAudioAsset {
-                    file_name: asset.file_name,
-                    content_type: asset.content_type,
-                    bytes: asset.bytes,
-                })
-            }
-            GeneratedAudioSource::VoiceClone { history_id } => {
-                let asset = self.client.read_voice_clone_audio(history_id).await?;
-                Ok(GeneratedAudioAsset {
-                    file_name: asset.file_name,
-                    content_type: asset.content_type,
-                    bytes: asset.bytes,
-                })
-            }
-            GeneratedAudioSource::VoiceDesign { history_id } => {
-                let asset = self.client.read_voice_design_audio(history_id).await?;
-                Ok(GeneratedAudioAsset {
-                    file_name: asset.file_name,
-                    content_type: asset.content_type,
-                    bytes: asset.bytes,
-                })
-            }
-            GeneratedAudioSource::StreamingSpeech { .. } => {
-                anyhow::bail!("远程存储模式暂不支持流式语音音频播放")
-            }
-        }
-    }
-
-    async fn save_generated_audio_as(
-        &self,
-        source: GeneratedAudioSource,
-        app: tauri::AppHandle,
-    ) -> Result<bool> {
-        match source {
-            GeneratedAudioSource::TextToSpeech { history_id } => {
-                let asset = self.client.read_text_to_speech_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
-                    .map_err(|err| anyhow::anyhow!(err))
-            }
-            GeneratedAudioSource::VoiceClone { history_id } => {
-                let asset = self.client.read_voice_clone_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
-                    .map_err(|err| anyhow::anyhow!(err))
-            }
-            GeneratedAudioSource::VoiceDesign { history_id } => {
-                let asset = self.client.read_voice_design_audio(history_id).await?;
-                crate::utils::audio::save_audio_bytes_as(&app, &asset.file_name, &asset.bytes)
-                    .map_err(|err| anyhow::anyhow!(err))
-            }
-            GeneratedAudioSource::StreamingSpeech { .. } => {
-                anyhow::bail!("远程存储模式暂不支持流式语音音频下载")
-            }
-        }
-    }
-
-    async fn delete_history_record(
-        &self,
-        history_id: i64,
-        task_type: HistoryTaskType,
-    ) -> Result<bool> {
-        self.client
-            .delete_history_record(history_id, task_type)
-            .await
-    }
-
-    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<HistoryRecord> {
-        self.client.update_task_status(payload).await
-    }
-
-    async fn create_text_to_speech_task(
-        &self,
-        payload: CreateTextToSpeechTaskPayload,
-    ) -> Result<TextToSpeechTaskResult> {
-        self.client.create_text_to_speech_task(payload).await
-    }
-
-    async fn create_model_training_task(
-        &self,
-        payload: CreateModelTrainingTaskPayload,
-    ) -> Result<ModelTrainingTaskResult> {
-        self.client.create_model_training_task(payload).await
-    }
-
-    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
-        self.client.cancel_history_task(history_id).await
-    }
-
-    async fn create_voice_clone_task(
-        &self,
-        payload: CreateVoiceCloneTaskPayload,
-    ) -> Result<VoiceCloneTaskResult> {
-        self.client.create_voice_clone_task(payload).await
-    }
-
-    async fn create_voice_design_task(
-        &self,
-        payload: CreateVoiceDesignTaskPayload,
-    ) -> Result<VoiceDesignTaskResult> {
-        self.client.create_voice_design_task(payload).await
-    }
-
-    async fn create_streaming_speech_task(
-        &self,
-        _payload: CreateStreamingSpeechTaskPayload,
-    ) -> Result<StreamingSpeechTaskResult> {
-        anyhow::bail!("远程存储模式暂不支持流式语音会话")
-    }
-
-    async fn send_streaming_message(
-        &self,
-        _payload: SendStreamingMessagePayload,
-        _on_event: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
-    ) -> Result<()> {
-        anyhow::bail!("远程存储模式暂不支持流式语音会话")
-    }
-
-    async fn cancel_streaming_task(&self, _task_id: i64) -> Result<bool> {
-        anyhow::bail!("远程存储模式暂不支持流式语音会话")
-    }
-
-    async fn get_streaming_replay_snapshot(
-        &self,
-        _history_id: i64,
-    ) -> Result<StreamingReplaySnapshot> {
-        anyhow::bail!("远程存储模式暂不支持流式语音历史重放")
-    }
-
-    async fn read_streaming_speaker_avatar(
-        &self,
-        _history_id: i64,
-        _speaker_name: String,
-    ) -> Result<StreamingSpeakerAvatarAsset> {
-        anyhow::bail!("远程存储模式暂不支持流式语音说话人头像")
-    }
-
-    async fn update_streaming_speakers(
-        &self,
-        _payload: UpdateStreamingSpeakersPayload,
-    ) -> Result<UpdateStreamingSpeakersResult> {
-        anyhow::bail!("远程存储模式暂不支持更新流式语音说话人")
+    fn streaming_speech_service(&self) -> &dyn crate::service::StreamingSpeechService {
+        self
     }
 }

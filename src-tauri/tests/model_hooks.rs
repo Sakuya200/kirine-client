@@ -14,7 +14,7 @@
 
 use kirine_client_lib::test_support::{
     models::{HistoryTaskType, ModelFilter},
-    HardwareType, LocalServiceHarness, PageRequest, Service,
+    HardwareType, LocalServiceHarness, ModelService, PageRequest,
 };
 use kirine_client_lib::Result;
 
