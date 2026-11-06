@@ -32,8 +32,8 @@ use crate::{
         models::{
             CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
             StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
-            StreamingSpeakerInput, StreamingSpeechTaskResult, TaskStatus,
-            UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
+            StreamingSpeakerAvatarPathAsset, StreamingSpeakerInput, StreamingSpeechTaskResult,
+            TaskStatus, UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
             UpdateTaskStatusPayload,
         },
         pipeline::streaming::{
@@ -649,6 +649,53 @@ impl LocalService {
         self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)
     }
 
+    /// 定位说话人头像的会话覆盖文件（路径级，不读内容；前端 convertFileSrc 经
+    /// asset 协议零拷贝显示）。仅覆盖优先级 ①（context.json 的 avatar_path 文件）；
+    /// 仅配置了记录头像（speakers 表字节列）的说话人报错，由前端回退字节命令。
+    pub(crate) async fn resolve_streaming_speaker_avatar_path_impl(
+        &self,
+        history_id: i64,
+        speaker_name: &str,
+    ) -> Result<StreamingSpeakerAvatarPathAsset> {
+        let detail = streaming_task_entity::Entity::find()
+            .filter(streaming_task_entity::Column::HistoryId.eq(history_id))
+            .filter(streaming_task_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("未找到流式会话详情: {history_id}"))?;
+
+        let data_dir = Path::new(self.data_dir());
+        let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
+        let context = self.load_streaming_context_cached(&context_json_path)?;
+        let speaker = context
+            .basic
+            .speakers
+            .iter()
+            .find(|s| s.name == speaker_name)
+            .ok_or_else(|| anyhow::anyhow!("说话人不存在: {speaker_name}"))?;
+
+        let avatar_path = speaker
+            .avatar_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("说话人 {} 未配置会话覆盖头像", speaker_name))?;
+        let resolved_avatar_path = resolve_task_path(data_dir, avatar_path);
+        let file_name = speaker.avatar_name.clone().unwrap_or_else(|| {
+            resolved_avatar_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "avatar".to_string())
+        });
+        Ok(StreamingSpeakerAvatarPathAsset {
+            history_id,
+            speaker_name: speaker_name.to_string(),
+            file_name,
+            content_type: image_content_type(&resolved_avatar_path).to_string(),
+            absolute_path: resolved_avatar_path.to_string_lossy().to_string(),
+        })
+    }
+
     /// 读取说话人头像字节（前端 Blob URL 显示用）。读取优先级：
     /// ① 会话覆盖头像——sample 目录文件（context.json 的 avatar_path，旧任务回退同样走此路）；
     /// ② 记录头像——按 speaker_id（fallback 按 name）查 speakers 表 avatar 列。
@@ -667,13 +714,13 @@ impl LocalService {
 
         let data_dir = Path::new(self.data_dir());
         let context_json_path = resolve_task_path(data_dir, &detail.context_file_path);
-        let context: StreamingContextJson =
-            serde_json::from_str(&std::fs::read_to_string(context_json_path)?)?;
+        let context = self.load_streaming_context_cached(&context_json_path)?;
         let speaker = context
             .basic
             .speakers
-            .into_iter()
+            .iter()
             .find(|s| s.name == speaker_name)
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("说话人不存在: {speaker_name}"))?;
 
         // 优先级 ①：会话覆盖头像文件（存在性由记录决定，旧任务回退共用）
@@ -1105,6 +1152,15 @@ impl StreamingSpeechService for LocalService {
         speaker_name: String,
     ) -> Result<StreamingSpeakerAvatarAsset> {
         self.read_streaming_speaker_avatar_impl(history_id, &speaker_name)
+            .await
+    }
+
+    async fn resolve_streaming_speaker_avatar_path(
+        &self,
+        history_id: i64,
+        speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarPathAsset> {
+        self.resolve_streaming_speaker_avatar_path_impl(history_id, &speaker_name)
             .await
     }
 

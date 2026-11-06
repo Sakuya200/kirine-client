@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use crate::{
     service::models::{
         CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
-        StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult, UpdateStreamingSpeakersPayload,
-        UpdateStreamingSpeakersResult,
+        StreamingSpeakerAvatarAsset, StreamingSpeakerAvatarPathAsset, StreamingSpeechTaskResult,
+        UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
     },
     Result,
 };
@@ -30,6 +30,12 @@ pub trait StreamingSpeechService: Send + Sync {
         history_id: i64,
         speaker_name: String,
     ) -> Result<StreamingSpeakerAvatarAsset>;
+    /// 路径级定位（仅会话覆盖头像文件）：前端 convertFileSrc 经 asset 协议零拷贝显示。
+    async fn resolve_streaming_speaker_avatar_path(
+        &self,
+        history_id: i64,
+        speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarPathAsset>;
     async fn update_streaming_speakers(
         &self,
         payload: UpdateStreamingSpeakersPayload,

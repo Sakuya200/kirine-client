@@ -5,7 +5,8 @@ use crate::{
     service::{
         models::{
             CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
-            StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult, UpdateStreamingSpeakersPayload,
+            StreamingSpeakerAvatarAsset, StreamingSpeakerAvatarPathAsset, StreamingSpeechTaskResult,
+            UpdateStreamingSpeakersPayload,
             UpdateStreamingSpeakersResult,
         },
         streaming::StreamingSpeechService,
@@ -48,6 +49,14 @@ impl StreamingSpeechService for RemoteService {
         _speaker_name: String,
     ) -> Result<StreamingSpeakerAvatarAsset> {
         bail!("远程存储模式暂不支持流式语音说话人头像")
+    }
+
+    async fn resolve_streaming_speaker_avatar_path(
+        &self,
+        _history_id: i64,
+        _speaker_name: String,
+    ) -> Result<StreamingSpeakerAvatarPathAsset> {
+        bail!("远程存储模式暂不支持流式语音说话人头像路径解析")
     }
 
     async fn update_streaming_speakers(

@@ -15,7 +15,8 @@ use std::{
     env::current_dir,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
+    time::SystemTime,
 };
 
 use anyhow::Context;
@@ -58,6 +59,10 @@ pub struct LocalService {
     orm: DatabaseConnection,
     active_task_controls: Arc<RwLock<HashMap<i64, ActiveTaskControl>>>,
     ui_config: Arc<UiConfigCatalog>,
+    /// context.json 解析缓存（键 = 文件路径，值 = mtime + 解析结果）：
+    /// 消息级高频读取（头像/回放详情）不再全量 read-parse；写入方靠 mtime 变化自然失效。
+    context_json_cache:
+        Arc<Mutex<HashMap<PathBuf, (SystemTime, Arc<crate::service::pipeline::streaming::StreamingContextJson>)>>>,
 }
 
 #[async_trait]
@@ -159,8 +164,43 @@ impl LocalService {
             orm,
             active_task_controls: Arc::new(RwLock::new(HashMap::new())),
             ui_config: Arc::new(load_ui_configs().unwrap_or_default()),
+            context_json_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         Ok(service)
+    }
+
+    /// 读取带 mtime 缓存的 context.json（解析结果 Arc 共享）。
+    /// 缓存键为文件路径，mtime 变化即重读解析——写入方（创建任务/更新说话人/发消息）
+    /// 无需显式失效。
+    pub(crate) fn load_streaming_context_cached(
+        &self,
+        context_json_path: &Path,
+    ) -> Result<Arc<crate::service::pipeline::streaming::StreamingContextJson>> {
+        let mtime = std::fs::metadata(context_json_path)
+            .and_then(|meta| meta.modified())
+            .with_context(|| format!("读取流式会话上下文失败: {}", context_json_path.display()))?;
+        let mut cache = self
+            .context_json_cache
+            .lock()
+            .expect("context.json cache poisoned");
+        if let Some((cached_mtime, cached)) = cache.get(context_json_path) {
+            if *cached_mtime == mtime {
+                return Ok(Arc::clone(cached));
+            }
+        }
+        let context = Arc::new(
+            serde_json::from_str::<crate::service::pipeline::streaming::StreamingContextJson>(
+                &fs::read_to_string(context_json_path)
+                    .with_context(|| format!("读取流式会话上下文失败: {}", context_json_path.display()))?,
+            )
+            .with_context(|| format!("解析流式会话上下文失败: {}", context_json_path.display()))?,
+        );
+        // 简单防膨胀：会话数量级远低于该上限，超出即整体清空
+        if cache.len() >= 64 {
+            cache.clear();
+        }
+        cache.insert(context_json_path.to_path_buf(), (mtime, Arc::clone(&context)));
+        Ok(context)
     }
 
     pub(crate) fn app_dir(&self) -> &Path {

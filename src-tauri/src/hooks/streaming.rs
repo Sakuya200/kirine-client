@@ -4,8 +4,8 @@ use crate::error::AppError;
 use crate::service::{
     models::{
         CreateStreamingSpeechTaskPayload, SendStreamingMessagePayload, StreamingReplaySnapshot,
-        StreamingSpeakerAvatarAsset, StreamingSpeechTaskResult, UpdateStreamingSpeakersPayload,
-        UpdateStreamingSpeakersResult,
+        StreamingSpeakerAvatarAsset, StreamingSpeakerAvatarPathAsset, StreamingSpeechTaskResult,
+        UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
     },
     ServiceState,
 };
@@ -93,6 +93,22 @@ pub async fn get_streaming_speaker_avatar(
         .map_err(|err| err.to_string())?
         .streaming_speech_service()
         .read_streaming_speaker_avatar(history_id, speaker_name)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_streaming_speaker_avatar_path(
+    history_id: i64,
+    speaker_name: String,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<StreamingSpeakerAvatarPathAsset, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .streaming_speech_service()
+        .resolve_streaming_speaker_avatar_path(history_id, speaker_name)
         .await
         .map_err(|err| err.to_string())
 }
