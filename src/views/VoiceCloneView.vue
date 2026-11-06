@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -745,6 +745,24 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  stopActiveTaskStatusRefresh();
+});
+
+// KeepAlive 生命周期：失活停轮询；再次激活时补刷历史列表 + 处理回放跳转 + 恢复轮询。
+// 首次激活紧跟 mounted 执行（mounted 已串行完成初始化），用 hasActivatedOnce 跳过，
+// 避免与 mounted 的串行初始化并发。
+let hasActivatedOnce = false;
+onActivated(() => {
+  if (!hasActivatedOnce) {
+    hasActivatedOnce = true;
+    return;
+  }
+  void hydrateReplayTaskFromRoute();
+  void loadRecentTasks();
+  syncActiveTaskStatusRefresh();
+});
+
+onDeactivated(() => {
   stopActiveTaskStatusRefresh();
 });
 

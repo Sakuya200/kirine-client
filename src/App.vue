@@ -30,6 +30,12 @@ const uiConfigStore = useUiConfigStore();
 
 const menuItems = appRoutes.filter(item => item.name && item.name !== 'not-found');
 
+// KeepAlive 白名单：仅缓存 4 个任务视图 + 流式语音视图（切页保留表单/结果状态，秒开）。
+// 对应视图内已做 onActivated/onDeactivated 配对启停轮询与数据补刷；
+// 其余视图（管理/历史/设置）保持每次挂载全量重建，避免状态过期。
+// 注意：<script setup> 组件名由文件名推断，此处字符串须与文件名一致。
+const KEEP_ALIVE_VIEWS = ['TextToSpeechView', 'VoiceCloneView', 'VoiceDesignView', 'ModelTrainingView', 'StreamingSpeechView'];
+
 const navIcons: Record<string, Component> = {
   [HistoryTaskType.ModelTraining]: MicrophoneIcon,
   [HistoryTaskType.TextToSpeech]: SpeakerWaveIcon,
@@ -132,7 +138,11 @@ onMounted(() => {
 
       <div class="mx-auto max-w-7xl">
         <div class="page-enter">
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <KeepAlive :include="KEEP_ALIVE_VIEWS" :max="6">
+              <component :is="Component" />
+            </KeepAlive>
+          </RouterView>
         </div>
       </div>
     </main>
