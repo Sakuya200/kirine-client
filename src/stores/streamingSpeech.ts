@@ -99,9 +99,21 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     modelParams: {}
   });
   const audioStates = reactive<Record<string, AudioState>>({});
-  /** 每条消息的音频分块（chunk 到达仅 push 引用，聚合交给 Blob，避免逐 chunk 全量拷贝）。 */
-  const audioBuffers = ref(new Map<string, Uint8Array[]>());
-  const audioUrls = ref(new Map<string, { url: string; length: number }>());
+  /**
+   * 每条消息的音频分块（chunk 到达仅 push 引用，聚合交给 Blob，避免逐 chunk 全量拷贝）。
+   * 刻意保持非响应式：deep-reactive 包装会让每个 ~12KB chunk 的 push 触发依赖追踪开销，
+   * 重建时机统一由 audioBuffersVersion 驱动。
+   */
+  const audioBuffers = new Map<string, Uint8Array[]>();
+  /** chunk 到达计数器：递增即驱动 getAudioUrl 所在 computed 重算（Blob 重建受节流控制）。 */
+  const audioBuffersVersion = ref(0);
+  /** 流式进行中每累计多少个 chunk 才重建一次 Blob URL（~4 chunk/s，约 1.5s 一次）。 */
+  const AUDIO_URL_REBUILD_CHUNK_INTERVAL = 6;
+  /**
+   * 消息 → 播放 URL 缓存。version = 构建时的 audioBuffersVersion（-1 哨兵 = 路径 URL）；
+   * chunkCount = 构建时的 chunk 数量（节流比较用）。
+   */
+  const audioUrls = ref(new Map<string, { url: string; version: number; chunkCount: number }>());
 
   const speakerOptions = computed(() =>
     speakers.value.map(speaker => ({
@@ -129,7 +141,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
   const revokeAudioUrl = (messageId: string) => {
     const cached = audioUrls.value.get(messageId);
     if (cached) {
-      if (cached.length !== -1) {
+      if (cached.version !== -1) {
         URL.revokeObjectURL(cached.url);
       }
       audioUrls.value.delete(messageId);
@@ -138,37 +150,48 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
 
   const clearAudioForMessage = (messageId: string) => {
     revokeAudioUrl(messageId);
-    audioBuffers.value.delete(messageId);
+    audioBuffers.delete(messageId);
+    // 清空后版本递增，确保引用该消息 URL 的 computed 立即失效
+    audioBuffersVersion.value += 1;
     delete audioStates[messageId];
   };
 
   const getAudioUrl = (messageId: string): string | null => {
+    // 读取版本号建立响应式依赖：chunk 到达递增版本驱动重算；
+    // 重算本身廉价（无 Blob 聚合），真正的 Blob 重建受下方节流控制。
+    const version = audioBuffersVersion.value;
     const state = audioStates[messageId];
     if (!state?.hasData) {
       return null;
     }
     const cached = audioUrls.value.get(messageId);
-    if (cached && cached.length === -1) {
+    if (cached && cached.version === -1) {
+      // 路径 URL（convertFileSrc）：静态资源，无需节流或重建
       return cached.url;
     }
-    const chunks = audioBuffers.value.get(messageId);
+    const chunks = audioBuffers.get(messageId);
     if (!chunks || chunks.length === 0) {
-      return cached?.length === -1 ? cached.url : null;
+      return cached?.version === -1 ? cached.url : null;
     }
-    if (cached && cached.length === chunks.length) {
+    if (cached && cached.version === version) {
+      return cached.url;
+    }
+    // 节流：流式进行中每累计 ~6 个 chunk（约 1.5s）才重建一次 Blob URL，
+    // 消灭逐 chunk O(n²) 聚合；流结束（isStreaming=false）立即重建完整音频。
+    if (state.isStreaming && cached && chunks.length - cached.chunkCount < AUDIO_URL_REBUILD_CHUNK_INTERVAL) {
       return cached.url;
     }
     revokeAudioUrl(messageId);
     // Blob 直接接受分块数组聚合，无需先拼接成单个缓冲
     const blob = new Blob(chunks as BlobPart[], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
-    audioUrls.value.set(messageId, { url, length: chunks.length });
+    audioUrls.value.set(messageId, { url, version, chunkCount: chunks.length });
     return url;
   };
 
   const setAudioPathForMessage = (messageId: string, audioPath: string | null) => {
     revokeAudioUrl(messageId);
-    audioBuffers.value.delete(messageId);
+    audioBuffers.delete(messageId);
 
     const state = ensureAudioState(messageId);
     if (!audioPath) {
@@ -183,7 +206,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     state.hasData = true;
     state.streamComplete = true;
     state.errorMessage = null;
-    audioUrls.value.set(messageId, { url: convertFileSrc(audioPath), length: -1 });
+    audioUrls.value.set(messageId, { url: convertFileSrc(audioPath), version: -1, chunkCount: 0 });
   };
 
   /** 说话人列表持久化进行中标记（乐观更新已生效、后端写入未完成）。 */
@@ -337,7 +360,7 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
     state.hasData = false;
     state.streamComplete = false;
     state.errorMessage = null;
-    audioBuffers.value.delete(messageId);
+    audioBuffers.delete(messageId);
     revokeAudioUrl(messageId);
 
     const channel = new Channel<AudioStreamEvent>();
@@ -346,12 +369,14 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       if (message instanceof ArrayBuffer) {
         state.isStreaming = true;
         state.hasData = true;
-        let chunks = audioBuffers.value.get(messageId);
+        let chunks = audioBuffers.get(messageId);
         if (!chunks) {
           chunks = [];
-          audioBuffers.value.set(messageId, chunks);
+          audioBuffers.set(messageId, chunks);
         }
         chunks.push(new Uint8Array(message));
+        // 非响应式 chunk 存储的统一失效信号：驱动 getAudioUrl 重算（重建受节流控制）
+        audioBuffersVersion.value += 1;
         return;
       }
       switch (message.type) {
@@ -361,6 +386,8 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
         case 'finished': {
           state.isStreaming = false;
           state.streamComplete = true;
+          // 流结束立即触发最终重建（节流仅在 isStreaming 时生效）
+          audioBuffersVersion.value += 1;
           updateMessageStatus(messageId, 'completed');
           break;
         }
