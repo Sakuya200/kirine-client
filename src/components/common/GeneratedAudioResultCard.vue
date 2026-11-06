@@ -10,12 +10,6 @@ import StatusPill from '@/components/common/StatusPill.vue';
 import HistoryTaskDetailDialog from '@/components/history/HistoryTaskDetailDialog.vue';
 import { TaskStatus } from '@/enums/status';
 
-interface AudioAssetPayload {
-  fileName: string;
-  contentType: string;
-  bytes: number[];
-}
-
 interface GeneratedAudioResultCardTask {
   taskId: number;
   fileName: string;
@@ -28,7 +22,7 @@ interface Props {
   emptyText: string;
   title?: string;
   subtitle?: string;
-  loadAudioAsset: (taskId: number) => Promise<AudioAssetPayload>;
+  loadAudioUrl: (taskId: number) => Promise<string>;
   downloadAudio?: (taskId: number) => Promise<boolean>;
 }
 
@@ -95,7 +89,7 @@ defineExpose({
       <div class="mt-3">
         <AudioResultPlayer
           :task="result"
-          :load-audio-asset="loadAudioAsset"
+          :load-audio-url="loadAudioUrl"
           :download-audio="downloadAudio"
           :download-label="t('common.resultCard.download')"
           download-tone="ghost"

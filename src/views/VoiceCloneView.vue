@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
@@ -28,7 +28,7 @@ import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } f
 import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
+import type { GeneratedAudioPathPayload, HistoryRecord } from '@/types/domain';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
@@ -71,13 +71,6 @@ interface VoiceCloneTaskResultPayload {
   createdAt: string;
   status: TaskStatus;
   outputFilePath: string;
-}
-
-interface VoiceCloneAudioAssetPayload {
-  taskId: number;
-  fileName: string;
-  contentType: string;
-  bytes: number[];
 }
 
 interface SelectedAudioFile {
@@ -713,10 +706,12 @@ const cancelActiveTask = async () => {
   }
 };
 
-const loadResultAudioAsset = (taskId: number) =>
-  invoke<VoiceCloneAudioAssetPayload>('get_generated_audio', {
+const loadResultAudioUrl = async (taskId: number): Promise<string> => {
+  const asset = await invoke<GeneratedAudioPathPayload>('get_generated_audio_path', {
     source: { kind: 'voice-clone', historyId: taskId }
   });
+  return convertFileSrc(asset.absolutePath);
+};
 
 const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'voice-clone', historyId: taskId });
 
@@ -817,7 +812,7 @@ usePollingResume(() => {
           ref="resultCardRef"
           :result="activeResult"
           :meta-text="activeResultMetaText"
-          :load-audio-asset="loadResultAudioAsset"
+          :load-audio-url="loadResultAudioUrl"
           :download-audio="saveResultAudio"
           :empty-text="t('voiceClone.result.emptyText')"
           @cancel="cancelActiveTask"

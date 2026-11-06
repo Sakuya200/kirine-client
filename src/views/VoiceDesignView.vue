@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -27,7 +27,7 @@ import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
+import type { GeneratedAudioPathPayload, HistoryRecord } from '@/types/domain';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
@@ -68,13 +68,6 @@ interface VoiceDesignTaskResultPayload {
   createdAt: string;
   status: TaskStatus;
   outputFilePath: string;
-}
-
-interface VoiceDesignAudioAssetPayload {
-  taskId: number;
-  fileName: string;
-  contentType: string;
-  bytes: number[];
 }
 
 const createDefaultExportAudioName = () => createTaskExportAudioName(HistoryTaskType.VoiceDesign);
@@ -621,10 +614,12 @@ const cancelActiveTask = async () => {
   }
 };
 
-const loadResultAudioAsset = (taskId: number) =>
-  invoke<VoiceDesignAudioAssetPayload>('get_generated_audio', {
+const loadResultAudioUrl = async (taskId: number): Promise<string> => {
+  const asset = await invoke<GeneratedAudioPathPayload>('get_generated_audio_path', {
     source: { kind: 'voice-design', historyId: taskId }
   });
+  return convertFileSrc(asset.absolutePath);
+};
 
 const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'voice-design', historyId: taskId });
 
@@ -716,7 +711,7 @@ usePollingResume(() => {
           ref="resultCardRef"
           :result="activeResult"
           :meta-text="activeResultMetaText"
-          :load-audio-asset="loadResultAudioAsset"
+          :load-audio-url="loadResultAudioUrl"
           :download-audio="saveResultAudio"
           :empty-text="t('voiceDesign.result.emptyText')"
           @cancel="cancelActiveTask"

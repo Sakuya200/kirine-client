@@ -2,13 +2,14 @@
 import { ArrowDownTrayIcon, PauseIcon, PlayIcon } from '@heroicons/vue/24/outline';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 import BaseButton from '@/components/common/BaseButton.vue';
 import { useStreamableAudioPlayer } from '@/hooks/useStreamableAudioPlayer';
 import { useStreamingSpeechStore } from '@/stores/streamingSpeech';
 import { useUiStore } from '@/stores/ui';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
+import type { GeneratedAudioPathPayload } from '@/types/domain';
 
 interface Props {
   mode: 'stream' | 'path';
@@ -61,17 +62,9 @@ const actionLabel = computed(() => {
 
 const showDownload = computed(() => props.mode === 'stream' && (!!props.audioPath || audioState.value?.streamComplete === true));
 
-interface StreamingSpeechAudioAsset {
-  fileName: string;
-  contentType: string;
-  bytes: number[];
-}
-
 const releaseReplayAudioUrl = () => {
-  if (replayAudioUrl.value) {
-    URL.revokeObjectURL(replayAudioUrl.value);
-    replayAudioUrl.value = null;
-  }
+  // asset 协议 URL 非 Blob URL，无需 revoke，置空即可
+  replayAudioUrl.value = null;
 };
 
 const ensureReplayAudioLoaded = async () => {
@@ -88,10 +81,10 @@ const ensureReplayAudioLoaded = async () => {
 
   isLoadingReplayAudio.value = true;
   try {
-    const asset = await invoke<StreamingSpeechAudioAsset>('get_generated_audio', {
+    const asset = await invoke<GeneratedAudioPathPayload>('get_generated_audio_path', {
       source: { kind: 'streaming-speech', historyId, messageId }
     });
-    replayAudioUrl.value = URL.createObjectURL(new Blob([Uint8Array.from(asset.bytes)], { type: asset.contentType || 'audio/wav' }));
+    replayAudioUrl.value = convertFileSrc(asset.absolutePath);
     return true;
   } catch (error) {
     uiStore.notifyError(error instanceof Error ? error.message : String(error));
