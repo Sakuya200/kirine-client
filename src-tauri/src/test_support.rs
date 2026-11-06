@@ -178,6 +178,10 @@ impl LocalServiceHarness {
         self.service.get_history_record(history_id).await
     }
 
+    pub async fn get_history_record_detail(&self, history_id: i64) -> Result<serde_json::Value> {
+        self.service.get_history_record_detail(history_id).await
+    }
+
     /// 读取 `task_history.status`（直接走原生 SQL，不加载 detail）。
     /// 用于断言清扫/状态机等仅关心 status 的场景，避免对未种子化 detail 行的依赖。
     pub async fn history_status(&self, history_id: i64) -> Result<TaskStatus> {

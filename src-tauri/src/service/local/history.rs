@@ -37,33 +37,6 @@ use crate::{
 };
 
 impl LocalService {
-    async fn load_task_error_log_impl(
-        &self,
-        history_id: i64,
-        task_type: HistoryTaskType,
-    ) -> Result<Option<String>> {
-        let runtime_config = self.runtime_config()?;
-        let log_dir = resolve_base_log_dir(runtime_config.log_dir())?;
-        let task_log_path = task_log_file_path(&log_dir, task_type, history_id);
-
-        match tokio::fs::read_to_string(&task_log_path).await {
-            Ok(content) => {
-                let trimmed = content.trim();
-                if trimmed.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(trimmed.to_string()))
-                }
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(io::Error::new(
-                err.kind(),
-                format!("读取任务日志失败: {}", task_log_path.display()),
-            )
-            .into()),
-        }
-    }
-
     /// 任务详情按需拉取（弹窗打开时与 task log 并行请求，替代全量 record 轮询）。
     pub(crate) async fn get_history_record_detail_impl(
         &self,
@@ -587,8 +560,9 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
 
         let task_type = parse_history_task_type(&row.task_type)?;
-        let detail = self.load_history_detail(history_id, task_type).await?;
 
+        // detail/taskLog 已拆分至 get_history_record_detail / get_history_task_log
+        // 按需拉取（前端任务事件化后不再周期性全量抓取），此处仅返回 summary 级
         Ok(HistoryRecord {
             id: row.id,
             task_type,
@@ -599,8 +573,8 @@ impl LocalService {
             device: parse_hardware_type(&row.device)?,
             create_time: row.create_time,
             modify_time: row.modify_time,
-            task_log: self.load_task_error_log_impl(row.id, task_type).await?,
-            detail,
+            task_log: None,
+            detail: serde_json::Value::Null,
         })
     }
 

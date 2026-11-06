@@ -21,7 +21,9 @@ import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadHistoryRecord } from '@/hooks/loadHistoryRecord';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
+import { useHistoryTaskEvents } from '@/hooks/useHistoryTaskEvents';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModels } from '@/hooks/useModels';
@@ -123,6 +125,9 @@ const generationHistory = ref<VoiceDesignResult[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 
+// 事件驱动为主（useHistoryTaskEvents），30s 低频轮询兜底防事件丢失；
+// 事件链稳定一个迭代后移除兜底轮询
+const HISTORY_TASK_FALLBACK_POLL_MS = 30_000;
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 // 单次刷新开始时间 + 代际令牌：用于检测被系统睡眠冻结的 invoke 并防止其晚到的
@@ -385,7 +390,7 @@ const syncActiveTaskStatusRefresh = () => {
 
     activeTaskStatusTimer = setInterval(() => {
       void refreshActiveTaskStatus();
-    }, 3000);
+    }, HISTORY_TASK_FALLBACK_POLL_MS);
 
     return;
   }
@@ -463,7 +468,7 @@ const refreshActiveTaskStatus = async () => {
   const currentTaskId = activeResult.value.taskId;
 
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId: currentTaskId });
+    const record = await loadHistoryRecord(currentTaskId);
     const nextResult = mapHistoryRecordToResult(record);
 
     if (!nextResult) {
@@ -494,7 +499,7 @@ const hydrateReplayTaskFromRoute = async () => {
   }
 
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId });
+    const record = await loadHistoryRecord(historyId);
     const replayResult = mapHistoryRecordToResult(record);
     if (!replayResult) {
       uiStore.notifyWarning(t('voiceDesign.notice.notDesignTask'));
@@ -526,7 +531,7 @@ watch(selectedHistoryTaskId, async taskId => {
   }
 
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
+    const record = await loadHistoryRecord(taskId);
     const result = mapHistoryRecordToResult(record);
 
     if (!result) {
@@ -655,7 +660,20 @@ onBeforeUnmount(() => {
 // 首次激活紧跟 mounted 执行（mounted 已串行完成初始化），用 hasActivatedOnce 跳过，
 // 避免与 mounted 的串行初始化并发。
 let hasActivatedOnce = false;
+let isViewActive = true;
+
+// 任务状态事件驱动刷新（500ms 防抖合并）：活动任务状态 + 最近任务列表；
+// 失活期间忽略事件，激活时的补刷已覆盖（onActivated 无条件 loadRecentTasks）
+useHistoryTaskEvents(event => {
+  if (!isViewActive || event.taskType !== HistoryTaskType.VoiceDesign) {
+    return;
+  }
+  void refreshActiveTaskStatus();
+  void loadRecentTasks({ silentOnError: true });
+});
+
 onActivated(() => {
+  isViewActive = true;
   if (!hasActivatedOnce) {
     hasActivatedOnce = true;
     return;
@@ -666,6 +684,7 @@ onActivated(() => {
 });
 
 onDeactivated(() => {
+  isViewActive = false;
   stopActiveTaskStatusRefresh();
 });
 
