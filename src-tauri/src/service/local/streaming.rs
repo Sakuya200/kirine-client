@@ -11,7 +11,7 @@ use sea_orm::{
 use tauri::ipc::Channel;
 use async_trait::async_trait;
 use tokio::sync::{oneshot, watch};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tracing::{error, info, warn};
 
 use crate::error::{codes, AppError};
@@ -49,10 +49,8 @@ use crate::{
     Result,
 };
 
-/// 单条流式消息等待终帧的超时上限。脚本在产出 finished/error 前卡住、帧缓冲文件
-/// 丢失或 runner 异常退出未发 done 信号时，强制收尾避免 `send_streaming_message` 永久挂起。
-/// 按真实合成耗时调整（建议单消息上限 5 分钟）。
-const STREAMING_MESSAGE_TIMEOUT: Duration = Duration::from_secs(300);
+/// 单条流式消息的超时改为帧间静默超时（任一帧刷新计时，静默超限判超时），
+/// 秒数与终止会话开关见 `EnvConfig::streaming`（env.toml `[streaming]`）。
 /// 新建流式会话时，等模型加载/voice prompt 编码完成、发出 `session_ready` 后才算建立成功。
 const STREAMING_SESSION_READY_TIMEOUT: Duration = Duration::from_secs(900);
 /// 说话人头像图片扩展名白名单（与前端 IMAGE_FILE_EXTENSIONS 对齐）。
@@ -562,13 +560,16 @@ impl LocalService {
         // 串行化 context.json 的 read-modify-write：同一会话并发发送时避免后写覆盖前写
         // 导致 messages 缺条目（input.jsonl 为 append-only 不受影响）。
         let context_lock = extra.context_lock.clone();
-        let (done_tx, done_rx) = oneshot::channel();
+        let (done_tx, mut done_rx) = oneshot::channel();
+        // 帧活动订阅须先于 Channel 注册建立：注册后 Python 首帧可能即刻到达，
+        // watch 保留最新计数值，保证订阅方 changed() 不漏事件。
+        let (message_channel, mut activity_rx) = MessageChannel::new(on_event, done_tx);
         {
             let mut guard = extra
                 .message_channels
                 .write()
                 .map_err(|_| anyhow::anyhow!("会话信道锁损坏"))?;
-            guard.insert(context_id.clone(), MessageChannel::new(on_event, done_tx));
+            guard.insert(context_id.clone(), message_channel);
         }
 
         // 追加 context.json messages + input.jsonl（审计日志），并经 Socket 推送 input 帧
@@ -613,22 +614,58 @@ impl LocalService {
             return Err(err);
         }
 
-        let outcome = match timeout(STREAMING_MESSAGE_TIMEOUT, done_rx).await {
-            Ok(Ok(o)) => o,
-            Ok(Err(_)) => bail!("流式会话进程退出，未收到完成信号"),
-            Err(_) => {
-                // 超时：移除 channel 并经其下发 Error，避免前端永久转圈、Channel 不结束。
-                // 若 runner 已先行 remove（终帧已到），则不下发，避免成功后误报错误。
-                if let Ok(mut guard) = extra.message_channels.write() {
-                    if let Some(mc) = guard.remove(&context_id) {
-                        let _ = mc
-                            .on_event
-                            .send(crate::service::pipeline::streaming::error_event(
-                                "流式生成超时".into(),
-                            ));
+        // 帧间静默超时：收到任一帧即刷新计时（长文本合成期间 chunk 连续到达不会误报），
+        // 静默超过配置时长才判超时——替代旧固定 300s 整消息超时。秒数进 env.toml
+        // streaming.message_silence_timeout_secs，终止会话开关见
+        // streaming.silence_timeout_terminate_session。
+        let streaming_config = self.runtime_config()?.streaming;
+        let silence_timeout =
+            Duration::from_secs(streaming_config.message_silence_timeout_secs.max(1));
+        let outcome = loop {
+            tokio::select! {
+                result = &mut done_rx => {
+                    match result {
+                        Ok(outcome) => break outcome,
+                        // done 发送端随 Channel 移除而丢弃：仅会话收尾 drain 时发生，
+                        // 语义等同进程退出
+                        Err(_) => bail!("流式会话进程退出，未收到完成信号"),
                     }
                 }
-                bail!("流式生成超时（contextId={context_id}）");
+                _ = activity_rx.changed() => {
+                    // 收到任一帧（或 Channel 已移除、done 已就绪）：刷新静默计时；
+                    // Channel 移除路径 done_rx 必然就绪，下一轮 select 即取走结果
+                    continue;
+                }
+                _ = sleep(silence_timeout) => {
+                    // 静默超时：移除 channel 并经其下发 Error，避免前端永久转圈、
+                    // Channel 不结束。若 runner 已先行 remove（终帧已到），则不下发，
+                    // 避免成功后误报错误。
+                    if let Ok(mut guard) = extra.message_channels.write() {
+                        if let Some(mc) = guard.remove(&context_id) {
+                            let _ = mc
+                                .on_event
+                                .send(crate::service::pipeline::streaming::error_event(
+                                    "流式生成超时（帧间静默）".into(),
+                                ));
+                        }
+                    }
+                    if streaming_config.silence_timeout_terminate_session {
+                        // 卡死的 Python 进程无法自愈，终止会话回收 GPU/显存；
+                        // 取消信号经 drive 循环整树强杀进程并置任务 Cancelled
+                        warn!(task_id, context_id = %context_id, silence_secs = silence_timeout.as_secs(), "streaming message silence timeout, terminating session");
+                        if let Err(err) =
+                            self.request_active_task_cancel(task_id, HistoryTaskType::StreamingSpeech)
+                        {
+                            warn!(error = %err, task_id, "failed to request session termination after silence timeout");
+                        }
+                    } else {
+                        warn!(task_id, context_id = %context_id, silence_secs = silence_timeout.as_secs(), "streaming message silence timeout");
+                    }
+                    bail!(
+                        "流式生成超时（contextId={context_id}，帧间静默 {}s）",
+                        silence_timeout.as_secs()
+                    );
+                }
             }
         };
 
@@ -964,8 +1001,22 @@ impl LocalService {
     }
 
     /// 启动清扫：将上次应用退出后残留的 Running 流式会话标记为 Cancelled。
+    /// 进程回收不在此处：应用退出路径已按 PID 注册表整树强杀（见 `close`）。
     pub(crate) async fn sweep_stale_streaming_sessions_impl(&self) -> Result<()> {
         sweep_stale_streaming_sessions_on_orm(self.orm()).await
+    }
+
+    /// 登记流式会话直系子进程 PID（运行期内存态）：应用退出时据此整树强杀。
+    pub(crate) fn register_streaming_session_pid(&self, task_id: i64, pid: u32) {
+        if let Ok(mut registry) = self.streaming_session_pids.lock() {
+            registry.insert(task_id, pid);
+        }
+    }
+
+    pub(crate) fn unregister_streaming_session_pid(&self, task_id: i64) {
+        if let Ok(mut registry) = self.streaming_session_pids.lock() {
+            registry.remove(&task_id);
+        }
     }
 
     /// 注册流式会话的运行句柄：创建 cancel 通道并注入 `StreamingSessionExtra`，
@@ -1072,6 +1123,7 @@ impl LocalService {
             }
             .await;
             service.unregister_active_task_control(task_id);
+            service.unregister_streaming_session_pid(task_id);
             if let Err(err) = result {
                 tracing::error!(error = %err, "local streaming session failed");
                 // 兜底：runner 在置 Running 前早退 / panic 会令任务停在 Pending/Running，

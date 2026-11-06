@@ -164,6 +164,8 @@ pub fn save_settings_config(
             .training
             .clone()
             .with_attn_implementation(attn_implementation),
+        // 流式配置不随设置页修改，原样保留
+        streaming: persisted_config.streaming.clone(),
     };
 
     save_configs(&next_config)?;

@@ -297,14 +297,18 @@ pub(crate) fn build_streaming_invocation(
 pub(crate) struct MessageChannel {
     pub on_event: Channel<InvokeResponseBody>,
     pub done: oneshot::Sender<StreamMessageOutcome>,
+    /// 帧活动计数：任一非终帧到达即 +1。`send_streaming_message` 在注册 Channel
+    /// 前建立订阅，据此实现帧间静默超时（watch 保留最新值，无丢帧竞态）。
+    pub frame_activity: watch::Sender<u64>,
 }
 
 impl MessageChannel {
     pub(crate) fn new(
         on_event: Channel<InvokeResponseBody>,
         done: oneshot::Sender<StreamMessageOutcome>,
-    ) -> Self {
-        Self { on_event, done }
+    ) -> (Self, watch::Receiver<u64>) {
+        let (frame_activity, activity_rx) = watch::channel(0u64);
+        (Self { on_event, done, frame_activity }, activity_rx)
     }
 }
 
@@ -479,6 +483,14 @@ pub(crate) async fn run_streaming_session(
     )
     .await
     .with_context(|| "failed to spawn streaming begin_llm_task")?;
+
+    // 登记会话直系子进程 PID：应用退出时按登记整树强杀，避免长期存活的
+    // 会话进程在退出后残留占用 GPU/显存（手工终止走 cancel 信号，见 drive 循环）。
+    if let Some(pid) = child.id() {
+        service.register_streaming_session_pid(task_id, pid);
+    } else {
+        warn!(task_id, "spawned streaming session has no pid");
+    }
 
     // 等待 Python 连接并完成令牌鉴权；失败则收尾子进程后交由上层置 Failed。
     let socket = match timeout(
@@ -851,6 +863,8 @@ fn forward_event(
         if let Some(mc) = guard.get(&frame.context_id) {
             // Channel::send 取 &self，读锁即可，避免 Chunk 高频时不必要的写锁竞争。
             let _ = mc.on_event.send(event);
+            // 帧活动计数 +1：等待方据此刷新帧间静默计时（收到帧即视为会话活跃）。
+            let _ = mc.frame_activity.send_modify(|count| *count += 1);
         }
     }
 }

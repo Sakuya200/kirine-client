@@ -21,6 +21,29 @@ pub struct EnvConfig {
     pub remote: Option<RemoteConfig>,
     #[serde(default)]
     pub training: TrainingConfig,
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+}
+
+/// 流式语音会话配置（settings 界面不暴露，改 env.toml 后重启生效）。
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", default)]
+pub struct StreamingConfig {
+    /// 单条流式消息的帧间静默超时秒数：收到任一帧刷新计时，静默超过该
+    /// 时长判超时（替代旧固定 300s 整消息超时，长文本合成不再误报）。
+    pub message_silence_timeout_secs: u64,
+    /// 静默超时后是否终止整个会话进程：卡死的 Python 无法自愈，终止以回收
+    /// GPU/显存；设为 false 时仅取消当前消息，会话保留可重试。
+    pub silence_timeout_terminate_session: bool,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            message_silence_timeout_secs: 180,
+            silence_timeout_terminate_session: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]

@@ -63,6 +63,9 @@ pub struct LocalService {
     /// 消息级高频读取（头像/回放详情）不再全量 read-parse；写入方靠 mtime 变化自然失效。
     context_json_cache:
         Arc<Mutex<HashMap<PathBuf, (SystemTime, Arc<crate::service::pipeline::streaming::StreamingContextJson>)>>>,
+    /// 流式会话进程 PID 注册表（task_id -> 直系子进程 PID，运行期内存态）。
+    /// 仅用于应用退出时按登记 PID 整树强杀；手工终止走 cancel 信号。
+    streaming_session_pids: Arc<Mutex<HashMap<i64, u32>>>,
 }
 
 #[async_trait]
@@ -79,6 +82,10 @@ impl Service for LocalService {
 
     async fn close(&self) -> Result<()> {
         info!("Closing local service and database connection");
+        // 应用退出收尾：终止所有运行中任务。
+        // ① 经 cancel 信号走管线自身的子进程回收路径；
+        // ② 流式会话为长期进程，另按登记 PID 整树强杀（cancel 亦会触发，双保险）。
+        self.terminate_all_active_tasks();
         self.orm.clone().close().await?;
         Ok(())
     }
@@ -165,6 +172,7 @@ impl LocalService {
             active_task_controls: Arc::new(RwLock::new(HashMap::new())),
             ui_config: Arc::new(load_ui_configs().unwrap_or_default()),
             context_json_cache: Arc::new(Mutex::new(HashMap::new())),
+            streaming_session_pids: Arc::new(Mutex::new(HashMap::new())),
         };
         Ok(service)
     }
@@ -310,6 +318,39 @@ impl LocalService {
         Ok(true)
     }
 
+    /// 应用退出收尾：终止所有运行中任务。
+    /// ① 全部任务发 cancel 信号，走管线自身的子进程回收路径；
+    /// ② 流式会话为长期进程，另按登记 PID 整树强杀（cancel 驱动循环也会触发，双保险）。
+    fn terminate_all_active_tasks(&self) {
+        if let Ok(controls) = self.active_task_controls.read() {
+            for (task_id, control) in controls.iter() {
+                info!(
+                    task_id,
+                    task_type = %control.task_type.as_str(),
+                    "terminating active task on app exit"
+                );
+                let _ = control.cancel_tx.send(true);
+            }
+        }
+        if let Ok(registry) = self.streaming_session_pids.lock() {
+            for (task_id, pid) in registry.iter() {
+                info!(
+                    task_id,
+                    pid,
+                    "force terminating streaming session process on app exit"
+                );
+                if let Err(err) = crate::utils::process::force_terminate_process(*pid) {
+                    tracing::warn!(
+                        error = %err,
+                        task_id,
+                        pid,
+                        "failed to terminate streaming session on app exit"
+                    );
+                }
+            }
+        }
+    }
+
     async fn init_db(orm: &DatabaseConnection, data_dir: &Path) -> Result<()> {
         migration::run_local_migrations(orm).await.map_err(|e| {
             anyhow::anyhow!(
@@ -329,7 +370,8 @@ impl LocalService {
                 )
             })?;
 
-        // 清扫上次应用退出后残留的流式会话 Running 行（长生命周期任务，进程随应用退出而终止）
+        // 清扫上次应用退出后残留的流式会话 Running 行（DB 状态修正）；
+        // 进程回收不在此处：应用退出路径已按 PID 注册表整树强杀（见 `close`）
         if let Err(err) = streaming::sweep_stale_streaming_sessions_on_orm(orm).await {
             tracing::warn!(error = %err, "failed to sweep stale streaming sessions during init");
         }
