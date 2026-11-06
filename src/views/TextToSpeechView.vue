@@ -17,7 +17,7 @@ import WarningConfirmDialog from '@/components/common/WarningConfirmDialog.vue';
 import GenericTaskParamsForm from '@/components/form/GenericTaskParamsForm.vue';
 import { HARDWARE_TYPE_TEXT, HardwareType } from '@/enums/settings';
 import { AppLanguage, APP_LANGUAGE_LABELS } from '@/enums/language';
-import { SpeakerStatus, TaskStatus } from '@/enums/status';
+import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption, type TextToSpeechSpeakerOption } from '@/enums/textToSpeech';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
@@ -25,9 +25,10 @@ import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { useModels } from '@/hooks/useModels';
+import { useSpeakerStore } from '@/stores/speakers';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
+import type { HistoryRecord, SpeakerProfile } from '@/types/domain';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
@@ -128,6 +129,7 @@ const {
   getModelLabel
 } = useModels();
 const uiStore = useUiStore();
+const speakerStore = useSpeakerStore();
 const {
   dialogOpen: showDeviceMismatchDialog,
   dialogTitle: deviceMismatchDialogTitle,
@@ -360,14 +362,7 @@ watch(
 
 const loadSpeakers = async () => {
   try {
-    const result = await invoke<SpeakerPagedResult>('list_speaker_infos', {
-      request: {
-        page: 1,
-        pageSize: 500,
-        filter: { keyword: null, status: SpeakerStatus.Ready, baseModel: form.baseModel || null }
-      }
-    });
-    speakers.value = Array.isArray(result?.items) ? result.items : [];
+    speakers.value = await speakerStore.listReadySpeakers({ baseModel: form.baseModel || null });
   } catch (error) {
     speakers.value = [];
     uiStore.notifyError(formatErrorMessage(t('common.store.speakers.loadFailed'), error));

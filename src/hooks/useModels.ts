@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { computed, ref } from 'vue';
 import { i18n } from '@/locales';
 
@@ -9,7 +8,7 @@ import { ModelInstallStatus } from '@/enums/status';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useModelStore } from '@/stores/models';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, ModelInfo, Page } from '@/types/domain';
+import type { BaseModel, ModelInfo } from '@/types/domain';
 
 export const normalizeModelInfo = (item: Partial<ModelInfo>): ModelInfo => {
   const supportedDevices = Array.isArray(item.supportedDevices)
@@ -54,7 +53,8 @@ export interface UseModelsOptions {
 }
 
 /**
- * 模型列表直连取数（页面每次挂载拉取，不做跨页缓存）。
+ * 模型列表取数：经 modelStore 的 TTL 缓存（60s）跨页共享，同窗口内的切页/查询
+ * 不再逐页重拉 list_model_infos；安装/卸载/换设备后由 store 自动失效。
  * 查询函数在数据未就绪时会自动触发一次静默加载，保证回显场景（如历史详情标签）
  * 无需手动调用 load。
  */
@@ -67,16 +67,12 @@ export const useModels = (options: UseModelsOptions = {}) => {
   const modelStore = useModelStore();
   let hasRequested = false;
 
-  const load = async ({ silent = false }: { silent?: boolean } = {}) => {
+  const load = async ({ silent = false, force = false }: { silent?: boolean; force?: boolean } = {}) => {
     hasRequested = true;
     isLoading.value = true;
 
     try {
-      const result = await invoke<Page<ModelInfo>>('list_model_infos', {
-        request: { page: 1, pageSize: 500, filter: null }
-      });
-      const rawItems = Array.isArray(result?.items) ? result.items : [];
-      items.value = rawItems.map(normalizeModelInfo);
+      items.value = await modelStore.getModelCache({ force });
     } catch (error) {
       items.value = [];
       if (!silent) {

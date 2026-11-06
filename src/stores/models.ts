@@ -8,7 +8,10 @@ import { ModelInstallStatus } from '@/enums/status';
 import { normalizeModelInfo } from '@/hooks/useModels';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
-import type { BaseModel, ModelInfo, ModelMutationResult } from '@/types/domain';
+import type { BaseModel, ModelInfo, ModelMutationResult, Page } from '@/types/domain';
+
+/** 模型列表跨页缓存 TTL：窗口内切页/查询共享同一份数据，不重复发 list_model_infos。 */
+const MODEL_CACHE_TTL_MS = 60_000;
 
 export const useModelStore = defineStore('models', () => {
   // 安装失败的模型 id（Rust 端 install_model 报错时记录）。这是会话级前端状态：
@@ -16,6 +19,39 @@ export const useModelStore = defineStore('models', () => {
   // 供模型管理页展示“安装失败”状态。安装/重装成功或卸载成功后清除。
   const failedModelIds = ref<Set<number>>(new Set());
   const uiStore = useUiStore();
+
+  // —— 模型列表跨页缓存 ——
+  // 每个视图/表单挂载都经 useModels 拉一次 pageSize:500 的全量列表；TTL 缓存 +
+  // 在途去重把同窗口内的 N 次切页请求合并为 1 次。安装/卸载/换设备成功后失效，
+  // 保证 mutation 之后的刷新仍走真实请求。
+  const cachedModels = ref<ModelInfo[] | null>(null);
+  const cachedModelsAt = ref(0);
+  let modelsRequest: Promise<ModelInfo[]> | null = null;
+
+  const invalidateModelCache = () => {
+    cachedModels.value = null;
+    cachedModelsAt.value = 0;
+  };
+
+  const getModelCache = async ({ force = false } = {}): Promise<ModelInfo[]> => {
+    if (!force && cachedModels.value && Date.now() - cachedModelsAt.value < MODEL_CACHE_TTL_MS) {
+      return cachedModels.value;
+    }
+    if (!modelsRequest) {
+      modelsRequest = invoke<Page<ModelInfo>>('list_model_infos', { request: { page: 1, pageSize: 500, filter: null } })
+        .then(result => {
+          const rawItems = Array.isArray(result?.items) ? result.items : [];
+          return rawItems.map(normalizeModelInfo);
+        })
+        .finally(() => {
+          modelsRequest = null;
+        });
+    }
+    const items = await modelsRequest;
+    cachedModels.value = items;
+    cachedModelsAt.value = Date.now();
+    return items;
+  };
 
   const installStatusOf = (item: ModelInfo): ModelInstallStatus => {
     if (failedModelIds.value.has(item.id)) {
@@ -36,6 +72,7 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       failedModelIds.value.delete(modelId);
+      invalidateModelCache();
       uiStore.notifySuccess(i18n.global.t('common.store.models.installed', { name: normalized.model.modelName, version: normalized.model.modelVersion }), 3200);
       return normalized;
     } catch (error) {
@@ -53,6 +90,7 @@ export const useModelStore = defineStore('models', () => {
         model: normalizeModelInfo(result.model)
       };
       failedModelIds.value.delete(modelId);
+      invalidateModelCache();
       uiStore.notifySuccess(i18n.global.t('common.store.models.uninstalled', { name: normalized.model.modelName, version: normalized.model.modelVersion }), 3200);
       return normalized;
     } catch (error) {
@@ -88,6 +126,7 @@ export const useModelStore = defineStore('models', () => {
   const setCurrentDevice = async (modelId: number, device: HardwareType): Promise<ModelInfo | null> => {
     try {
       const next = await invoke<ModelInfo>('set_model_current_device', { modelId, device });
+      invalidateModelCache();
       return normalizeModelInfo(next);
     } catch (error) {
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.models.setCurrentDeviceFailed'), error));
@@ -103,6 +142,8 @@ export const useModelStore = defineStore('models', () => {
     getDeviceType,
     uninstallModel,
     installStatusOf,
-    clearInstallFailed
+    clearInstallFailed,
+    getModelCache,
+    invalidateModelCache
   };
 });

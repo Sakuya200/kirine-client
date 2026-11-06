@@ -140,6 +140,9 @@ export const useUiConfigStore = defineStore('ui-config', () => {
       catalog.value = EMPTY_CATALOG;
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.uiConfig.loadFailed'), error));
     } finally {
+      // catalog 已重置：validateModelParams 的 memoize 必须一并失效，避免旧配置的校验结果
+      lastValidateKey = null;
+      validateMapConfigKey = null;
       initialized.value = true;
       isLoading.value = false;
     }
@@ -163,12 +166,32 @@ export const useUiConfigStore = defineStore('ui-config', () => {
     return JSON.stringify(modelParams[rule.field]) === JSON.stringify(rule.equals);
   };
 
+  // validateModelParams 随表单击键高频调用：memoize 校验结果（键含 modelParams 全量序列化，
+  // 任何输入变化都是新键），并复用同 taskConfig 的参数定义 Map，消灭每次重建 Map 的开销。
+  // loadCatalog 重置 catalog 时同步置空（见上方 finally）。
+  let lastValidateKey: string | null = null;
+  let lastValidateResult = false;
+  let validateMapConfigKey: string | null = null;
+  let validateParamDefinitionsMap: Map<string, ParamDefinition> | null = null;
+
   const validateModelParams = (baseModel: string, task: HistoryTaskType, modelParams: Record<string, unknown>): boolean => {
     const taskConfig = getTaskConfig(baseModel, task);
     if (!taskConfig) {
       return false;
     }
-    const paramDefinitionsMap = new Map<string, ParamDefinition>(taskConfig.params.map(param => [param.name, param]));
+    const resultKey = `${baseModel}:${task}:${JSON.stringify(modelParams)}`;
+    if (resultKey === lastValidateKey) {
+      return lastValidateResult;
+    }
+
+    const mapKey = `${baseModel}:${task}`;
+    if (mapKey !== validateMapConfigKey || validateParamDefinitionsMap === null) {
+      validateParamDefinitionsMap = new Map<string, ParamDefinition>(taskConfig.params.map(param => [param.name, param]));
+      validateMapConfigKey = mapKey;
+    }
+    const paramDefinitionsMap = validateParamDefinitionsMap;
+
+    let result = true;
     for (const [key, value] of Object.entries(modelParams)) {
       const paramDefinition = paramDefinitionsMap.get(key);
       if (!paramDefinition || !paramDefinition.required || !isParamVisible(paramDefinition, modelParams)) {
@@ -178,24 +201,29 @@ export const useUiConfigStore = defineStore('ui-config', () => {
       switch (paramDefinition.paramType) {
         case 'number':
           if (typeof value !== 'number') {
-            return false;
+            result = false;
           }
           break;
         case 'string':
           if (typeof value !== 'string' || value.trim() === '') {
-            return false;
+            result = false;
           }
           break;
         case 'boolean':
           if (typeof value !== 'boolean') {
-            return false;
+            result = false;
           }
           break;
         default:
-          return false;
+          result = false;
+      }
+      if (!result) {
+        break;
       }
     }
-    return true;
+    lastValidateKey = resultKey;
+    lastValidateResult = result;
+    return result;
   };
 
   return {

@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { defineStore } from 'pinia';
+import { ref } from 'vue';
 import { i18n } from '@/locales';
 
 import { SpeakerStatus } from '@/enums/status';
 import { useUiStore } from '@/stores/ui';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
-import type { BaseModel, SpeakerProfile } from '@/types/domain';
+import type { BaseModel, SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
 
 interface CreateSpeakerPayload {
   speakerName: string;
@@ -57,11 +58,53 @@ export const normalizeSpeaker = (item: Partial<SpeakerProfile>): SpeakerProfile 
 };
 
 /**
- * 说话人写操作集合：仅封装 create / update / import / delete 四个 invoke 与结果通知。
- * 列表查询由各页面直连 `list_speaker_infos` 取数，本 store 不再缓存列表/分页/统计状态。
+ * 说话人集合：写操作封装 + Ready 列表跨页缓存。
+ * TTS 表单与流式说话人表单都按 status=Ready(+baseModel) 拉下拉数据，改为共享一份
+ * 全量列表缓存（TTL + 在途去重），调用方按需客户端过滤；SpeakersView 的服务端
+ * 分页/关键词检索/统计仍直连 `list_speaker_infos`，不走此缓存。
  */
 export const useSpeakerStore = defineStore('speakers', () => {
   const uiStore = useUiStore();
+
+  // —— Ready 说话人列表跨页缓存 ——
+  // 写操作（创建/更新/导入/删除）成功后失效；TTL 内的跨页切换/表单重开共享同一份数据。
+  const SPEAKER_CACHE_TTL_MS = 30_000;
+  const cachedSpeakers = ref<SpeakerProfile[] | null>(null);
+  const cachedSpeakersAt = ref(0);
+  let speakersRequest: Promise<SpeakerProfile[]> | null = null;
+
+  const invalidateSpeakerCache = () => {
+    cachedSpeakers.value = null;
+    cachedSpeakersAt.value = 0;
+  };
+
+  const fetchAllSpeakers = async (): Promise<SpeakerProfile[]> => {
+    if (!speakersRequest) {
+      speakersRequest = invoke<SpeakerPagedResult>('list_speaker_infos', {
+        request: { page: 1, pageSize: 1000, filter: { keyword: null, status: null, baseModel: null } }
+      })
+        .then(result => (Array.isArray(result?.items) ? result.items.map(normalizeSpeaker) : []))
+        .finally(() => {
+          speakersRequest = null;
+        });
+    }
+    return speakersRequest;
+  };
+
+  /** status=Ready 的说话人（可按 baseModel 过滤），供任务表单的下拉选项使用。 */
+  const listReadySpeakers = async (
+    { baseModel = null, force = false }: { baseModel?: BaseModel | null; force?: boolean } = {}
+  ): Promise<SpeakerProfile[]> => {
+    let items = cachedSpeakers.value;
+    if (force || !items || Date.now() - cachedSpeakersAt.value >= SPEAKER_CACHE_TTL_MS) {
+      items = await fetchAllSpeakers();
+      cachedSpeakers.value = items;
+      cachedSpeakersAt.value = Date.now();
+    }
+    return items.filter(
+      speaker => speaker.status === SpeakerStatus.Ready && (!baseModel || speaker.baseModel === baseModel)
+    );
+  };
 
   const createSpeaker = async (payload: CreateSpeakerPayload) => {
     try {
@@ -79,6 +122,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       );
 
       uiStore.notifySuccess(i18n.global.t('common.store.speakers.created', { name: created.speakerName }), 3200);
+      invalidateSpeakerCache();
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.createFailed'), error));
@@ -101,6 +145,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       );
 
       uiStore.notifySuccess(i18n.global.t('common.store.speakers.updated', { name: updated.speakerName }), 3200);
+      invalidateSpeakerCache();
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.updateFailed'), error));
@@ -124,6 +169,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       );
 
       uiStore.notifySuccess(i18n.global.t('common.store.speakers.imported', { name: imported.speakerName }), 3200);
+      invalidateSpeakerCache();
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.importFailed'), error));
@@ -141,6 +187,7 @@ export const useSpeakerStore = defineStore('speakers', () => {
       }
 
       uiStore.notifySuccess(i18n.global.t('common.store.speakers.deleted', { name: speakerName }), 3200);
+      invalidateSpeakerCache();
       return true;
     } catch (error) {
       uiStore.notifyError(formatErrorMessage(i18n.global.t('common.store.speakers.deleteFailed'), error));
@@ -152,6 +199,8 @@ export const useSpeakerStore = defineStore('speakers', () => {
     createSpeaker,
     updateSpeaker,
     importSpeaker,
-    removeSpeaker
+    removeSpeaker,
+    listReadySpeakers,
+    invalidateSpeakerCache
   };
 });
