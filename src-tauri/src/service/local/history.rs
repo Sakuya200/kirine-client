@@ -20,8 +20,8 @@ use crate::{
             voice_design_task as voice_design_task_entity,
         },
         models::{
-            GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter, HistoryRecord,
-            HistoryRecordSummary, HistoryTaskType, ModelTrainingSampleInput,
+            GeneratedAudioAsset, GeneratedAudioPathAsset, GeneratedAudioSource, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ModelTrainingSampleInput,
             ModelTrainingTaskDetail, Page, PageRequest, StreamingTaskDetail, TaskStatus,
             TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
             UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
@@ -871,6 +871,18 @@ impl GeneratedAudioService for LocalService {
         source: GeneratedAudioSource,
     ) -> Result<GeneratedAudioAsset> {
         self.read_generated_audio_impl(source).await
+    }
+
+    async fn resolve_generated_audio_path(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioPathAsset> {
+        let (file_name, path) = self.resolve_generated_audio_file(source).await?;
+        Ok(GeneratedAudioPathAsset {
+            file_name,
+            content_type: crate::utils::audio::content_type_for_extension(&path).to_string(),
+            absolute_path: path.to_string_lossy().to_string(),
+        })
     }
 
     async fn save_generated_audio_as(

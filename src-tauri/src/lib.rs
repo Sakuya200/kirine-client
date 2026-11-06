@@ -152,6 +152,20 @@ async fn init(app: &mut tauri::App) -> Result<()> {
 
     match &service {
         ServiceImpl::Local(local) => {
+            // 资产协议静态 scope 仅覆盖 $APPDATA/**（tauri.conf.json）；数据目录被用户
+            // 自定义到其它位置时（绿色包/设置页修改），运行时追加递归授权，
+            // 保证 convertFileSrc 经 asset 协议可读生成音频。
+            let data_dir = std::path::PathBuf::from(local.data_dir());
+            if let Err(err) = app
+                .asset_protocol_scope()
+                .allow_directory(&data_dir, true)
+            {
+                error!(
+                    error = %err,
+                    data_dir = %data_dir.display(),
+                    "failed to allow asset protocol scope for data dir"
+                );
+            }
             tracing::info!(data_dir = %local.data_dir(), "local storage initialized");
         }
         ServiceImpl::Remote(_) => {

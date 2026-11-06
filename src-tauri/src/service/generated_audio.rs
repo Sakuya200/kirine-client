@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::{
-    service::models::{GeneratedAudioAsset, GeneratedAudioSource},
+    service::models::{GeneratedAudioAsset, GeneratedAudioPathAsset, GeneratedAudioSource},
     Result,
 };
 
@@ -11,6 +11,11 @@ pub trait GeneratedAudioService: Send + Sync {
         &self,
         source: GeneratedAudioSource,
     ) -> Result<GeneratedAudioAsset>;
+    /// 路径级定位（不读文件内容）：前端经 convertFileSrc + asset 协议零拷贝播放。
+    async fn resolve_generated_audio_path(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioPathAsset>;
     async fn save_generated_audio_as(
         &self,
         source: GeneratedAudioSource,

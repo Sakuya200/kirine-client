@@ -24,6 +24,7 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         task_history::list_history_records,
         task_history::get_history_record,
         task_history::get_generated_audio,
+        task_history::get_generated_audio_path,
         task_history::save_generated_audio_as,
         task_history::save_model_training_template_as,
         task_history::delete_history_record,

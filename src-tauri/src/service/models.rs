@@ -638,6 +638,15 @@ pub struct GeneratedAudioAsset {
     pub bytes: Vec<u8>,
 }
 
+/// 生成音频的路径级定位：不读文件内容，供前端 convertFileSrc 经 asset 协议播放。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedAudioPathAsset {
+    pub file_name: String,
+    pub content_type: String,
+    pub absolute_path: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextToSpeechAudioAsset {

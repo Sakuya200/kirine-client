@@ -4,7 +4,7 @@ use super::RemoteService;
 use crate::{
     service::{
         generated_audio::GeneratedAudioService,
-        models::{GeneratedAudioAsset, GeneratedAudioSource},
+        models::{GeneratedAudioAsset, GeneratedAudioPathAsset, GeneratedAudioSource},
     },
     Result,
 };
@@ -12,6 +12,13 @@ use anyhow::bail;
 
 #[async_trait]
 impl GeneratedAudioService for RemoteService {
+    async fn resolve_generated_audio_path(
+        &self,
+        _source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioPathAsset> {
+        bail!("远程存储模式暂不支持音频路径解析")
+    }
+
     async fn read_generated_audio(
         &self,
         source: GeneratedAudioSource,

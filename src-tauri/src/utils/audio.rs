@@ -16,6 +16,21 @@ pub fn content_type_for_format(format: TextToSpeechFormat) -> &'static str {
     }
 }
 
+/// 按扩展名推断生成音频的 Content-Type（路径级响应不携带任务格式字段）。
+pub fn content_type_for_extension(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("wav") => "audio/wav",
+        Some("mp3") => "audio/mpeg",
+        Some("flac") => "audio/flac",
+        _ => "application/octet-stream",
+    }
+}
+
 pub fn resolve_temp_wav_path(final_output_path: &str, format: TextToSpeechFormat) -> PathBuf {
     if format == TextToSpeechFormat::Wav {
         return PathBuf::from(final_output_path);

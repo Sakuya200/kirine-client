@@ -4,9 +4,10 @@ use crate::error::AppError;
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-        CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioSource, HistoryFilter,
-        HistoryRecord, HistoryRecordSummary, HistoryTaskType, ModelTrainingTaskResult, Page,
-        PageRequest, TextToSpeechTaskResult, VoiceCloneTaskResult, VoiceDesignTaskResult,
+        CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioPathAsset,
+        GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+        ModelTrainingTaskResult, Page, PageRequest, TextToSpeechTaskResult, VoiceCloneTaskResult,
+        VoiceDesignTaskResult,
     },
     ServiceState,
 };
@@ -62,6 +63,21 @@ pub async fn get_generated_audio(
         .map_err(|err| err.to_string())?
         .generated_audio_service()
         .read_generated_audio(source)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_generated_audio_path(
+    source: GeneratedAudioSource,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<GeneratedAudioPathAsset, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .generated_audio_service()
+        .resolve_generated_audio_path(source)
         .await
         .map_err(|err| err.to_string())
 }
