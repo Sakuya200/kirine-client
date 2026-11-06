@@ -3,6 +3,9 @@ pub mod models;
 pub(crate) mod pipeline;
 mod remote;
 
+// 任务列表失效事件发射通道
+pub(crate) mod events;
+
 // 各业务服务接口定义
 mod generated_audio;
 mod history;

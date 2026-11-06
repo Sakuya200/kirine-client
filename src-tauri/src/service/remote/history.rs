@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use anyhow::bail;
 
 use super::RemoteService;
 use crate::{
@@ -26,6 +27,18 @@ impl HistoryService for RemoteService {
 
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
         self.client.get_history_record(history_id).await
+    }
+
+    async fn get_history_record_detail(&self, _history_id: i64) -> Result<serde_json::Value> {
+        bail!("远程存储模式暂不支持任务详情查询")
+    }
+
+    async fn get_history_task_log(
+        &self,
+        _history_id: i64,
+        _max_bytes: Option<u64>,
+    ) -> Result<Option<String>> {
+        bail!("远程存储模式暂不支持任务日志查询")
     }
 
     async fn delete_history_record(

@@ -170,6 +170,9 @@ async fn init(app: &mut tauri::App) -> Result<()> {
         }
     }
 
+    // 注册任务事件发射通道（service 层经此发射 history:task-updated）
+    crate::service::events::register_app_handle(app.handle().clone());
+
     app.manage(ServiceState::new(service));
 
     Ok(())

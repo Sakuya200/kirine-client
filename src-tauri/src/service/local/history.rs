@@ -21,11 +21,11 @@ use crate::{
         },
         models::{
             GeneratedAudioAsset, GeneratedAudioPathAsset, GeneratedAudioSource, HistoryFilter,
-            HistoryRecord, HistoryRecordSummary, HistoryTaskType, ModelTrainingSampleInput,
-            ModelTrainingTaskDetail, Page, PageRequest, StreamingTaskDetail, TaskStatus,
-            TextToSpeechAudioAsset, TextToSpeechFormat, TextToSpeechTaskDetail,
-            UpdateTaskStatusPayload, VoiceCloneAudioAsset, VoiceCloneTaskDetail,
-            VoiceDesignAudioAsset, VoiceDesignTaskDetail,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskEventAction, HistoryTaskType,
+            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
+            StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
+            TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
+            VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
         },
         LocalService,
     },
@@ -62,6 +62,73 @@ impl LocalService {
             )
             .into()),
         }
+    }
+
+    /// 任务详情按需拉取（弹窗打开时与 task log 并行请求，替代全量 record 轮询）。
+    pub(crate) async fn get_history_record_detail_impl(
+        &self,
+        history_id: i64,
+    ) -> Result<serde_json::Value> {
+        let row = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+
+        let task_type = parse_history_task_type(&row.task_type)?;
+        self.load_history_detail(history_id, task_type).await
+    }
+
+    /// 任务日志 tail 读取：maxBytes 缺省 64KB，超限时对齐首个换行避免截出半行。
+    pub(crate) async fn load_task_log_tail_impl(
+        &self,
+        history_id: i64,
+        task_type: HistoryTaskType,
+        max_bytes: u64,
+    ) -> Result<Option<String>> {
+        let runtime_config = self.runtime_config()?;
+        let log_dir = resolve_base_log_dir(runtime_config.log_dir())?;
+        let task_log_path = task_log_file_path(&log_dir, task_type, history_id);
+
+        let file_len = match tokio::fs::metadata(&task_log_path).await {
+            Ok(meta) => meta.len(),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(io::Error::new(
+                    err.kind(),
+                    format!("读取任务日志失败: {}", task_log_path.display()),
+                )
+                .into())
+            }
+        };
+
+        let start = file_len.saturating_sub(max_bytes);
+        let mut file = tokio::fs::File::open(&task_log_path).await.map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("读取任务日志失败: {}", task_log_path.display()),
+            )
+        })?;
+        if start > 0 {
+            use tokio::io::AsyncSeekExt;
+            file.seek(std::io::SeekFrom::Start(start)).await.map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("定位任务日志失败: {}", task_log_path.display()),
+                )
+            })?;
+        }
+
+        use tokio::io::AsyncReadExt;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await.map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("读取任务日志失败: {}", task_log_path.display()),
+            )
+        })?;
+
+        Ok(crate::utils::process::decode_log_tail_text(&buffer, start))
     }
 }
 
@@ -378,6 +445,7 @@ impl LocalService {
             return Ok(false);
         };
 
+        let emit_status = history.status.parse::<TaskStatus>().ok();
         let mut history_active: task_history_entity::ActiveModel = history.into();
         history_active.deleted = sea_orm::ActiveValue::Set(1);
         history_active.modify_time = sea_orm::ActiveValue::Set(modify_time.clone());
@@ -447,6 +515,17 @@ impl LocalService {
         }
 
         tx.commit().await?;
+
+        if let Some(status) = emit_status {
+            crate::service::events::emit_history_task_event(
+                history_id,
+                task_type,
+                status,
+                &modify_time,
+                HistoryTaskEventAction::Deleted,
+            );
+        }
+
         Ok(true)
     }
 
@@ -471,14 +550,31 @@ impl LocalService {
             return Err(io::Error::new(io::ErrorKind::NotFound, "未找到目标任务").into());
         };
 
+        // 事件发射需要 task_type；解析失败只跳过发射，不影响状态落库
+        let emit_task_type = history.task_type.parse::<HistoryTaskType>().ok();
         let mut active: task_history_entity::ActiveModel = history.into();
         active.status = sea_orm::ActiveValue::Set(payload.status.as_str().to_string());
         if duration_seconds > 0 {
             active.duration_seconds = sea_orm::ActiveValue::Set(duration_seconds);
         }
-        active.modify_time = sea_orm::ActiveValue::Set(modify_time);
+        active.modify_time = sea_orm::ActiveValue::Set(modify_time.clone());
         active.finished_time = sea_orm::ActiveValue::Set(finished_time);
         active.update(self.orm()).await?;
+
+        if let Some(task_type) = emit_task_type {
+            let action = if payload.status == TaskStatus::Cancelled {
+                HistoryTaskEventAction::Cancelled
+            } else {
+                HistoryTaskEventAction::Updated
+            };
+            crate::service::events::emit_history_task_event(
+                payload.task_id,
+                task_type,
+                payload.status,
+                &modify_time,
+                action,
+            );
+        }
 
         Ok(())
     }
@@ -845,6 +941,27 @@ impl HistoryService for LocalService {
 
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
         self.get_history_record_impl(history_id).await
+    }
+
+    async fn get_history_record_detail(&self, history_id: i64) -> Result<serde_json::Value> {
+        self.get_history_record_detail_impl(history_id).await
+    }
+
+    async fn get_history_task_log(
+        &self,
+        history_id: i64,
+        max_bytes: Option<u64>,
+    ) -> Result<Option<String>> {
+        let row = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+        let task_type = parse_history_task_type(&row.task_type)?;
+        // 缺省 64KB，钳制到 [1KB, 4MB] 防御异常入参
+        let max_bytes = max_bytes.unwrap_or(64 * 1024).clamp(1024, 4 * 1024 * 1024);
+        self.load_task_log_tail_impl(history_id, task_type, max_bytes)
+            .await
     }
 
     async fn delete_history_record(

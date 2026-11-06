@@ -30,7 +30,8 @@ use crate::{
             streaming_task as streaming_task_entity, task_history as task_history_entity,
         },
         models::{
-            CreateStreamingSpeechTaskPayload, HistoryTaskType, SendStreamingMessagePayload,
+            CreateStreamingSpeechTaskPayload, HistoryTaskEventAction, HistoryTaskType,
+            SendStreamingMessagePayload,
             StreamingReplayMessage, StreamingReplaySnapshot, StreamingSpeakerAvatarAsset,
             StreamingSpeakerAvatarPathAsset, StreamingSpeakerInput, StreamingSpeechTaskResult,
             TaskStatus, UpdateStreamingSpeakersPayload, UpdateStreamingSpeakersResult,
@@ -437,6 +438,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::StreamingSpeech,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
 
         // 注册会话附加态 + 拉起长期进程，阻塞等待真正就绪。
         self.register_streaming_session(task_id);

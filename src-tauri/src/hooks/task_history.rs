@@ -53,6 +53,37 @@ pub async fn get_history_record(
 }
 
 #[tauri::command]
+pub async fn get_history_record_detail(
+    history_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<serde_json::Value, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .history_service()
+        .get_history_record_detail(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_history_task_log(
+    history_id: i64,
+    max_bytes: Option<u64>,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<Option<String>, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .history_service()
+        .get_history_task_log(history_id, max_bytes)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub async fn get_generated_audio(
     source: GeneratedAudioSource,
     state: State<'_, ServiceState>,

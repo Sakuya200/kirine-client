@@ -34,9 +34,10 @@ use crate::{
             training_task as training_task_entity,
         },
         models::{
-            CreateModelTrainingTaskPayload, HistoryTaskType, ModelTrainingFileInput,
-            ModelTrainingFileKind, ModelTrainingSampleInput, ModelTrainingSampleType,
-            ModelTrainingTaskResult, SpeakerSource, SpeakerStatus, TaskStatus,
+            CreateModelTrainingTaskPayload, HistoryTaskEventAction, HistoryTaskType,
+            ModelTrainingFileInput, ModelTrainingFileKind, ModelTrainingSampleInput,
+            ModelTrainingSampleType, ModelTrainingTaskResult, SpeakerSource, SpeakerStatus,
+            TaskStatus,
         },
         pipeline::{resolve_model_task_pipeline, TrainingPipelineRequest},
         training::ModelTrainingService,
@@ -323,6 +324,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::ModelTraining,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_training(base_model.clone(), task_id, speaker_id, &speaker_name)?;
 
         Ok(ModelTrainingTaskResult {

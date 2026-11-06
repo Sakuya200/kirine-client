@@ -15,6 +15,11 @@ pub trait HistoryService: Send + Sync {
         request: PageRequest<HistoryFilter>,
     ) -> Result<Page<HistoryRecordSummary>>;
     async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord>;
+    /// 任务详情（HistoryTaskDetailDialog 打开时按需拉取，替代全量 record 轮询）
+    async fn get_history_record_detail(&self, history_id: i64) -> Result<serde_json::Value>;
+    /// 任务日志 tail（maxBytes 缺省 64KB，超限对齐首个换行截断）
+    async fn get_history_task_log(&self, history_id: i64, max_bytes: Option<u64>)
+        -> Result<Option<String>>;
     async fn delete_history_record(
         &self,
         history_id: i64,

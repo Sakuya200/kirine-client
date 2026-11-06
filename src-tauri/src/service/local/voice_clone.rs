@@ -19,7 +19,10 @@ use crate::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
-        models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
+        models::{
+            CreateVoiceCloneTaskPayload, HistoryTaskEventAction, HistoryTaskType, TaskStatus,
+            VoiceCloneTaskResult,
+        },
         pipeline::{resolve_model_task_pipeline, VoiceClonePipelineRequest},
         voice_clone::VoiceCloneService,
         LocalService,
@@ -170,6 +173,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::VoiceClone,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_voice_clone_inference(base_model.clone(), task_id)?;
 
         Ok(VoiceCloneTaskResult {

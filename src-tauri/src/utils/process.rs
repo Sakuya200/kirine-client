@@ -152,6 +152,27 @@ fn decode_output(bytes: &[u8]) -> String {
     trim_error_snippet(&String::from_utf8_lossy(bytes))
 }
 
+/// 解码日志 tail 字节为文本。`start_offset > 0` 表示从文件中部起读：
+/// 对齐首个换行避免截出半行（窗口内无换行说明最后一行本身超长，
+/// 此时保留窗口内容）；全空白返回 None。
+pub fn decode_log_tail_text(buffer: &[u8], start_offset: u64) -> Option<String> {
+    let text = String::from_utf8_lossy(buffer);
+    let aligned: &str = if start_offset > 0 {
+        match text.find('\n') {
+            Some(index) => &text[index + 1..],
+            None => text.as_ref(),
+        }
+    } else {
+        text.as_ref()
+    };
+    let trimmed = aligned.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 /// 任务日志 tail 读取上限：失败消息只需要结尾片段，无需整个文件（训练日志可达数 MB）。
 const MAX_TASK_LOG_TAIL_BYTES: u64 = 64 * 1024;
 

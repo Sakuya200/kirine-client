@@ -22,8 +22,8 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
-            TextToSpeechTaskResult,
+            CreateTextToSpeechTaskPayload, HistoryTaskEventAction, HistoryTaskType, SpeakerStatus,
+            TaskStatus, TextToSpeechTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, TtsPipelineRequest},
         tts::TextToSpeechService,
@@ -153,6 +153,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::TextToSpeech,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_tts_inference(base_model.clone(), task_id)?;
 
         Ok(TextToSpeechTaskResult {

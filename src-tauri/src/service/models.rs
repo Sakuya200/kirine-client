@@ -596,6 +596,29 @@ pub struct HistoryRecordSummary {
     pub modify_time: String,
 }
 
+/// 任务列表失效事件名：前端订阅后按需刷新，替代周期轮询全量记录。
+pub const HISTORY_TASK_UPDATED_EVENT: &str = "history:task-updated";
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryTaskEventAction {
+    Created,
+    Updated,
+    Deleted,
+    Cancelled,
+}
+
+/// 任务列表失效信号事件（只含定位/过滤所需字段，不含 detail/taskLog）
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryTaskEvent {
+    pub history_id: i64,
+    pub task_type: HistoryTaskType,
+    pub status: TaskStatus,
+    pub modify_time: String,
+    pub action: HistoryTaskEventAction,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {

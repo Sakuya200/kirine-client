@@ -20,7 +20,8 @@ use crate::{
             task_history as task_history_entity, voice_design_task as voice_design_task_entity,
         },
         models::{
-            CreateVoiceDesignTaskPayload, HistoryTaskType, TaskStatus, VoiceDesignTaskResult,
+            CreateVoiceDesignTaskPayload, HistoryTaskEventAction, HistoryTaskType, TaskStatus,
+            VoiceDesignTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, VoiceDesignPipelineRequest},
         voice_design::VoiceDesignService,
@@ -141,6 +142,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::VoiceDesign,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_voice_design_inference(base_model.clone(), task_id)?;
 
         Ok(VoiceDesignTaskResult {

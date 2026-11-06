@@ -23,6 +23,8 @@ pub fn load_hooks(builder: tauri::Builder<Wry>) -> tauri::Builder<Wry> {
         model_info::set_model_current_device,
         task_history::list_history_records,
         task_history::get_history_record,
+        task_history::get_history_record_detail,
+        task_history::get_history_task_log,
         task_history::get_generated_audio,
         task_history::get_generated_audio_path,
         task_history::save_generated_audio_as,

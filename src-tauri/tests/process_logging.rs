@@ -5,7 +5,7 @@ use std::{
 };
 
 use kirine_client_lib::utils::process::{
-    append_process_output, join_path_entries, read_task_log_tail,
+    append_process_output, decode_log_tail_text, join_path_entries, read_task_log_tail,
 };
 
 #[test]
@@ -112,4 +112,32 @@ fn read_task_log_tail_reads_only_tail_window_aligned_to_line() {
 fn read_task_log_tail_missing_file_is_empty() {
     let log_path = unique_log_path("missing");
     assert_eq!(read_task_log_tail(&log_path), String::new());
+}
+
+#[test]
+fn decode_log_tail_text_full_window_keeps_all_lines() {
+    // start_offset = 0：整窗口有效，不需要换行对齐
+    let buffer = b"line-0001\nline-0002\nline-0003\n".as_slice();
+    let decoded = decode_log_tail_text(buffer, 0).unwrap();
+    assert!(decoded.starts_with("line-0001"));
+    assert!(decoded.ends_with("line-0003"));
+}
+
+#[test]
+fn decode_log_tail_text_mid_file_aligns_to_first_newline() {
+    // start_offset > 0：首行可能被截断，应丢弃首个不完整片段
+    let buffer = b"023\nline-0024\nline-0025\n".as_slice();
+    let decoded = decode_log_tail_text(buffer, 1_024).unwrap();
+    assert_eq!(decoded, "line-0024\nline-0025");
+
+    // 窗口内无换行（末行超长）：保留整个窗口内容
+    let no_newline = b"very-long-truncated-last-line".as_slice();
+    let decoded = decode_log_tail_text(no_newline, 1_024).unwrap();
+    assert_eq!(decoded, "very-long-truncated-last-line");
+}
+
+#[test]
+fn decode_log_tail_text_blank_content_is_none() {
+    assert_eq!(decode_log_tail_text(b"\n  \n\t\n".as_slice(), 0), None);
+    assert_eq!(decode_log_tail_text(b"".as_slice(), 0), None);
 }
