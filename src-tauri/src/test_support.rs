@@ -37,6 +37,9 @@ pub use crate::service::local::streaming::{
     ingest_streaming_speaker_avatars, validate_streaming_speakers,
     validate_streaming_speakers_hot_update,
 };
+pub use crate::service::pipeline::training::{NormalizationFailure, run_training_transcodes};
+// 测试需要构造 `Result<String>` 的 Err 分支（失败样本收集路径），重导出 anyhow
+pub use anyhow;
 pub use crate::service::{
     GeneratedAudioService, HistoryService, LocalService, ModelService, Service, SpeakerService,
 };

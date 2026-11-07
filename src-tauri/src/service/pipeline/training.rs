@@ -1,13 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anyhow::Context;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value;
 use tokio::sync::watch;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::error::{codes, AppError};
 use crate::{
@@ -29,7 +31,7 @@ use crate::{
     },
     utils::{
         audio::{build_ffmpeg_transcode_script_args, resolve_normalized_wav_sidecar_path},
-        process::{run_logged_shell_script, LoggedCommandResult},
+        process::{read_task_log_tail, run_logged_shell_script, LoggedCommandResult},
         time::now_string,
     },
     Result,
@@ -239,10 +241,17 @@ pub(crate) async fn run_common_training_pipeline(
             &paths.transcode_script_path,
             &paths.input_jsonl,
             &paths.sample_root,
-            task_id,
             &log_dir,
             COMMON_TRAINING_NORMALIZE_AUDIO_LABEL,
             COMMON_TRAINING_NORMALIZE_LOG_MESSAGE,
+            runtime_config
+                .training
+                .normalization_concurrency
+                .unwrap_or_else(default_training_normalization_concurrency),
+            runtime_config
+                .training
+                .normalization_failure_rate_percent
+                .unwrap_or(DEFAULT_TRAINING_NORMALIZATION_FAILURE_RATE_PERCENT),
         )
         .await?;
 
@@ -569,40 +578,42 @@ pub(crate) async fn prepare_training_model_env_for_paths(
     .await
 }
 
-pub(crate) async fn normalize_training_audio_path(
+/// 默认失败率阈值：失败样本占比超过该值（百分比）才整体失败，可经 [training] 配置覆盖。
+pub(crate) const DEFAULT_TRAINING_NORMALIZATION_FAILURE_RATE_PERCENT: u8 = 10;
+
+/// 默认规范化并发度：min(4, max(2, 逻辑核数/2))。
+pub(crate) fn default_training_normalization_concurrency() -> usize {
+    let cpus = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(4);
+    (cpus / 2).clamp(2, 4)
+}
+
+/// 单个训练音频规范化：经 transcode_audio.ps1 脚本链转出单声道 WAV sidecar。
+/// 日志写独立样本文件——并发进程各自持有句柄，避免交错写坏同一任务日志。
+async fn transcode_training_sample(
     src_model_root: &Path,
     transcode_script_path: &Path,
-    task_id: i64,
-    log_dir: &Path,
     input_path: &Path,
-    normalized_paths: &mut HashMap<String, String>,
-    label: &str,
+    sample_log_path: &Path,
+    normalize_label: &str,
 ) -> Result<String> {
-    let input_string = input_path.to_string_lossy().to_string();
-    if let Some(normalized) = normalized_paths.get(&input_string) {
-        return Ok(normalized.clone());
-    }
     if !input_path.exists() {
         anyhow::bail!("训练音频文件不存在: {}", input_path.display());
     }
 
     let output_path = resolve_normalized_wav_sidecar_path(input_path);
-    let task_log_path = crate::common::task_paths::task_log_file_path(
-        log_dir,
-        HistoryTaskType::ModelTraining,
-        task_id,
-    );
     let platform = ScriptPlatform::current();
 
     run_logged_shell_script(
         Path::new(platform.shell_program()),
         transcode_script_path,
         src_model_root,
-        label,
-        &task_log_path,
+        normalize_label,
+        sample_log_path,
         "shell script completed successfully",
         platform.shell_base_args(),
-        build_ffmpeg_transcode_script_args(input_path, &output_path, "wav", &task_log_path),
+        build_ffmpeg_transcode_script_args(input_path, &output_path, "wav", sample_log_path),
     )
     .await?;
 
@@ -610,9 +621,120 @@ pub(crate) async fn normalize_training_audio_path(
         anyhow::bail!("训练音频转码后未生成 WAV 文件: {}", output_path.display());
     }
 
-    let output_string = output_path.to_string_lossy().to_string();
-    normalized_paths.insert(input_string, output_string.clone());
-    Ok(output_string)
+    Ok(output_path.to_string_lossy().to_string())
+}
+
+/// 规范化失败条目：输入路径 + 该样本独立日志的 tail（统一汇总报错用）。
+#[derive(Debug, Clone)]
+pub struct NormalizationFailure {
+    pub index: usize,
+    pub input: String,
+    pub log_tail: String,
+}
+
+/// 并发执行训练音频规范化：`tokio::sync::Semaphore` 控并发、`JoinSet` 收集乱序结果，
+/// 原子完成计数按约 10% 步长打进度日志。每个样本仍走完整脚本链
+/// （powershell → transcode_audio.ps1 → ffmpeg.exe），并发只提高吞吐不改变脚本边界。
+///
+/// 失败样本收集 `(序号, 输入, 日志 tail)`；失败率超过阈值才整体失败（错误信息含全部
+/// 失败样本汇总），低于阈值返回失败列表由调用方降级（保留原始路径）。
+pub async fn run_training_transcodes<F, Fut>(
+    pending: Vec<String>,
+    concurrency: usize,
+    failure_rate_percent: u8,
+    log_dir: &Path,
+    spawn_one: F,
+) -> Result<(HashMap<String, String>, Vec<NormalizationFailure>)>
+where
+    F: Fn(String, PathBuf) -> Fut + Clone + Send + 'static,
+    Fut: std::future::Future<Output = Result<String>> + Send,
+{
+    let total = pending.len();
+    let concurrency = concurrency.max(1).min(total.max(1));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let progress_step = (total / 10).max(1);
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for (index, input) in pending.into_iter().enumerate() {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("normalization semaphore closed");
+        let log_dir = log_dir.to_path_buf();
+        let spawn_one = spawn_one.clone();
+        let completed = Arc::clone(&completed);
+        join_set.spawn(async move {
+            // 许可 guard 持有到任务结束，控制同时在飞的转码进程数
+            let _permit = permit;
+            let sample_log_path = log_dir.join(format!("normalize-sample-{:04}.log", index + 1));
+            let result = spawn_one(input.clone(), sample_log_path.clone()).await;
+            let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+            if done == total || done % progress_step == 0 {
+                info!(done, total, "normalizing training audio progress");
+            }
+            (index, input, sample_log_path, result)
+        });
+    }
+
+    let mut normalized_paths = HashMap::<String, String>::new();
+    let mut failures = Vec::new();
+    while let Some(joined) = join_set.join_next().await {
+        let (index, input, sample_log_path, result) = joined.context("normalization task panicked")?;
+        match result {
+            Ok(output) => {
+                normalized_paths.insert(input, output);
+            }
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    input = %input,
+                    log = %sample_log_path.display(),
+                    "training audio normalization failed"
+                );
+                failures.push(NormalizationFailure {
+                    index,
+                    input,
+                    log_tail: read_task_log_tail(&sample_log_path),
+                });
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let actual_percent =
+            (failures.len() as f64 / total.max(1) as f64 * 100.0).ceil() as u64;
+        if actual_percent > failure_rate_percent as u64 {
+            let summary = failures
+                .iter()
+                .map(|failure| {
+                    format!(
+                        "#{} {}: {}",
+                        failure.index + 1,
+                        failure.input,
+                        failure.log_tail.lines().next_back().unwrap_or("").trim()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!(
+                "训练音频规范化失败率 {}% 超过阈值 {}%（{}/{}）:\n{}",
+                actual_percent,
+                failure_rate_percent,
+                failures.len(),
+                total,
+                summary
+            );
+        }
+        warn!(
+            failures = failures.len(),
+            total,
+            "training audio normalization failures below threshold, keeping original paths"
+        );
+    }
+
+    Ok((normalized_paths, failures))
 }
 
 pub(crate) async fn normalize_training_jsonl_inputs(
@@ -620,10 +742,11 @@ pub(crate) async fn normalize_training_jsonl_inputs(
     transcode_script_path: &Path,
     input_jsonl: &Path,
     sample_root: &Path,
-    task_id: i64,
     log_dir: &Path,
     normalize_label: &str,
     log_message: &str,
+    concurrency: usize,
+    failure_rate_percent: u8,
 ) -> Result<()> {
     let raw = std::fs::read_to_string(input_jsonl).with_context(|| {
         format!(
@@ -632,9 +755,10 @@ pub(crate) async fn normalize_training_jsonl_inputs(
         )
     })?;
 
-    let mut normalized_paths = HashMap::<String, String>::new();
-    let mut normalized_lines = Vec::new();
-    let mut changed = false;
+    // 第一遍：解析所有行，收集待转码音频路径（同一文件多处引用只转码一次）
+    let mut parsed_values = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
+    let mut seen = HashSet::<String>::new();
     let mut sample_count = 0usize;
 
     for (line_number, line) in raw.lines().enumerate() {
@@ -662,35 +786,71 @@ pub(crate) async fn normalize_training_jsonl_inputs(
             else {
                 continue;
             };
-
-            let normalized = normalize_training_audio_path(
-                src_model_root,
-                transcode_script_path,
-                task_id,
-                log_dir,
-                Path::new(&path_value),
-                &mut normalized_paths,
-                normalize_label,
-            )
-            .await?;
-
-            if normalized != path_value {
-                object.insert(field.to_string(), Value::String(normalized));
-                changed = true;
+            if seen.insert(path_value.clone()) {
+                pending.push(path_value);
             }
         }
 
-        normalized_lines.push(serde_json::to_string(&value)?);
+        parsed_values.push(value);
     }
 
     if sample_count == 0 {
         anyhow::bail!("训练索引文件中没有可用样本: {}", input_jsonl.display());
     }
 
+    // 并发规范化；失败率超阈值时在引擎内整体失败，低于阈值则失败样本保留原始路径
+    let src_model_root_owned = src_model_root.to_path_buf();
+    let transcode_script_path_owned = transcode_script_path.to_path_buf();
+    let normalize_label_owned = normalize_label.to_string();
+    let (normalized_paths, _failures) = run_training_transcodes(
+        pending,
+        concurrency,
+        failure_rate_percent,
+        log_dir,
+        move |input, sample_log_path| {
+            let src_model_root = src_model_root_owned.clone();
+            let transcode_script_path = transcode_script_path_owned.clone();
+            let normalize_label = normalize_label_owned.clone();
+            async move {
+                transcode_training_sample(
+                    &src_model_root,
+                    &transcode_script_path,
+                    Path::new(&input),
+                    &sample_log_path,
+                    &normalize_label,
+                )
+                .await
+            }
+        },
+    )
+    .await?;
+
+    // 第二遍：回填规范化路径；失败样本（不在 normalized_paths 中）保留原始值
+    let mut changed = false;
+    for value in &mut parsed_values {
+        let object = value.as_object_mut().expect("parsed training jsonl object");
+        for field in ["audio", "ref_audio"] {
+            let Some(path_value) = object.get(field).and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(normalized) = normalized_paths.get(path_value) else {
+                continue;
+            };
+            if normalized != path_value {
+                object.insert(field.to_string(), Value::String(normalized.clone()));
+                changed = true;
+            }
+        }
+    }
+
     if !changed {
         return Ok(());
     }
 
+    let normalized_lines = parsed_values
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     std::fs::write(input_jsonl, format!("{}\n", normalized_lines.join("\n"))).with_context(
         || {
             format!(

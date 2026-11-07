@@ -28,4 +28,5 @@
 - [FFmpeg Bundling](ffmpeg-bundling.md) - ffmpeg shared build 打包/解压（src-model 同级，无系统 PATH 注册）+ moss_tts_realtime DLL 注册
 - [Portable Packaging](portable-packaging.md) - 绿色免安装 zip 包：make-portable.ps1、布局常量对齐表、子进程 PATH 前缀注入、WebView2 检测、杀软误报缓解
 - [Child Process PATH Handling](child-process-path-handling.md) - 子进程 PATH 拼接禁用 join_paths（引号语义损坏 PATH）；脚本端工具解析绝对路径优先
+- [Scripts Own Model Runtime Logic](scripts-own-model-runtime-logic.md) - 模型初始化/调用/硬件探测逻辑归脚本层，勿用 Rust 缓存或直连代替脚本判断；秒级脚本延迟可忽略
 - [Undo Commit For Review](undo-commit-for-review.md) - 执行计划产出的 commit 须立即 reset --soft 撤回，改动留待开发者检查后再提交

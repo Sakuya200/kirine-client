@@ -68,12 +68,20 @@ pub struct RemoteConfig {
 #[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
     pub attn_implementation: AttentionImplementation,
+    /// 训练音频规范化并发数；缺省 = min(4, max(2, 逻辑核数/2))。
+    /// 每个样本经 transcode_audio.ps1 脚本链转码，并发只提高吞吐不改变脚本边界。
+    pub normalization_concurrency: Option<usize>,
+    /// 训练音频规范化失败率阈值（百分比 0-100）：失败占比超过该值才整体失败；
+    /// 低于阈值保留失败样本原始路径继续训练。缺省 10。
+    pub normalization_failure_rate_percent: Option<u8>,
 }
 
 impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
             attn_implementation: AttentionImplementation::default(),
+            normalization_concurrency: None,
+            normalization_failure_rate_percent: None,
         }
     }
 }
