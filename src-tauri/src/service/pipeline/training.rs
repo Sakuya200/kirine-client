@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
@@ -681,7 +681,8 @@ where
     let mut normalized_paths = HashMap::<String, String>::new();
     let mut failures = Vec::new();
     while let Some(joined) = join_set.join_next().await {
-        let (index, input, sample_log_path, result) = joined.context("normalization task panicked")?;
+        let (index, input, sample_log_path, result) =
+            joined.context("normalization task panicked")?;
         match result {
             Ok(output) => {
                 normalized_paths.insert(input, output);
@@ -703,8 +704,7 @@ where
     }
 
     if !failures.is_empty() {
-        let actual_percent =
-            (failures.len() as f64 / total.max(1) as f64 * 100.0).ceil() as u64;
+        let actual_percent = (failures.len() as f64 / total.max(1) as f64 * 100.0).ceil() as u64;
         if actual_percent > failure_rate_percent as u64 {
             let summary = failures
                 .iter()
@@ -729,8 +729,7 @@ where
         }
         warn!(
             failures = failures.len(),
-            total,
-            "training audio normalization failures below threshold, keeping original paths"
+            total, "training audio normalization failures below threshold, keeping original paths"
         );
     }
 
