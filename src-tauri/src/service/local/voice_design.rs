@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use async_trait::async_trait;
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
@@ -18,9 +20,11 @@ use crate::{
             task_history as task_history_entity, voice_design_task as voice_design_task_entity,
         },
         models::{
-            CreateVoiceDesignTaskPayload, HistoryTaskType, TaskStatus, VoiceDesignTaskResult,
+            CreateVoiceDesignTaskPayload, HistoryTaskEventAction, HistoryTaskType, TaskStatus,
+            VoiceDesignTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, VoiceDesignPipelineRequest},
+        voice_design::VoiceDesignService,
         LocalService,
     },
     utils::time::now_string,
@@ -104,14 +108,13 @@ impl LocalService {
             task_id,
         )?;
 
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::VoiceDesign,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
 
         let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
@@ -139,6 +142,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::VoiceDesign,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_voice_design_inference(base_model.clone(), task_id)?;
 
         Ok(VoiceDesignTaskResult {
@@ -190,5 +200,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VoiceDesignService for LocalService {
+    async fn create_voice_design_task(
+        &self,
+        payload: CreateVoiceDesignTaskPayload,
+    ) -> Result<VoiceDesignTaskResult> {
+        self.create_voice_design_task_impl(payload).await
     }
 }

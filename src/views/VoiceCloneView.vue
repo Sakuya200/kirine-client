@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ArrowPathIcon, SparklesIcon, StopCircleIcon } from '@heroicons/vue/24/outline';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -21,14 +21,16 @@ import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
 import { TaskStatus } from '@/enums/status';
 import { getHistoryTaskReplayId, HISTORY_TASK_REPLAY_QUERY_KEY, HistoryTaskType } from '@/enums/task';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadHistoryRecord } from '@/hooks/loadHistoryRecord';
 import { loadRecentHistoryRecords } from '@/hooks/loadRecentHistoryRecords';
+import { useHistoryTaskEvents } from '@/hooks/useHistoryTaskEvents';
 import { usePollingResume } from '@/hooks/usePollingResume';
 import { useTaskDeviceTypeGuard } from '@/hooks/useTaskDeviceTypeGuard';
 import { TEXT_TO_SPEECH_FORMATS, TextToSpeechFormat, type TextToSpeechOption } from '@/enums/textToSpeech';
 import { useModels } from '@/hooks/useModels';
 import { useUiConfigStore } from '@/stores/uiConfig';
 import { useUiStore } from '@/stores/ui';
-import type { HistoryRecord } from '@/types/domain';
+import type { GeneratedAudioPathPayload, HistoryRecord } from '@/types/domain';
 import { saveGeneratedAudio } from '@/utils/audioDownload';
 import { createTaskExportAudioName } from '@/utils/createTaskExportAudioName';
 import { mergeModelParamsWithUiConfigDefaults } from '@/utils/uiConfigModelParams';
@@ -71,13 +73,6 @@ interface VoiceCloneTaskResultPayload {
   createdAt: string;
   status: TaskStatus;
   outputFilePath: string;
-}
-
-interface VoiceCloneAudioAssetPayload {
-  taskId: number;
-  fileName: string;
-  contentType: string;
-  bytes: number[];
 }
 
 interface SelectedAudioFile {
@@ -137,6 +132,9 @@ const generationHistory = ref<VoiceCloneResult[]>([]);
 const selectedHistoryTaskId = ref<number | null>(null);
 const resultCardRef = ref<InstanceType<typeof GeneratedAudioResultCard> | null>(null);
 
+// 事件驱动为主（useHistoryTaskEvents），30s 低频轮询兜底防事件丢失；
+// 事件链稳定一个迭代后移除兜底轮询
+const HISTORY_TASK_FALLBACK_POLL_MS = 30_000;
 let activeTaskStatusTimer: ReturnType<typeof setInterval> | null = null;
 let isActiveTaskRefreshInFlight = false;
 // 单次刷新开始时间 + 代际令牌：用于检测被系统睡眠冻结的 invoke 并防止其晚到的
@@ -444,7 +442,7 @@ const setSelectedHistoryTaskId = (taskId: number | null, skipReload = false) => 
 
 const loadSelectedHistoryTask = async (taskId: number) => {
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId: taskId });
+    const record = await loadHistoryRecord(taskId);
 
     if (record.taskType !== HistoryTaskType.VoiceClone) {
       uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
@@ -487,7 +485,7 @@ const hydrateReplayTaskFromRoute = async () => {
   }
 
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId });
+    const record = await loadHistoryRecord(historyId);
 
     if (record.taskType !== HistoryTaskType.VoiceClone) {
       uiStore.notifyWarning(t('tts.notice.mismatchWarning'));
@@ -529,7 +527,7 @@ const syncActiveTaskStatusRefresh = () => {
 
   activeTaskStatusTimer = setInterval(() => {
     void refreshActiveTaskStatus();
-  }, 3000);
+  }, HISTORY_TASK_FALLBACK_POLL_MS);
 };
 
 const selectReferenceAudio = async () => {
@@ -555,7 +553,7 @@ const selectReferenceAudio = async () => {
   }
 };
 
-const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {}) => {
+const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false, silentOnError = false } = {}) => {
   if (isHistoryRefreshInFlight) {
     return;
   }
@@ -577,7 +575,9 @@ const loadRecentTasks = async ({ manual = false, notifyOnSuccess = false } = {})
     }
   } catch (error) {
     generationHistory.value = [];
-    uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.refreshFailed'), error));
+    if (!silentOnError) {
+      uiStore.notifyError(formatErrorMessage(t('voiceClone.notice.refreshFailed'), error));
+    }
   } finally {
     isHistoryRefreshInFlight = false;
     if (manual) {
@@ -614,7 +614,7 @@ const refreshActiveTaskStatus = async () => {
   const currentTaskId = activeResult.value.taskId;
 
   try {
-    const record = await invoke<HistoryRecord>('get_history_record', { historyId: currentTaskId });
+    const record = await loadHistoryRecord(currentTaskId);
     const nextResult = mapHistoryRecordToResult(record);
 
     if (!nextResult) {
@@ -713,10 +713,12 @@ const cancelActiveTask = async () => {
   }
 };
 
-const loadResultAudioAsset = (taskId: number) =>
-  invoke<VoiceCloneAudioAssetPayload>('get_generated_audio', {
+const loadResultAudioUrl = async (taskId: number): Promise<string> => {
+  const asset = await invoke<GeneratedAudioPathPayload>('get_generated_audio_path', {
     source: { kind: 'voice-clone', historyId: taskId }
   });
+  return convertFileSrc(asset.absolutePath);
+};
 
 const saveResultAudio = (taskId: number) => saveGeneratedAudio({ kind: 'voice-clone', historyId: taskId });
 
@@ -745,6 +747,38 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  stopActiveTaskStatusRefresh();
+});
+
+// KeepAlive 生命周期：失活停轮询；再次激活时补刷历史列表 + 处理回放跳转 + 恢复轮询。
+// 首次激活紧跟 mounted 执行（mounted 已串行完成初始化），用 hasActivatedOnce 跳过，
+// 避免与 mounted 的串行初始化并发。
+let hasActivatedOnce = false;
+let isViewActive = true;
+
+// 任务状态事件驱动刷新（500ms 防抖合并）：活动任务状态 + 最近任务列表；
+// 失活期间忽略事件，激活时的补刷已覆盖（onActivated 无条件 loadRecentTasks）
+useHistoryTaskEvents(event => {
+  if (!isViewActive || event.taskType !== HistoryTaskType.VoiceClone) {
+    return;
+  }
+  void refreshActiveTaskStatus();
+  void loadRecentTasks({ silentOnError: true });
+});
+
+onActivated(() => {
+  isViewActive = true;
+  if (!hasActivatedOnce) {
+    hasActivatedOnce = true;
+    return;
+  }
+  void hydrateReplayTaskFromRoute();
+  void loadRecentTasks();
+  syncActiveTaskStatusRefresh();
+});
+
+onDeactivated(() => {
+  isViewActive = false;
   stopActiveTaskStatusRefresh();
 });
 
@@ -799,7 +833,7 @@ usePollingResume(() => {
           ref="resultCardRef"
           :result="activeResult"
           :meta-text="activeResultMetaText"
-          :load-audio-asset="loadResultAudioAsset"
+          :load-audio-url="loadResultAudioUrl"
           :download-audio="saveResultAudio"
           :empty-text="t('voiceClone.result.emptyText')"
           @cancel="cancelActiveTask"

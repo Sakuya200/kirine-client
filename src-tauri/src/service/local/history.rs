@@ -1,5 +1,7 @@
 use std::{io, path::Path};
 
+use async_trait::async_trait;
+
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, TransactionTrait,
@@ -9,6 +11,8 @@ use crate::{
     common::{local_paths::resolve_task_path, task_paths::task_log_file_path},
     config::{resolve_base_log_dir, HardwareType},
     service::{
+        generated_audio::GeneratedAudioService,
+        history::HistoryService,
         local::entity::{
             streaming_task as streaming_task_entity, task_history as task_history_entity,
             training_task as training_task_entity, tts_task as tts_task_entity,
@@ -16,8 +20,9 @@ use crate::{
             voice_design_task as voice_design_task_entity,
         },
         models::{
-            GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary,
-            HistoryTaskType, ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
+            GeneratedAudioAsset, GeneratedAudioPathAsset, GeneratedAudioSource, HistoryFilter,
+            HistoryRecord, HistoryRecordSummary, HistoryTaskEventAction, HistoryTaskType,
+            ModelTrainingSampleInput, ModelTrainingTaskDetail, Page, PageRequest,
             StreamingTaskDetail, TaskStatus, TextToSpeechAudioAsset, TextToSpeechFormat,
             TextToSpeechTaskDetail, UpdateTaskStatusPayload, VoiceCloneAudioAsset,
             VoiceCloneTaskDetail, VoiceDesignAudioAsset, VoiceDesignTaskDetail,
@@ -25,38 +30,78 @@ use crate::{
         LocalService,
     },
     utils::{
-        audio::{content_type_for_format, save_existing_audio_file_as},
+        audio::content_type_for_format,
         time::now_string,
     },
     Result,
 };
 
 impl LocalService {
-    async fn load_task_error_log_impl(
+    /// 任务详情按需拉取（弹窗打开时与 task log 并行请求，替代全量 record 轮询）。
+    pub(crate) async fn get_history_record_detail_impl(
+        &self,
+        history_id: i64,
+    ) -> Result<serde_json::Value> {
+        let row = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+
+        let task_type = parse_history_task_type(&row.task_type)?;
+        self.load_history_detail(history_id, task_type).await
+    }
+
+    /// 任务日志 tail 读取：maxBytes 缺省 64KB，超限时对齐首个换行避免截出半行。
+    pub(crate) async fn load_task_log_tail_impl(
         &self,
         history_id: i64,
         task_type: HistoryTaskType,
+        max_bytes: u64,
     ) -> Result<Option<String>> {
         let runtime_config = self.runtime_config()?;
         let log_dir = resolve_base_log_dir(runtime_config.log_dir())?;
         let task_log_path = task_log_file_path(&log_dir, task_type, history_id);
 
-        match tokio::fs::read_to_string(&task_log_path).await {
-            Ok(content) => {
-                let trimmed = content.trim();
-                if trimmed.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(trimmed.to_string()))
-                }
+        let file_len = match tokio::fs::metadata(&task_log_path).await {
+            Ok(meta) => meta.len(),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(io::Error::new(
+                    err.kind(),
+                    format!("读取任务日志失败: {}", task_log_path.display()),
+                )
+                .into())
             }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(io::Error::new(
+        };
+
+        let start = file_len.saturating_sub(max_bytes);
+        let mut file = tokio::fs::File::open(&task_log_path).await.map_err(|err| {
+            io::Error::new(
                 err.kind(),
                 format!("读取任务日志失败: {}", task_log_path.display()),
             )
-            .into()),
+        })?;
+        if start > 0 {
+            use tokio::io::AsyncSeekExt;
+            file.seek(std::io::SeekFrom::Start(start)).await.map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("定位任务日志失败: {}", task_log_path.display()),
+                )
+            })?;
         }
+
+        use tokio::io::AsyncReadExt;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await.map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("读取任务日志失败: {}", task_log_path.display()),
+            )
+        })?;
+
+        Ok(crate::utils::process::decode_log_tail_text(&buffer, start))
     }
 }
 
@@ -112,8 +157,13 @@ impl LocalService {
         app: &tauri::AppHandle,
     ) -> Result<bool> {
         let (file_name, source_path) = self.resolve_generated_audio_file(source).await?;
-        save_existing_audio_file_as(app, &file_name, &source_path)
-            .map_err(|err| anyhow::anyhow!(err))
+        crate::utils::audio::save_existing_audio_file_as_async(
+            app.clone(),
+            file_name,
+            source_path,
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!(err))
     }
 
     async fn resolve_generated_audio_file(
@@ -368,6 +418,7 @@ impl LocalService {
             return Ok(false);
         };
 
+        let emit_status = history.status.parse::<TaskStatus>().ok();
         let mut history_active: task_history_entity::ActiveModel = history.into();
         history_active.deleted = sea_orm::ActiveValue::Set(1);
         history_active.modify_time = sea_orm::ActiveValue::Set(modify_time.clone());
@@ -437,13 +488,24 @@ impl LocalService {
         }
 
         tx.commit().await?;
+
+        if let Some(status) = emit_status {
+            crate::service::events::emit_history_task_event(
+                history_id,
+                task_type,
+                status,
+                &modify_time,
+                HistoryTaskEventAction::Deleted,
+            );
+        }
+
         Ok(true)
     }
 
     pub(crate) async fn update_task_status_impl(
         &self,
         payload: UpdateTaskStatusPayload,
-    ) -> Result<HistoryRecord> {
+    ) -> Result<()> {
         let modify_time = now_string()?;
         let duration_seconds = payload.duration_seconds.unwrap_or(0);
         let finished_time = if payload.status.is_finished() {
@@ -461,16 +523,33 @@ impl LocalService {
             return Err(io::Error::new(io::ErrorKind::NotFound, "未找到目标任务").into());
         };
 
+        // 事件发射需要 task_type；解析失败只跳过发射，不影响状态落库
+        let emit_task_type = history.task_type.parse::<HistoryTaskType>().ok();
         let mut active: task_history_entity::ActiveModel = history.into();
         active.status = sea_orm::ActiveValue::Set(payload.status.as_str().to_string());
         if duration_seconds > 0 {
             active.duration_seconds = sea_orm::ActiveValue::Set(duration_seconds);
         }
-        active.modify_time = sea_orm::ActiveValue::Set(modify_time);
+        active.modify_time = sea_orm::ActiveValue::Set(modify_time.clone());
         active.finished_time = sea_orm::ActiveValue::Set(finished_time);
         active.update(self.orm()).await?;
 
-        self.get_history_record_impl(payload.task_id).await
+        if let Some(task_type) = emit_task_type {
+            let action = if payload.status == TaskStatus::Cancelled {
+                HistoryTaskEventAction::Cancelled
+            } else {
+                HistoryTaskEventAction::Updated
+            };
+            crate::service::events::emit_history_task_event(
+                payload.task_id,
+                task_type,
+                payload.status,
+                &modify_time,
+                action,
+            );
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn get_history_record_impl(&self, history_id: i64) -> Result<HistoryRecord> {
@@ -481,8 +560,9 @@ impl LocalService {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
 
         let task_type = parse_history_task_type(&row.task_type)?;
-        let detail = self.load_history_detail(history_id, task_type).await?;
 
+        // detail/taskLog 已拆分至 get_history_record_detail / get_history_task_log
+        // 按需拉取（前端任务事件化后不再周期性全量抓取），此处仅返回 summary 级
         Ok(HistoryRecord {
             id: row.id,
             task_type,
@@ -493,8 +573,8 @@ impl LocalService {
             device: parse_hardware_type(&row.device)?,
             create_time: row.create_time,
             modify_time: row.modify_time,
-            task_log: self.load_task_error_log_impl(row.id, task_type).await?,
-            detail,
+            task_log: None,
+            detail: serde_json::Value::Null,
         })
     }
 
@@ -637,7 +717,9 @@ impl LocalService {
         history_id: i64,
         message_id: &str,
     ) -> Result<crate::service::models::StreamingSpeechAudioAsset> {
-        let (file_name, audio_path) = self.resolve_streaming_audio_file(history_id, message_id).await?;
+        let (file_name, audio_path) = self
+            .resolve_streaming_audio_file(history_id, message_id)
+            .await?;
         let bytes = tokio::fs::read(&audio_path).await.map_err(|err| {
             io::Error::new(
                 err.kind(),
@@ -820,4 +902,85 @@ fn parse_task_status(value: &str) -> Result<TaskStatus> {
     value
         .parse::<TaskStatus>()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
+}
+
+#[async_trait]
+impl HistoryService for LocalService {
+    async fn list_history_records(
+        &self,
+        request: PageRequest<HistoryFilter>,
+    ) -> Result<Page<HistoryRecordSummary>> {
+        self.list_history_records_impl(request).await
+    }
+
+    async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
+        self.get_history_record_impl(history_id).await
+    }
+
+    async fn get_history_record_detail(&self, history_id: i64) -> Result<serde_json::Value> {
+        self.get_history_record_detail_impl(history_id).await
+    }
+
+    async fn get_history_task_log(
+        &self,
+        history_id: i64,
+        max_bytes: Option<u64>,
+    ) -> Result<Option<String>> {
+        let row = task_history_entity::Entity::find_by_id(history_id)
+            .filter(task_history_entity::Column::Deleted.eq(0))
+            .one(self.orm())
+            .await?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "未找到目标任务"))?;
+        let task_type = parse_history_task_type(&row.task_type)?;
+        // 缺省 64KB，钳制到 [1KB, 4MB] 防御异常入参
+        let max_bytes = max_bytes.unwrap_or(64 * 1024).clamp(1024, 4 * 1024 * 1024);
+        self.load_task_log_tail_impl(history_id, task_type, max_bytes)
+            .await
+    }
+
+    async fn delete_history_record(
+        &self,
+        history_id: i64,
+        task_type: HistoryTaskType,
+    ) -> Result<bool> {
+        self.delete_history_record_impl(history_id, task_type).await
+    }
+
+    async fn update_task_status(&self, payload: UpdateTaskStatusPayload) -> Result<()> {
+        self.update_task_status_impl(payload).await
+    }
+
+    async fn cancel_history_task(&self, history_id: i64) -> Result<bool> {
+        self.cancel_task_impl(history_id).await
+    }
+}
+
+#[async_trait]
+impl GeneratedAudioService for LocalService {
+    async fn read_generated_audio(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioAsset> {
+        self.read_generated_audio_impl(source).await
+    }
+
+    async fn resolve_generated_audio_path(
+        &self,
+        source: GeneratedAudioSource,
+    ) -> Result<GeneratedAudioPathAsset> {
+        let (file_name, path) = self.resolve_generated_audio_file(source).await?;
+        Ok(GeneratedAudioPathAsset {
+            file_name,
+            content_type: crate::utils::audio::content_type_for_extension(&path).to_string(),
+            absolute_path: path.to_string_lossy().to_string(),
+        })
+    }
+
+    async fn save_generated_audio_as(
+        &self,
+        source: GeneratedAudioSource,
+        app: tauri::AppHandle,
+    ) -> Result<bool> {
+        self.save_generated_audio_as_impl(source, &app).await
+    }
 }

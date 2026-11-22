@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Cog6ToothIcon, EyeIcon, EyeSlashIcon, PaperAirplaneIcon, PlayCircleIcon, StopCircleIcon, TrashIcon } from '@heroicons/vue/24/outline';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
@@ -169,6 +169,18 @@ const hydrateReplayTaskFromRoute = async () => {
 onMounted(async () => {
   await uiConfigStore.ensureLoaded();
   await hydrateReplayTaskFromRoute();
+});
+
+// KeepAlive 生命周期：再次激活时处理从历史页发起的回放跳转。
+// 首次激活紧跟 mounted 执行（mounted 已串行完成初始化），用 hasActivatedOnce 跳过，
+// 避免与 mounted 的串行初始化并发。
+let hasActivatedOnce = false;
+onActivated(() => {
+  if (!hasActivatedOnce) {
+    hasActivatedOnce = true;
+    return;
+  }
+  void hydrateReplayTaskFromRoute();
 });
 </script>
 

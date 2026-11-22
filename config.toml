@@ -11,3 +11,7 @@ api_token = ""
 
 [training]
 attn_implementation = "sdpa"
+
+[streaming]
+message_silence_timeout_secs = 180
+silence_timeout_terminate_session = true

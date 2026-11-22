@@ -258,6 +258,13 @@ export interface Page<T> {
   totalPages: number;
 }
 
+/** get_generated_audio_path 返回：路径级定位（不携带字节），前端经 convertFileSrc 播放 */
+export interface GeneratedAudioPathPayload {
+  fileName: string;
+  contentType: string;
+  absolutePath: string;
+}
+
 export interface SpeakerFilter {
   keyword?: string | null;
   status?: SpeakerStatus | null;

@@ -11,7 +11,7 @@ use crate::Result;
 
 // `service` / `config` 模块在 lib.rs 中为私有，集成测试（外部 crate）无法直接命名其中的
 // 类型与纯函数。`test_support` 作为对外的公共测试桥接模块，统一重导出测试所需的类型与
-// 抽取出的纯函数 `build_llm_task_script_args`（规则4 参数契约验证）。
+// 抽取出的包装器参数构造函数（规则4 参数契约验证）。
 pub use crate::config::HardwareType;
 pub use crate::hooks::streaming::AudioStreamEvent;
 pub use crate::service::models;
@@ -21,7 +21,9 @@ pub use crate::service::pipeline::api::{
     PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
     VoiceCloneArgs, VoiceDesignArgs,
 };
-pub use crate::service::pipeline::{build_llm_task_script_args, record_task_failure_log};
+pub use crate::service::pipeline::{
+    build_llm_task_script_args, build_streaming_llm_task_script_args, record_task_failure_log,
+};
 pub use crate::service::pipeline::streaming::{
     error_event, frame_to_event, parse_streaming_frame, serialize_input_entry,
     StreamingContextBasic, StreamingContextJson, StreamingFrame, StreamingFramePayload,
@@ -37,7 +39,12 @@ pub use crate::service::local::streaming::{
     ingest_streaming_speaker_avatars, validate_streaming_speakers,
     validate_streaming_speakers_hot_update,
 };
-pub use crate::service::{LocalService, Service};
+pub use crate::service::pipeline::training::{NormalizationFailure, run_training_transcodes};
+// 测试需要构造 `Result<String>` 的 Err 分支（失败样本收集路径），重导出 anyhow
+pub use anyhow;
+pub use crate::service::{
+    GeneratedAudioService, HistoryService, LocalService, ModelService, Service, SpeakerService,
+};
 
 /// 临时库测试设施：每个 `LocalServiceHarness::new` 在 `std::env::temp_dir` 下创建独立
 /// 临时目录，经 `LocalService::from_paths` 走「建库 → 全量迁移 → sync 模型目录」链路，
@@ -174,6 +181,10 @@ impl LocalServiceHarness {
 
     pub async fn get_history_record(&self, history_id: i64) -> Result<HistoryRecord> {
         self.service.get_history_record(history_id).await
+    }
+
+    pub async fn get_history_record_detail(&self, history_id: i64) -> Result<serde_json::Value> {
+        self.service.get_history_record_detail(history_id).await
     }
 
     /// 读取 `task_history.status`（直接走原生 SQL，不加载 detail）。

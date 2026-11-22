@@ -21,6 +21,29 @@ pub struct EnvConfig {
     pub remote: Option<RemoteConfig>,
     #[serde(default)]
     pub training: TrainingConfig,
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+}
+
+/// 流式语音会话配置（settings 界面不暴露，改 env.toml 后重启生效）。
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", default)]
+pub struct StreamingConfig {
+    /// 单条流式消息的帧间静默超时秒数：收到任一帧刷新计时，静默超过该
+    /// 时长判超时（替代旧固定 300s 整消息超时，长文本合成不再误报）。
+    pub message_silence_timeout_secs: u64,
+    /// 静默超时后是否终止整个会话进程：卡死的 Python 无法自愈，终止以回收
+    /// GPU/显存；设为 false 时仅取消当前消息，会话保留可重试。
+    pub silence_timeout_terminate_session: bool,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            message_silence_timeout_secs: 180,
+            silence_timeout_terminate_session: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Default)]
@@ -45,12 +68,20 @@ pub struct RemoteConfig {
 #[serde(rename_all = "snake_case", default)]
 pub struct TrainingConfig {
     pub attn_implementation: AttentionImplementation,
+    /// 训练音频规范化并发数；缺省 = min(4, max(2, 逻辑核数/2))。
+    /// 每个样本经 transcode_audio.ps1 脚本链转码，并发只提高吞吐不改变脚本边界。
+    pub normalization_concurrency: Option<usize>,
+    /// 训练音频规范化失败率阈值（百分比 0-100）：失败占比超过该值才整体失败；
+    /// 低于阈值保留失败样本原始路径继续训练。缺省 10。
+    pub normalization_failure_rate_percent: Option<u8>,
 }
 
 impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
             attn_implementation: AttentionImplementation::default(),
+            normalization_concurrency: None,
+            normalization_failure_rate_percent: None,
         }
     }
 }

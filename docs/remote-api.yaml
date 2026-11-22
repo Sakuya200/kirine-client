@@ -432,7 +432,7 @@ paths:
             schema: { $ref: '#/components/schemas/UpdateTaskStatusPayload' }
       responses:
         '200':
-          description: 更新后的历史记录
+          description: 更新确认（客户端仅关心成功与否，不消费响应体；服务端可返回更新后的历史记录或空 data）
           content:
             application/json:
               schema:
@@ -440,7 +440,7 @@ paths:
                   - $ref: '#/components/schemas/CommonResponse'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/HistoryRecord', nullable: true }
+                      data: { type: object, nullable: true }
 
   /api/history/{id}/cancel:
     parameters:

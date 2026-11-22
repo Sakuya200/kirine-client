@@ -4,9 +4,9 @@ use crate::error::AppError;
 use crate::service::{
     models::{
         CreateModelTrainingTaskPayload, CreateTextToSpeechTaskPayload, CreateVoiceCloneTaskPayload,
-        CreateVoiceDesignTaskPayload, GeneratedAudioSource, HistoryFilter, HistoryRecord,
-        HistoryRecordSummary, HistoryTaskType, ModelTrainingTaskResult, Page, PageRequest,
-        GeneratedAudioAsset, TextToSpeechTaskResult, VoiceCloneTaskResult,
+        CreateVoiceDesignTaskPayload, GeneratedAudioAsset, GeneratedAudioPathAsset,
+        GeneratedAudioSource, HistoryFilter, HistoryRecord, HistoryRecordSummary, HistoryTaskType,
+        ModelTrainingTaskResult, Page, PageRequest, TextToSpeechTaskResult, VoiceCloneTaskResult,
         VoiceDesignTaskResult,
     },
     ServiceState,
@@ -28,9 +28,10 @@ pub async fn list_history_records(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<Page<HistoryRecordSummary>, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .history_service()
         .list_history_records(request)
         .await
         .map_err(|err| err.to_string())
@@ -42,10 +43,42 @@ pub async fn get_history_record(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<HistoryRecord, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .history_service()
         .get_history_record(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_history_record_detail(
+    history_id: i64,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<serde_json::Value, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .history_service()
+        .get_history_record_detail(history_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_history_task_log(
+    history_id: i64,
+    max_bytes: Option<u64>,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<Option<String>, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .history_service()
+        .get_history_task_log(history_id, max_bytes)
         .await
         .map_err(|err| err.to_string())
 }
@@ -56,10 +89,26 @@ pub async fn get_generated_audio(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<GeneratedAudioAsset, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .generated_audio_service()
         .read_generated_audio(source)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_generated_audio_path(
+    source: GeneratedAudioSource,
+    state: State<'_, ServiceState>,
+) -> std::result::Result<GeneratedAudioPathAsset, String> {
+    state
+        .inner()
+        .service()
+        .map_err(|err| err.to_string())?
+        .generated_audio_service()
+        .resolve_generated_audio_path(source)
         .await
         .map_err(|err| err.to_string())
 }
@@ -71,9 +120,10 @@ pub async fn save_generated_audio_as(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .generated_audio_service()
         .save_generated_audio_as(source, app)
         .await
         .map_err(|err| err.to_string())
@@ -110,9 +160,10 @@ pub async fn delete_history_record(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .history_service()
         .delete_history_record(history_id, task_type)
         .await
         .map_err(|err| err.to_string())
@@ -124,9 +175,10 @@ pub async fn create_text_to_speech_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<TextToSpeechTaskResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .text_to_speech_service()
         .create_text_to_speech_task(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -138,9 +190,10 @@ pub async fn create_model_training_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<ModelTrainingTaskResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .model_training_service()
         .create_model_training_task(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -152,9 +205,10 @@ pub async fn cancel_history_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .history_service()
         .cancel_history_task(history_id)
         .await
         .map_err(AppError::from_anyhow)
@@ -166,9 +220,10 @@ pub async fn create_voice_clone_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<VoiceCloneTaskResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .voice_clone_service()
         .create_voice_clone_task(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -180,9 +235,10 @@ pub async fn create_voice_design_task(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<VoiceDesignTaskResult, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .voice_design_service()
         .create_voice_design_task(payload)
         .await
         .map_err(AppError::from_anyhow)

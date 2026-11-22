@@ -80,9 +80,9 @@ pub fn run() {
             }
 
             let service_state = app_handle.state::<ServiceState>();
-            if let Err(err) =
-                tauri::async_runtime::block_on(async { service_state.0.close().await })
-            {
+            if let Err(err) = tauri::async_runtime::block_on(async {
+                service_state.inner().service()?.close().await
+            }) {
                 error!(error = %err, "failed to close service during app shutdown");
             }
         }
@@ -91,11 +91,7 @@ pub fn run() {
 
 #[cfg(windows)]
 fn show_error_dialog(message: &str) {
-    use std::{
-        ffi::OsStr,
-        iter::once,
-        os::windows::ffi::OsStrExt,
-    };
+    use std::{ffi::OsStr, iter::once, os::windows::ffi::OsStrExt};
 
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, MB_ICONERROR, MB_OK, MB_SETFOREGROUND,
@@ -156,6 +152,17 @@ async fn init(app: &mut tauri::App) -> Result<()> {
 
     match &service {
         ServiceImpl::Local(local) => {
+            // 资产协议静态 scope 仅覆盖 $APPDATA/**（tauri.conf.json）；数据目录被用户
+            // 自定义到其它位置时（绿色包/设置页修改），运行时追加递归授权，
+            // 保证 convertFileSrc 经 asset 协议可读生成音频。
+            let data_dir = std::path::PathBuf::from(local.data_dir());
+            if let Err(err) = app.asset_protocol_scope().allow_directory(&data_dir, true) {
+                error!(
+                    error = %err,
+                    data_dir = %data_dir.display(),
+                    "failed to allow asset protocol scope for data dir"
+                );
+            }
             tracing::info!(data_dir = %local.data_dir(), "local storage initialized");
         }
         ServiceImpl::Remote(_) => {
@@ -163,7 +170,10 @@ async fn init(app: &mut tauri::App) -> Result<()> {
         }
     }
 
-    app.manage(ServiceState(service));
+    // 注册任务事件发射通道（service 层经此发射 history:task-updated）
+    crate::service::events::register_app_handle(app.handle().clone());
+
+    app.manage(ServiceState::new(service));
 
     Ok(())
 }

@@ -1,5 +1,7 @@
 use std::{io, path::Path};
 
+use async_trait::async_trait;
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
     TransactionTrait,
@@ -20,10 +22,11 @@ use crate::{
             tts_task as tts_task_entity,
         },
         models::{
-            CreateTextToSpeechTaskPayload, HistoryTaskType, SpeakerStatus, TaskStatus,
-            TextToSpeechTaskResult,
+            CreateTextToSpeechTaskPayload, HistoryTaskEventAction, HistoryTaskType, SpeakerStatus,
+            TaskStatus, TextToSpeechTaskResult,
         },
         pipeline::{resolve_model_task_pipeline, TtsPipelineRequest},
+        tts::TextToSpeechService,
         LocalService,
     },
     utils::time::now_string,
@@ -116,14 +119,13 @@ impl LocalService {
             HistoryTaskType::TextToSpeech,
             task_id,
         )?;
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::TextToSpeech,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
         let file_name = format!("{}.{}", export_audio_name, payload.format.as_str());
         let output_path = output_dir.join(&file_name);
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
@@ -151,6 +153,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::TextToSpeech,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_tts_inference(base_model.clone(), task_id)?;
 
         Ok(TextToSpeechTaskResult {
@@ -199,5 +208,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl TextToSpeechService for LocalService {
+    async fn create_text_to_speech_task(
+        &self,
+        payload: CreateTextToSpeechTaskPayload,
+    ) -> Result<TextToSpeechTaskResult> {
+        self.create_text_to_speech_task_impl(payload).await
     }
 }

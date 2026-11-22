@@ -14,7 +14,7 @@ use kirine_client_lib::test_support::{
     models::{
         GeneratedAudioSource, HistoryFilter, HistoryTaskType, TaskStatus, UpdateTaskStatusPayload,
     },
-    LocalServiceHarness, PageRequest, Service,
+    GeneratedAudioService, HistoryService, LocalServiceHarness, PageRequest,
 };
 use kirine_client_lib::Result;
 
@@ -126,7 +126,7 @@ async fn list_history_records_pagination_and_filter() -> Result<()> {
 }
 
 #[tokio::test]
-async fn get_history_record_returns_full_detail() -> Result<()> {
+async fn get_history_record_returns_summary_and_detail_is_split() -> Result<()> {
     let harness = LocalServiceHarness::new("history-get").await?;
 
     harness
@@ -139,15 +139,21 @@ async fn get_history_record_returns_full_detail() -> Result<()> {
         .await?;
     harness.seed_tts_detail(10, BASE, VERSION, None).await?;
 
+    // get_history_record 为 summary 级：detail/taskLog 置空（已拆分至独立接口）
     let record = harness.get_history_record(10).await?;
     assert_eq!(record.id, 10);
     assert_eq!(record.task_type, HistoryTaskType::TextToSpeech);
     assert_eq!(record.status, TaskStatus::Completed);
-    // detail 为非空 JSON 对象
-    let detail = record
-        .detail
+    assert!(record.detail.is_null());
+    assert!(record.task_log.is_none());
+
+    // detail 经 get_history_record_detail 拉取，为非空 JSON 对象
+    let detail = harness
+        .get_history_record_detail(10)
+        .await?
         .as_object()
-        .expect("detail should be an object");
+        .expect("detail should be an object")
+        .clone();
     assert!(!detail.is_empty());
     assert_eq!(detail.get("baseModel").and_then(|v| v.as_str()), Some(BASE));
 
@@ -310,7 +316,7 @@ async fn update_task_status_persists_transition() -> Result<()> {
         .await?;
     harness.seed_tts_detail(40, BASE, VERSION, None).await?;
 
-    let updated = harness
+    harness
         .service()
         .update_task_status(UpdateTaskStatusPayload {
             task_id: 40,
@@ -318,11 +324,10 @@ async fn update_task_status_persists_transition() -> Result<()> {
             duration_seconds: Some(12),
         })
         .await?;
-    assert_eq!(updated.id, 40);
-    assert_eq!(updated.status, TaskStatus::Completed);
 
     // 落库校验
     let record = harness.get_history_record(40).await?;
+    assert_eq!(record.id, 40);
     assert_eq!(record.status, TaskStatus::Completed);
 
     harness.shutdown().await

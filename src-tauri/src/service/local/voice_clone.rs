@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use anyhow::{bail, Context};
+use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, EntityTrait, TransactionTrait,
 };
@@ -18,8 +19,12 @@ use crate::{
         local::entity::{
             task_history as task_history_entity, voice_clone_task as voice_clone_task_entity,
         },
-        models::{CreateVoiceCloneTaskPayload, HistoryTaskType, TaskStatus, VoiceCloneTaskResult},
+        models::{
+            CreateVoiceCloneTaskPayload, HistoryTaskEventAction, HistoryTaskType, TaskStatus,
+            VoiceCloneTaskResult,
+        },
         pipeline::{resolve_model_task_pipeline, VoiceClonePipelineRequest},
+        voice_clone::VoiceCloneService,
         LocalService,
     },
     utils::time::now_string,
@@ -120,23 +125,28 @@ impl LocalService {
         let output_path = output_dir.join(&file_name);
         let ref_audio_target_path =
             sample_dir.join(super::build_task_audio_file_name(&resolved_ref_audio_path));
-        fs::copy(&resolved_ref_audio_path, &ref_audio_target_path).with_context(|| {
-            format!(
-                "failed to copy reference audio from {} to {}",
-                resolved_ref_audio_path.display(),
-                ref_audio_target_path.display()
-            )
-        })?;
+        let ref_audio_target = ref_audio_target_path.clone();
+        let resolved_ref_audio = resolved_ref_audio_path.clone();
+        crate::utils::blocking::run_blocking(move || {
+            fs::copy(&resolved_ref_audio, &ref_audio_target).with_context(|| {
+                format!(
+                    "failed to copy reference audio from {} to {}",
+                    resolved_ref_audio.display(),
+                    ref_audio_target.display()
+                )
+            })?;
+            Ok(())
+        })
+        .await?;
         let serialized_ref_audio_path =
             serialize_task_path(Path::new(self.data_dir()), &ref_audio_target_path);
-        super::copy_model_param_files(
+        self.copy_model_param_files_async(
             &base_model,
             HistoryTaskType::VoiceClone,
             &mut model_params,
             &sample_dir,
-            Path::new(self.data_dir()),
-            self.ui_config(),
-        )?;
+        )
+        .await?;
         let serialized_output_path = serialize_task_path(Path::new(self.data_dir()), &output_path);
 
         voice_clone_task_entity::Entity::insert(voice_clone_task_entity::ActiveModel {
@@ -163,6 +173,13 @@ impl LocalService {
         .await?;
 
         txn.commit().await?;
+        crate::service::events::emit_history_task_event(
+            task_id,
+            HistoryTaskType::VoiceClone,
+            TaskStatus::Pending,
+            &create_time,
+            HistoryTaskEventAction::Created,
+        );
         self.start_voice_clone_inference(base_model.clone(), task_id)?;
 
         Ok(VoiceCloneTaskResult {
@@ -215,5 +232,15 @@ impl LocalService {
         });
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VoiceCloneService for LocalService {
+    async fn create_voice_clone_task(
+        &self,
+        payload: CreateVoiceCloneTaskPayload,
+    ) -> Result<VoiceCloneTaskResult> {
+        self.create_voice_clone_task_impl(payload).await
     }
 }

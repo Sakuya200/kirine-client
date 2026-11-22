@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
 import { ArrowDownTrayIcon, FolderOpenIcon, XMarkIcon } from '@heroicons/vue/24/outline';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -10,13 +9,13 @@ import BaseDialog from '@/components/common/BaseDialog.vue';
 import BaseListbox from '@/components/common/BaseListbox.vue';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { MODEL_TRAINING_AUDIO_FILE_EXTENSIONS } from '@/enums/modelTraining';
-import { SpeakerStatus } from '@/enums/status';
 import { HistoryTaskType } from '@/enums/task';
 import { useModels } from '@/hooks/useModels';
+import { useSpeakerStore } from '@/stores/speakers';
 import { useUiStore } from '@/stores/ui';
 import { requiresRefText, type StreamingSpeakerInput } from '@/stores/streamingSpeech';
 import { IMAGE_FILE_EXTENSIONS, type StreamingSpeakerConfig } from '@/types/streaming';
-import type { SpeakerPagedResult, SpeakerProfile } from '@/types/domain';
+import type { SpeakerProfile } from '@/types/domain';
 
 interface Props {
   open: boolean;
@@ -30,6 +29,7 @@ const emit = defineEmits<{ close: []; submit: [payload: StreamingSpeakerInput] }
 
 const { getModelsByFeature } = useModels();
 const uiStore = useUiStore();
+const speakerStore = useSpeakerStore();
 const { t } = useI18n();
 
 const modelOptions = computed(() =>
@@ -98,14 +98,7 @@ const canSubmit = computed(() => {
 
 const loadTrainedSpeakers = async () => {
   try {
-    const result = await invoke<SpeakerPagedResult>('list_speaker_infos', {
-      request: {
-        page: 1,
-        pageSize: 1000,
-        filter: { keyword: null, status: SpeakerStatus.Ready, baseModel: form.value.baseModel || null }
-      }
-    });
-    trainedSpeakers.value = result.items;
+    trainedSpeakers.value = await speakerStore.listReadySpeakers({ baseModel: form.value.baseModel || null });
   } catch (error) {
     uiStore.notifyError(formatErrorMessage(t('streaming.form.loadTrainedFailed'), error));
   }

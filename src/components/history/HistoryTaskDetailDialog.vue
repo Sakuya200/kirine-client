@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { invoke } from '@tauri-apps/api/core';
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -16,6 +15,8 @@ import TextToSpeechTaskDetailForm from '@/components/form/TextToSpeechTaskDetail
 import VoiceCloneTaskDetailForm from '@/components/form/VoiceCloneTaskDetailForm.vue';
 import VoiceDesignTaskDetailForm from '@/components/form/VoiceDesignTaskDetailForm.vue';
 import { formatErrorMessage } from '@/hooks/useErrorMessage';
+import { loadHistoryRecord } from '@/hooks/loadHistoryRecord';
+import { useHistoryTaskEvents } from '@/hooks/useHistoryTaskEvents';
 import { useUiStore } from '@/stores/ui';
 import type { HistoryRecord } from '@/types/domain';
 import { formatDurationClock } from '@/utils/formatDurationClock';
@@ -49,9 +50,7 @@ const loadDetailRecord = async () => {
 
   isLoading.value = true;
   try {
-    record.value = await invoke<HistoryRecord>('get_history_record', {
-      historyId: props.recordId
-    });
+    record.value = await loadHistoryRecord(props.recordId, { withLog: true });
   } catch (error) {
     record.value = null;
     uiStore.notifyError(formatErrorMessage(t('history.taskDetail.loadFailed'), error));
@@ -74,6 +73,15 @@ watch(
   },
   { immediate: true }
 );
+
+// 弹窗打开期间订阅任务事件：该任务任一状态变化即时刷新（含日志 tail），
+// 运行中任务不再依赖父组件轮询 token 二次拉取
+useHistoryTaskEvents(event => {
+  if (!props.open || !record.value || event.historyId !== record.value.id) {
+    return;
+  }
+  void loadDetailRecord();
+});
 
 const dialogTitle = computed(() => {
   if (!record.value) {

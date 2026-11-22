@@ -398,6 +398,20 @@ pub fn build_llm_task_script_args(
     ]
 }
 
+/// 构造 Windows 流式会话的包装器参数。流式日志统一由 Rust 采集器写入，
+/// 避免 PowerShell 与 Rust 同时打开同一个任务日志文件。
+pub fn build_streaming_llm_task_script_args(
+    script_path: &Path,
+    params_json_path: &Path,
+    task_log_path: &Path,
+    base_model: &str,
+) -> Vec<String> {
+    let mut args =
+        build_llm_task_script_args(script_path, params_json_path, task_log_path, base_model);
+    args.push("--stream-log-output".into());
+    args
+}
+
 pub(crate) async fn run_llm_task_invocation(
     begin_llm_task_script_path: &Path,
     script_path: &Path,

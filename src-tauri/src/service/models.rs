@@ -596,6 +596,29 @@ pub struct HistoryRecordSummary {
     pub modify_time: String,
 }
 
+/// 任务列表失效事件名：前端订阅后按需刷新，替代周期轮询全量记录。
+pub const HISTORY_TASK_UPDATED_EVENT: &str = "history:task-updated";
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryTaskEventAction {
+    Created,
+    Updated,
+    Deleted,
+    Cancelled,
+}
+
+/// 任务列表失效信号事件（只含定位/过滤所需字段，不含 detail/taskLog）
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryTaskEvent {
+    pub history_id: i64,
+    pub task_type: HistoryTaskType,
+    pub status: TaskStatus,
+    pub modify_time: String,
+    pub action: HistoryTaskEventAction,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTextToSpeechTaskPayload {
@@ -636,6 +659,15 @@ pub struct GeneratedAudioAsset {
     pub file_name: String,
     pub content_type: String,
     pub bytes: Vec<u8>,
+}
+
+/// 生成音频的路径级定位：不读文件内容，供前端 convertFileSrc 经 asset 协议播放。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedAudioPathAsset {
+    pub file_name: String,
+    pub content_type: String,
+    pub absolute_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -684,6 +716,17 @@ pub struct StreamingSpeakerAvatarAsset {
     pub file_name: String,
     pub content_type: String,
     pub bytes: Vec<u8>,
+}
+
+/// 流式说话人头像路径定位（仅会话覆盖头像文件；记录头像无文件路径，由前端回退字节命令）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingSpeakerAvatarPathAsset {
+    pub history_id: i64,
+    pub speaker_name: String,
+    pub file_name: String,
+    pub content_type: String,
+    pub absolute_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

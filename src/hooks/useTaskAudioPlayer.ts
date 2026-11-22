@@ -2,19 +2,14 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 
 import { TaskStatus } from '@/enums/status';
 
-interface AudioAssetPayload {
-  fileName: string;
-  contentType: string;
-  bytes: number[];
-}
-
 interface PlaybackTaskResult {
   taskId: number;
   status: TaskStatus;
 }
 
 interface UseTaskAudioPlayerOptions {
-  loadAudioAsset: (taskId: number) => Promise<AudioAssetPayload>;
+  /** 解析任务的播放 URL（asset 协议地址）：invoke get_generated_audio_path + convertFileSrc。 */
+  loadAudioUrl: (taskId: number) => Promise<string>;
   onPlaybackEnded?: () => void;
   onPlaybackError?: () => void;
   onPlayFailed?: (error: unknown) => void;
@@ -27,9 +22,8 @@ export const useTaskAudioPlayer = <Result extends PlaybackTaskResult>(options: U
   const playbackProgress = ref(0);
 
   let audioElement: HTMLAudioElement | null = null;
-  let audioBlob: Blob | null = null;
-  let audioObjectUrl: string | null = null;
-  let audioObjectTaskId: number | null = null;
+  let audioUrl: string | null = null;
+  let audioUrlTaskId: number | null = null;
   let removeAudioListeners: (() => void) | null = null;
 
   const currentPlaybackSeconds = computed(() => Math.round(audioCurrentTime.value));
@@ -49,14 +43,9 @@ export const useTaskAudioPlayer = <Result extends PlaybackTaskResult>(options: U
     playbackProgress.value = duration > 0 ? Math.min(100, (audioElement.currentTime / duration) * 100) : 0;
   };
 
-  const releaseAudioSource = () => {
-    if (audioObjectUrl) {
-      URL.revokeObjectURL(audioObjectUrl);
-      audioObjectUrl = null;
-    }
-
-    audioBlob = null;
-    audioObjectTaskId = null;
+  const resetAudioSource = () => {
+    audioUrl = null;
+    audioUrlTaskId = null;
   };
 
   const destroyAudioElement = () => {
@@ -80,7 +69,7 @@ export const useTaskAudioPlayer = <Result extends PlaybackTaskResult>(options: U
     destroyAudioElement();
 
     if (releaseSource) {
-      releaseAudioSource();
+      resetAudioSource();
     }
 
     audioCurrentTime.value = 0;
@@ -88,40 +77,30 @@ export const useTaskAudioPlayer = <Result extends PlaybackTaskResult>(options: U
     playbackProgress.value = 0;
   };
 
-  const getAudioSource = async (result: Result) => {
-    if (audioBlob && audioObjectUrl && audioObjectTaskId === result.taskId) {
-      return {
-        blob: audioBlob,
-        objectUrl: audioObjectUrl
-      };
+  // asset 协议 URL 由 WebView 流式读盘，无 Blob/字节拷贝，也无需 revoke
+  const getAudioSourceUrl = async (result: Result): Promise<string> => {
+    if (audioUrl && audioUrlTaskId === result.taskId) {
+      return audioUrl;
     }
 
-    const asset = await options.loadAudioAsset(result.taskId);
-    const blob = new Blob([Uint8Array.from(asset.bytes)], {
-      type: asset.contentType || 'audio/wav'
-    });
+    const url = await options.loadAudioUrl(result.taskId);
+    resetAudioSource();
+    audioUrl = url;
+    audioUrlTaskId = result.taskId;
 
-    releaseAudioSource();
-    audioBlob = blob;
-    audioObjectUrl = URL.createObjectURL(blob);
-    audioObjectTaskId = result.taskId;
-
-    return {
-      blob,
-      objectUrl: audioObjectUrl
-    };
+    return url;
   };
 
   const ensureAudioElement = async (result: Result) => {
-    const asset = await getAudioSource(result);
+    const url = await getAudioSourceUrl(result);
 
-    if (!audioElement || audioElement.src !== asset.objectUrl) {
+    if (!audioElement || audioElement.src !== url) {
       destroyAudioElement();
       audioCurrentTime.value = 0;
       audioDuration.value = 0;
       playbackProgress.value = 0;
 
-      const nextAudioElement = new Audio(asset.objectUrl);
+      const nextAudioElement = new Audio(url);
 
       const handleTimeUpdate = () => syncAudioProgress();
       const handleLoadedMetadata = () => syncAudioProgress();

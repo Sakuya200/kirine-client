@@ -15,9 +15,10 @@ pub async fn create_speaker_info(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<SpeakerInfo, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .speaker_service()
         .create_speaker_info(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -29,9 +30,10 @@ pub async fn list_speaker_infos(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<SpeakerPageResult, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .speaker_service()
         .list_speaker_infos(request)
         .await
         .map_err(|err| err.to_string())
@@ -43,9 +45,10 @@ pub async fn import_model_as_speaker(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<SpeakerInfo, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .speaker_service()
         .import_model_as_speaker(payload)
         .await
         .map_err(|err| err.to_string())
@@ -57,9 +60,10 @@ pub async fn update_speaker_info(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<SpeakerInfo, AppError> {
     state
-        .0
+        .inner()
         .service()
         .map_err(AppError::from_anyhow)?
+        .speaker_service()
         .update_speaker_info(payload)
         .await
         .map_err(AppError::from_anyhow)
@@ -71,9 +75,10 @@ pub async fn delete_speaker_info(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<bool, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .speaker_service()
         .delete_speaker_info(speaker_id)
         .await
         .map_err(|err| err.to_string())
@@ -85,9 +90,10 @@ pub async fn get_speaker_avatar(
     state: State<'_, ServiceState>,
 ) -> std::result::Result<crate::service::models::SpeakerAvatarAsset, String> {
     state
-        .0
+        .inner()
         .service()
         .map_err(|err| err.to_string())?
+        .speaker_service()
         .get_speaker_avatar(speaker_id)
         .await
         .map_err(|err| err.to_string())

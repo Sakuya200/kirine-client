@@ -48,11 +48,11 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
   };
 
   const ensureAudioElement = (src: string, playbackOptions: { autoplay?: boolean; resumeTime?: number } = {}) => {
-    const shouldRecreate = !audioElement || audioElement.src !== src;
-    if (shouldRecreate) {
-      const resumeTime = playbackOptions.resumeTime ?? 0;
-      destroyAudioElement();
-      const next = new Audio(src);
+    // 元素只创建一次并持续复用：src 变化（流式播放中 Blob URL 节流更新）时直接换 src
+    // 触发重载，事件监听保持不变；仅在 destroyAudioElement（reset/releaseSource）时销毁，
+    // 消灭逐 chunk「销毁 + new Audio + 重挂监听」的重建风暴。
+    if (!audioElement) {
+      const next = new Audio();
 
       const handleTimeUpdate = () => {
         const duration = Number.isFinite(next.duration) && next.duration > 0 ? next.duration : 0;
@@ -90,15 +90,22 @@ export const useStreamableAudioPlayer = (options: UseStreamableAudioPlayerOption
       };
 
       audioElement = next;
-      if (resumeTime > 0 && Number.isFinite(resumeTime)) {
-        next.currentTime = Math.min(resumeTime, next.duration || resumeTime);
-        audioCurrentTime.value = next.currentTime;
-      }
     }
-    if (playbackOptions.autoplay && audioElement) {
-      audioElement.play().catch(() => options.onPlaybackError?.());
+    const element = audioElement;
+    if (element.src !== src) {
+      element.src = src;
     }
-    return audioElement;
+    const resumeTime = playbackOptions.resumeTime ?? 0;
+    if (resumeTime > 0 && Number.isFinite(resumeTime)) {
+      // 换 src 场景：新媒体尚未加载（duration 为 NaN），按规范记录默认起播位置；
+      // 同 src 场景：currentTime 赋值为自身，无副作用。
+      element.currentTime = Math.min(resumeTime, element.duration || resumeTime);
+      audioCurrentTime.value = element.currentTime;
+    }
+    if (playbackOptions.autoplay) {
+      element.play().catch(() => options.onPlaybackError?.());
+    }
+    return element;
   };
 
   const togglePlayback = () => {

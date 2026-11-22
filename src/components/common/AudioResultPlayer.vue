@@ -10,12 +10,6 @@ import { formatErrorMessage } from '@/hooks/useErrorMessage';
 import { useUiStore } from '@/stores/ui';
 import { formatDurationClock } from '@/utils/formatDurationClock';
 
-interface AudioAssetPayload {
-  fileName: string;
-  contentType: string;
-  bytes: number[];
-}
-
 interface AudioPlayerTask {
   taskId: number;
   status: TaskStatus;
@@ -23,7 +17,7 @@ interface AudioPlayerTask {
 
 interface Props {
   task: AudioPlayerTask | null;
-  loadAudioAsset: (taskId: number) => Promise<AudioAssetPayload>;
+  loadAudioUrl: (taskId: number) => Promise<string>;
   downloadAudio?: (taskId: number) => Promise<boolean>;
   showDownload?: boolean;
   downloadLabel?: string;
@@ -49,7 +43,7 @@ const isDownloading = ref(false);
 
 const { isPlaying, playbackProgress, currentPlaybackSeconds, playbackTotalSeconds, togglePlayback, resetPlayback } =
   useTaskAudioPlayer<AudioPlayerTask>({
-    loadAudioAsset: taskId => props.loadAudioAsset(taskId),
+    loadAudioUrl: taskId => props.loadAudioUrl(taskId),
     onPlaybackEnded: () => {
       uiStore.notifyInfo(t('common.audio.ended'), 2200);
     },

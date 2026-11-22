@@ -8,7 +8,7 @@ use std::fs;
 
 use kirine_client_lib::test_support::{
     models::{CreateSpeakerPayload, ImportModelAsSpeakerPayload, SpeakerSource, SpeakerStatus},
-    LocalServiceHarness, PageRequest, Service, SpeakerFilter,
+    LocalServiceHarness, PageRequest, SpeakerFilter, SpeakerService,
 };
 use kirine_client_lib::Result;
 
