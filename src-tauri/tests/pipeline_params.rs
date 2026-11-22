@@ -16,9 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use kirine_client_lib::test_support::{
-    build_llm_task_script_args, PythonScriptInvocationSpec, PythonScriptRuntimeOptions,
-    PythonScriptTaskArgs, PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs,
-    TrainingArgs, VoiceCloneArgs, VoiceDesignArgs,
+    build_llm_task_script_args, build_streaming_llm_task_script_args, PythonScriptInvocationSpec,
+    PythonScriptRuntimeOptions, PythonScriptTaskArgs, PythonScriptTaskKind, StreamingArgs,
+    StreamingSpeakerArg, TTSArgs, TrainingArgs, VoiceCloneArgs, VoiceDesignArgs,
 };
 
 #[test]
@@ -94,7 +94,7 @@ fn streaming_script_args_match_begin_llm_task_contract() {
     let params = Path::new("/d/streaming_1/streaming.params.json");
     let task_log = Path::new("/log/task/streaming-1.log");
 
-    let args = build_llm_task_script_args(script, params, task_log, "gpt_sovits_cpufast");
+    let args = build_streaming_llm_task_script_args(script, params, task_log, "gpt_sovits_cpufast");
 
     // 与既有用例一致：用 to_string_lossy 比对，避免 Windows 路径分隔符差异。
     let expected = [
@@ -108,6 +108,7 @@ fn streaming_script_args_match_begin_llm_task_contract() {
         &task_log.to_string_lossy().to_string(),
         "--task-log-file",
         &task_log.to_string_lossy().to_string(),
+        "--stream-log-output",
     ];
     assert_eq!(args.len(), expected.len());
     for (i, want) in expected.iter().enumerate() {

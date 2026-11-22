@@ -34,7 +34,7 @@ use crate::{
                 PythonScriptInvocationSpec, PythonScriptRuntimeOptions, PythonScriptTaskArgs,
                 PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg,
             },
-            build_llm_task_script_args,
+            build_llm_task_script_args, build_streaming_llm_task_script_args,
             script_paths::{
                 resolve_src_model_root, src_model_begin_llm_task_script_path,
                 src_model_model_python_script_path, ScriptPlatform,
@@ -464,12 +464,22 @@ pub(crate) async fn run_streaming_session(
             .to_string_lossy()
             .to_string(),
     );
-    shell_args.extend(build_llm_task_script_args(
-        &paths.streaming_python_script_path,
-        &paths.params_json_path,
-        &task_log_path,
-        &detail.base_model,
-    ));
+    let script_args = if matches!(platform, ScriptPlatform::Windows) {
+        build_streaming_llm_task_script_args(
+            &paths.streaming_python_script_path,
+            &paths.params_json_path,
+            &task_log_path,
+            &detail.base_model,
+        )
+    } else {
+        build_llm_task_script_args(
+            &paths.streaming_python_script_path,
+            &paths.params_json_path,
+            &task_log_path,
+            &detail.base_model,
+        )
+    };
+    shell_args.extend(script_args);
 
     // 帧与输入均走环回 Socket（Python 连接 <-> Rust 分帧读写），不再经缓冲文件。
     // 这里统一通过 process.rs 的日志封装把 stderr 接管到任务日志，避免

@@ -11,7 +11,7 @@ use crate::Result;
 
 // `service` / `config` 模块在 lib.rs 中为私有，集成测试（外部 crate）无法直接命名其中的
 // 类型与纯函数。`test_support` 作为对外的公共测试桥接模块，统一重导出测试所需的类型与
-// 抽取出的纯函数 `build_llm_task_script_args`（规则4 参数契约验证）。
+// 抽取出的包装器参数构造函数（规则4 参数契约验证）。
 pub use crate::config::HardwareType;
 pub use crate::hooks::streaming::AudioStreamEvent;
 pub use crate::service::models;
@@ -21,7 +21,9 @@ pub use crate::service::pipeline::api::{
     PythonScriptTaskKind, StreamingArgs, StreamingSpeakerArg, TTSArgs, TrainingArgs,
     VoiceCloneArgs, VoiceDesignArgs,
 };
-pub use crate::service::pipeline::{build_llm_task_script_args, record_task_failure_log};
+pub use crate::service::pipeline::{
+    build_llm_task_script_args, build_streaming_llm_task_script_args, record_task_failure_log,
+};
 pub use crate::service::pipeline::streaming::{
     error_event, frame_to_event, parse_streaming_frame, serialize_input_entry,
     StreamingContextBasic, StreamingContextJson, StreamingFrame, StreamingFramePayload,

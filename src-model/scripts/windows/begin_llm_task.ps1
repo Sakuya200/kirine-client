@@ -25,7 +25,7 @@ if ($separatorIndex -ge 0) {
     }
 }
 try {
-    $parsed = Parse-CliArguments -Arguments $scriptArgs -OptionsWithValues @('--base-model', '--params-file', '--script-path', '--log-path', '--task-log-file') -ActionName 'begin-llm-task'
+    $parsed = Parse-CliArguments -Arguments $scriptArgs -OptionsWithValues @('--base-model', '--params-file', '--script-path', '--log-path', '--task-log-file') -SwitchOptions @('--stream-log-output') -ActionName 'begin-llm-task'
 }
 catch {
     Write-Error $_.Exception.Message
@@ -45,6 +45,7 @@ if ([string]::IsNullOrWhiteSpace($scriptPath)) {
 $paramsFile = $parsed['--params-file']
 $logPath = $parsed['--log-path']
 $taskLogFile = $parsed['--task-log-file']
+$streamLogOutput = $parsed['--stream-log-output']
 Ensure-TaskLogFile -TaskLogFile $taskLogFile -MissingMessage 'Missing --task-log-file argument.'
 
 $modelRoot = Join-Path $srcModelRoot $baseModel
@@ -55,6 +56,21 @@ $modelRoot = Join-Path $srcModelRoot $baseModel
 $pyEnv = Resolve-ModelPythonEnvironment -ModelRoot $modelRoot
 $venvDir = $pyEnv.EnvDir
 $venvPython = $pyEnv.Python
+
+function Write-BeginTaskLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    if ($streamLogOutput) {
+        Write-Output $Value
+    }
+    else {
+        Append-TaskLog -TaskLogFile $taskLogFile -Value $Value
+    }
+}
 
 function Invoke-LoggedCommand {
     param(
@@ -68,7 +84,7 @@ function Invoke-LoggedCommand {
         [string[]]$Arguments
     )
 
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] ${Description}: ${Command} $($Arguments -join ' ')"
+    Write-BeginTaskLog -Value "[begin-llm-task] ${Description}: ${Command} $($Arguments -join ' ')"
 
     $previousErrorActionPreference = $ErrorActionPreference
     $previousPythonIoEncoding = $env:PYTHONIOENCODING
@@ -79,7 +95,12 @@ function Invoke-LoggedCommand {
         $ErrorActionPreference = 'Continue'
         $env:PYTHONIOENCODING = 'utf-8'
         $env:PYTHONUTF8 = '1'
-        & $Command @Arguments 2>&1 | Out-File -LiteralPath $taskLogFile -Append -Encoding utf8
+        if ($streamLogOutput) {
+            & $Command @Arguments 2>&1
+        }
+        else {
+            & $Command @Arguments 2>&1 | Out-File -LiteralPath $taskLogFile -Append -Encoding utf8
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -191,7 +212,7 @@ function Invoke-LoggedPythonCommand {
     $cmdExe = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'
     $vsDevCmdPath = Get-VisualStudioDeveloperCommandPrompt
     if (-not [string]::IsNullOrWhiteSpace($vsDevCmdPath) -and (Test-Path -LiteralPath $cmdExe)) {
-        Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Initializing VS dev environment: $vsDevCmdPath"
+        Write-BeginTaskLog -Value "[begin-llm-task] Initializing VS dev environment: $vsDevCmdPath"
         if (Initialize-VisualStudioEnvironment -VsDevCmdPath $vsDevCmdPath -CmdExe $cmdExe) {
             Invoke-LoggedCommand -Description 'Running Python command' -Command $PythonExecutable -Arguments $PythonArguments
             return
@@ -200,30 +221,31 @@ function Invoke-LoggedPythonCommand {
         # VS environment setup is a best-effort enhancement and must never
         # break the task: fall back to invoking python directly (the behavior
         # before VS integration was introduced).
-        Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] VS dev environment setup failed, falling back to direct python invocation."
+        Write-BeginTaskLog -Value "[begin-llm-task] VS dev environment setup failed, falling back to direct python invocation."
     }
 
     Invoke-LoggedCommand -Description 'Running Python command' -Command $PythonExecutable -Arguments $PythonArguments
 }
 
-Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Starting LLM task with base model '$baseModel'."
+Write-BeginTaskLog -Value "[begin-llm-task] Starting LLM task with base model '$baseModel'."
 
 if (-not (Test-Path -LiteralPath $scriptPath)) {
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: Script not found: $scriptPath"
+    Write-BeginTaskLog -Value "[begin-llm-task] Execute Error: Script not found: $scriptPath"
     exit 1
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: Python executable not found: $venvPython"
+    Write-BeginTaskLog -Value "[begin-llm-task] Execute Error: Python executable not found: $venvPython"
     exit 1
 }
 
-Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] executing script: $scriptPath"
+Write-BeginTaskLog -Value "[begin-llm-task] executing script: $scriptPath"
 
 try {
     # NOTE: --log-path / --task-log-file are intentionally NOT forwarded to
     # the target Python script.  They are consumed by this wrapper for its
-    # own task-log output (Append-TaskLog / Out-File above).  The params-file
+    # own task-log output (Append-TaskLog / Out-File above, or stdout in
+    # streaming mode).  The params-file
     # entry scripts (voice_clone/tts/training/voice_design across all models)
     # only accept --params-file and would fail with argparse
     # "unrecognized arguments" if these were passed through.  Scripts that genuinely
@@ -241,8 +263,8 @@ try {
     Invoke-LoggedPythonCommand -PythonExecutable $venvPython -PythonArguments $pythonArgs
 }
 catch {
-    Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Execute Error: $_"
+    Write-BeginTaskLog -Value "[begin-llm-task] Execute Error: $_"
     exit 1
 }
-Append-TaskLog -TaskLogFile $taskLogFile -Value "[begin-llm-task] Completed LLM task successfully."
+Write-BeginTaskLog -Value "[begin-llm-task] Completed LLM task successfully."
 exit 0

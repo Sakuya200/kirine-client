@@ -94,12 +94,13 @@ const ensureReplayAudioLoaded = async () => {
   }
 };
 
-const handleTogglePlayback = async () => {
+const handleTogglePlayback = () => {
   if (isPlaying.value) {
     togglePlayback();
     return;
   }
-  if (!(await ensureReplayAudioLoaded())) {
+  if (props.audioPath && props.messageId && !replayAudioUrl.value) {
+    void ensureReplayAudioLoaded();
     return;
   }
   togglePlayback();
@@ -145,6 +146,8 @@ watch(
     releaseReplayAudioUrl();
     if (path !== undefined && !props.messageId) {
       setAudioPath(path);
+    } else if (path && props.messageId) {
+      void ensureReplayAudioLoaded();
     }
   },
   { immediate: true }
