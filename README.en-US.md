@@ -35,6 +35,8 @@ Before using Kirine Client for the first time, install the following programs an
 | VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
 | MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
 | MOSS-TTS Realtime | 1.7B | — | — | — | — | ✓ | CPU / CUDA |
+| IndexTTS | 2.0 | ✓ | ✓ | — | — | — | CPU / CUDA |
+| IndexTTS | 2.5 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | GPT-SoVITS-CPUFast | V1 / V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
 
 ## 4. Quick Start
@@ -99,6 +101,9 @@ Streaming speech uses a session-level long-running process: one session can carr
    - Model repo (Hugging Face): https://huggingface.co/OpenMOSS-Team
 7. GPT-SoVITS-CPUFast
    - Project repo (GitHub): https://github.com/baicai-1145/GPT-SoVITS-CPUFast
+8. IndexTTS
+   - IndexTTS 2.0 model repo (Hugging Face): https://huggingface.co/IndexTeam/IndexTTS-2
+   - IndexTTS 2.5 model repo (Hugging Face): https://huggingface.co/IndexTeam/IndexTTS-2.5
 
 ## 7. FAQ
 
@@ -237,4 +242,3 @@ attn_implementation = "sdpa"
 ### D9. Model Adapter Development
 
 To add or maintain model adapters in `src-model/` (including the structure of the two config files `model-config.json` / `params-config.json`, the form component types supported by the frontend, and the implementation flow and call chain of the Python adapters), read the **[Model Adapter Development Guide](src-model/ADAPTER_DEVELOPMENT.md)**.
-

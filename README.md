@@ -37,6 +37,8 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 | VoxCPM2 | 2B | ✓ | ✓ | ✓ | ✓ | — | CPU / CUDA |
 | MOSS-TTS Local | 1.7B | ✓ | ✓ | ✓ | — | — | CPU / CUDA |
 | MOSS-TTS Realtime | 1.7B | — | — | — | — | ✓ | CPU / CUDA |
+| IndexTTS | 2.0 | ✓ | ✓ | — | — | — | CPU / CUDA |
+| IndexTTS | 2.5 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | GPT-SoVITS-CPUFast | V1 / V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
 
 ## 4. 快速上手
@@ -101,6 +103,9 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
    - 模型仓库（Hugging Face）：https://huggingface.co/OpenMOSS-Team
 7. GPT-SoVITS-CPUFast
    - 项目仓库（GitHub）：https://github.com/baicai-1145/GPT-SoVITS-CPUFast
+8. IndexTTS
+   - IndexTTS 2.0 模型仓库（Hugging Face）：https://huggingface.co/IndexTeam/IndexTTS-2
+   - IndexTTS 2.5 模型仓库（Hugging Face）：https://huggingface.co/IndexTeam/IndexTTS-2.5
 
 ## 7. 常见问题
 
