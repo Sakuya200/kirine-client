@@ -16,7 +16,6 @@ use serde_json::json;
 fn voice_clone(name: &str, ref_audio: &str) -> StreamingSpeakerInput {
     StreamingSpeakerInput {
         name: name.to_string(),
-        base_model: "moss_tts_realtime".to_string(),
         model_version: None,
         ref_audio_path: ref_audio.to_string(),
         ref_audio_name: ref_audio.to_string(),
@@ -34,7 +33,6 @@ fn voice_clone(name: &str, ref_audio: &str) -> StreamingSpeakerInput {
 fn trained(name: &str, dir: &str) -> StreamingSpeakerInput {
     StreamingSpeakerInput {
         name: name.to_string(),
-        base_model: "moss_tts_realtime".to_string(),
         model_version: None,
         ref_audio_path: String::new(),
         ref_audio_name: String::new(),
@@ -42,6 +40,25 @@ fn trained(name: &str, dir: &str) -> StreamingSpeakerInput {
         description: None,
         speaker_dir_name: Some(dir.to_string()),
         category: "trained".to_string(),
+        side: "right".to_string(),
+        avatar_path: None,
+        avatar_name: None,
+        speaker_id: None,
+    }
+}
+
+/// preset 说话人：模型内置音色（如 qwen3_tts 的 CustomVoice spk_id），无参考音频、
+/// 无 checkpoint 目录。
+fn preset(name: &str) -> StreamingSpeakerInput {
+    StreamingSpeakerInput {
+        name: name.to_string(),
+        model_version: None,
+        ref_audio_path: String::new(),
+        ref_audio_name: String::new(),
+        ref_text: String::new(),
+        description: None,
+        speaker_dir_name: None,
+        category: "preset".to_string(),
         side: "right".to_string(),
         avatar_path: None,
         avatar_name: None,
@@ -112,6 +129,72 @@ fn validate_accepts_single_voice_clone() {
 fn validate_accepts_one_trained_with_voice_clones() {
     validate_streaming_speakers(&[voice_clone("A", "a.wav"), trained("T", "spk-1")])
         .expect("valid mix");
+}
+
+// ---- preset 类别（模型内置音色）----
+
+#[test]
+fn validate_accepts_preset_without_ref_audio() {
+    validate_streaming_speakers(&[preset("Vivian")]).expect("preset needs no ref audio");
+}
+
+#[test]
+fn validate_accepts_preset_with_trained() {
+    validate_streaming_speakers(&[preset("Vivian"), trained("T", "spk-1")])
+        .expect("preset + trained mix");
+}
+
+#[test]
+fn validate_accepts_multiple_presets_with_trained() {
+    let speakers: Vec<StreamingSpeakerInput> =
+        (0..8).map(|i| preset(&format!("Preset{i}"))).chain(std::iter::once(trained("T", "spk-1"))).collect();
+    validate_streaming_speakers(&speakers).expect("8 presets + 1 trained");
+}
+
+#[test]
+fn validate_rejects_blank_category_without_ref_audio() {
+    // category 缺省按 voice-clone 语义处理：仍要求参考音频。
+    let mut speaker = preset("A");
+    speaker.category = String::new();
+    let err = validate_streaming_speakers(&[speaker]).expect_err("blank category");
+    assert!(err.to_string().contains("参考音频"));
+}
+
+#[test]
+fn validate_rejects_duplicate_preset_names() {
+    let err = validate_streaming_speakers(&[preset("Vivian"), preset("Vivian")])
+        .expect_err("duplicate preset names");
+    assert!(err.to_string().contains("重复"));
+}
+
+#[test]
+fn hot_update_allows_preset_add_and_remove() {
+    let old = [old_speaker("P", "preset", None), old_speaker("T", "trained", Some("spk-1"))];
+    // 新增 preset B、删除 preset P；trained 保留。
+    let new = [preset("B"), trained("T", "spk-1")];
+    validate_streaming_speakers_hot_update(&old, &new).expect("preset churn passes");
+}
+
+#[test]
+fn preset_speaker_serializes_without_ref_audio() {
+    // serde 往返回归：preset 说话人 refAudioPath 为空串时序列化/反序列化不丢字段。
+    let speaker: StreamingSpeaker =
+        serde_json::from_value(json!({
+            "id": "Vivian",
+            "name": "Vivian",
+            "baseModel": "qwen3_tts",
+            "refAudioPath": "",
+            "refAudioName": "",
+            "refText": "",
+            "category": "preset",
+        }))
+        .expect("deserialize preset speaker");
+    assert_eq!(speaker.category, "preset");
+    assert_eq!(speaker.ref_audio_path, "");
+    let roundtrip: StreamingSpeaker =
+        serde_json::from_value(serde_json::to_value(&speaker).expect("serialize")).expect("roundtrip");
+    assert_eq!(roundtrip.category, "preset");
+    assert_eq!(roundtrip.ref_audio_path, "");
 }
 
 // ---- validate_streaming_speakers_hot_update ----

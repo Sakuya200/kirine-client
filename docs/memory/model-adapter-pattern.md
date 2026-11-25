@@ -5,17 +5,17 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 477b1f78-1d15-4316-9e8d-45edad057e8b
-  modified: 2026-09-26T00:40:14.345Z
+  modified: 2026-11-23T10:01:23.262Z
 ---
 
 # 模型适配器架构
 
-> 状态截至 2026-09-26 · 分支 `v0.13.1`
+> 状态截至 2026-11-23 · 分支 `v0.15.0`
 
 ## 模型体系
 项目采用 **Git 子模块 + 配置驱动** 的模型适配器架构。每个模型作为独立 Git 子模块存在于 `src-model/` 目录，通过标准化的命令行接口（`--params-file`）与后端 Pipeline 通信。
 
-## 支持的模型（8 个）
+## 支持的模型（9 个）
 
 | 模型 | 版本 | 子模块路径 | TTS | 声音克隆 | 微调 | 音色设计 | 设备 | 说明 |
 |------|------|-----------|-----|---------|------|---------|------|------|
@@ -27,6 +27,7 @@ metadata:
 | **moss_tts_realtime** | 1.7B | `src-model/moss_tts_realtime` | ❌ | ❌ | ❌ | ❌ | CUDA/CPU | MOSS-TTS-Realtime，**会话级流式 `streaming.py` 首例**（仅 `streaming-speech`），上游 OpenMOSS/MOSS-TTS |
 | **gpt_sovits_cpufast** | V1/V2/V2Pro/V2ProPlus | `src-model/gpt_sovits_cpufast` | ✅ | ✅ | ❌ | ❌ | CPU | CPU 优化的 GPT-SoVITS，固定上游 main `d3e5875`（G2PW pth 权重已纳入下载清单） |
 | **index_tts** | 2.0/2.5 | `src-model/index_tts` | ✅ | ✅ | ❌ | ❌ | CUDA/CPU | 上游 index-tts/IndexTTS，仅 TTS+克隆；进程内直调 `infer_v2`/`infer_v2_5`（不用官方 CLI）；版本自包含产物目录（`index_tts_2`/`index_tts_25`）隔离卸载 |
+| **ming_tts** | 0.5B | `src-model/ming_tts` | ✅ | ✅ | ❌ | ✅ | CUDA | 上游 inclusionAI/Ming-3.0-tts，仅 GPU（上游仅 NVIDIA 验证）；torch 2.6.0；无训练（二期）与流式（上游不支持） |
 
 > 特性矩阵、设备支持与支持语言以各子模块 `configs/model-config.json` 的 `supportedFeatureList` / `supportedDevices` / `supportedLanguages` 为准（应用启动时扫描）。
 
@@ -163,6 +164,16 @@ src-model/dots_tts/
 - **辅助模型由 download.py 预取**到 `checkpoints/hf_cache/`（w2v-bert-2.0 / CAMPPlus / BigVGAN，MaskGCT semantic codec 仅 2.0），任务期零联网；HF 受限环境走 `HF_ENDPOINT=https://hf-mirror.com`。
 - `durationFactor`（0.5–2.0）仅 2.5 生效，2.0 忽略不报错。
 - 首个带 `requirements-post-torch.txt` 的适配器（accelerate / descript-audiotools / openai-whisper 依赖 torch，torch 装完后安装）；Python 3.12 兼容（上游 `<3.12` 仅约束其包元数据，sys.path 导入不受影响）。
+
+## ming_tts 模型详解
+
+- 上游: GitHub `inclusionAI/Ming-3.0-tts`（克隆到 `base-models/ming_tts_05b/repo`）+ HF 权重 `inclusionAI/Ming-3.0-tts-0.5b`（下载到 `base-models/ming_tts_05b/Ming-3.0-tts-0.5b/`）；落盘目录名 `ming_tts_05b` 硬编码于 download.py/common.py（≠ baseModel，卸载按 requiredModelNameList 同名回收）。
+- 仅 `text-to-speech` / `voice-clone` / `voice-design`，仅 cuda。上游任务族（TTS/FREEFORM/VOICE_DESIGN/MULTILINGUAL/BASIC/EMOTION/DIALECT/IP/podcast）映射：**TTS 预置说话人→IP 任务；TTS 无说话人→FREEFORM（instruction 表单字段）**；**voice-clone 的 synthesisMode select（clone/emotion/attributes/dialect/multilingual）+ visibleWhen 切模式字段**；voice-design 的 style 走任务顶层 `instruct`（同 irodori）。
+- **内置音色走预置说话人**：model-config.json speakers[] = 灵小柔/灵楷/UK_George/US_Emma（上游 controls.ip 逐字 id），同步后 status=Ready 出现在说话人下拉；Python `BUILTIN_VOICES` 白名单校验。
+- **pynini 可选**：文本正则化默认关（表单开关 textNormalization 默认 false → 恒传 `--no_text_normalization`）；pip 装不上仅告警。torch==2.6.0/torchaudio/torchvision 0.21.0；cu130/cu128 索引无 2.6.0 轮子，init_task_runtime 自动降级 cu126/124/118。
+- **语言映射**：任务级 language 仅中英显式传 `--language_id`；日/韩/德/西/法 → None（省略 flag，避免静默贴错标签）；德/西/法经 voice-clone 的 languageId select（MULTILINGUAL 模式）覆盖。
+- **prompt_text 门**：clone/multilingual/emotion 模式空 ref_text → adapter ValueError（上游 TTS/MULTILINGUAL/EMOTION 必带 --prompt_text；BASIC/DIALECT 不接受）。
+- 参数契约校验测试与适配器断言在主仓库执行（`python -I` + sys.path.insert + pyright 门槛：params_entity.py 继承错误与运行时依赖 reportMissingImports 豁免）。
 
 ## 关联记忆
 - [[project-overview]] - 项目全貌

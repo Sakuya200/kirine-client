@@ -38,6 +38,7 @@ Before using Kirine Client for the first time, install the following programs an
 | IndexTTS | 2.0 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | IndexTTS | 2.5 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | GPT-SoVITS-CPUFast | V1 / V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
+| Ming-3.0-tts | 0.5B | ✓ | ✓ | — | ✓ | — | CUDA |
 
 ## 4. Quick Start
 
@@ -104,6 +105,9 @@ Streaming speech uses a session-level long-running process: one session can carr
 8. IndexTTS
    - IndexTTS 2.0 model repo (Hugging Face): https://huggingface.co/IndexTeam/IndexTTS-2
    - IndexTTS 2.5 model repo (Hugging Face): https://huggingface.co/IndexTeam/IndexTTS-2.5
+9. Ming-3.0-tts
+   - Project (GitHub): https://github.com/inclusionAI/Ming-3.0-tts
+   - Model repo (Hugging Face): https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5b
 
 ## 7. FAQ
 

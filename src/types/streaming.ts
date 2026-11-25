@@ -24,7 +24,6 @@ export interface StreamingSpeakerConfig {
   category: StreamingSpeakerCategory;
   /** trained 说话人 = speaker_id；voice-clone 无。 */
   speakerDirName?: string;
-  baseModel: string;
   modelVersion?: string;
   refAudioPath: string;
   refAudioName: string;

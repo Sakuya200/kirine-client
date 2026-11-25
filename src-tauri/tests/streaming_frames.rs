@@ -77,7 +77,6 @@ fn context_json_round_trips() {
             speakers: vec![StreamingSpeaker {
                 id: "spk-1".to_string(),
                 name: "A".to_string(),
-                base_model: "gpt_sovits_cpufast".to_string(),
                 model_version: None,
                 ref_audio_path: "/ref.wav".to_string(),
                 ref_audio_name: "ref.wav".to_string(),

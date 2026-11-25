@@ -62,8 +62,10 @@ const normalizeModelParams = (baseModel: string, modelParams: Record<string, unk
   return mergeModelParamsWithUiConfigDefaults(taskConfig, modelParams);
 };
 
-/** 会话运行中或历史回放中：会话级配置已固化，仅说话人可改（运行中即时生效）。 */
-const isSessionLocked = computed(() => store.activeTaskId !== null || store.replayTaskId !== null);
+/** 仅会话真正运行中（进程已拉起）才锁定会话级配置；历史回放/已结束会话可自由编辑——
+ * 后端对无进程会话的说话人更新仅落盘（trained 热更新校验也仅在进程在时执行），
+ * 模型等会话级配置则在下一次创建会话时才生效。 */
+const isSessionLocked = computed(() => store.activeTaskId !== null);
 
 // 选项同步默认值（镜像 VoiceCloneView 的 watch 模式）。
 // 会话锁定时必须跳过：这些 watch 会把 sessionConfig 重置为默认值，
@@ -179,7 +181,15 @@ const removeSpeaker = (speaker: StreamingSpeakerConfig) => {
   uiStore.notifyInfo(t('streaming.drawer.removedSpeaker', { name: speaker.name }), 2200);
 };
 
-const categoryLabel = (speaker: StreamingSpeakerConfig) => (speaker.category === 'voice-clone' ? t('streaming.form.categoryVoiceClone') : speaker.category);
+const categoryLabel = (speaker: StreamingSpeakerConfig) => {
+  if (speaker.category === 'voice-clone') {
+    return t('streaming.form.categoryVoiceClone');
+  }
+  if (speaker.category === 'preset') {
+    return t('streaming.form.categoryPreset');
+  }
+  return t('streaming.form.categoryTrained');
+};
 
 // 左边缘拖拽调宽（320–1080）
 const startDrag = (event: PointerEvent) => {
