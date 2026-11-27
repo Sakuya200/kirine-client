@@ -1,5 +1,5 @@
 {
-  "include": ["qwen3_tts", "vox_cpm2", "moss_tts_local", "gpt_sovits_cpufast", "dots_tts", "moss_tts_realtime", "index_tts"],
+  "include": ["qwen3_tts", "vox_cpm2", "moss_tts_local", "gpt_sovits_cpufast", "dots_tts", "moss_tts_realtime", "index_tts", "ming_tts"],
   "exclude": ["**/venv", "**/conda_env", "**/__pycache__", "**/node_modules", "**/.*"],
   "extraPaths": ["."],
   "typeCheckingMode": "basic",
@@ -30,6 +30,10 @@
     },
     {
       "root": "index_tts",
+      "extraPaths": ["."]
+    },
+    {
+      "root": "ming_tts",
       "extraPaths": ["."]
     }
   ]

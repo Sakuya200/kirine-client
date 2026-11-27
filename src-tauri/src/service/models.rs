@@ -796,7 +796,6 @@ pub struct CreateVoiceDesignTaskPayload {
 #[serde(rename_all = "camelCase")]
 pub struct StreamingSpeakerInput {
     pub name: String,
-    pub base_model: BaseModel,
     #[serde(default)]
     pub model_version: Option<String>,
     pub ref_audio_path: String,

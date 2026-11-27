@@ -40,6 +40,7 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 | IndexTTS | 2.0 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | IndexTTS | 2.5 | ✓ | ✓ | — | — | — | CPU / CUDA |
 | GPT-SoVITS-CPUFast | V1 / V2 / V2Pro / V2ProPlus | ✓ | ✓ | — | — | — | CPU |
+| Ming-3.0-tts | 0.5B | ✓ | ✓ | — | ✓ | — | CUDA |
 
 ## 4. 快速上手
 
@@ -106,6 +107,9 @@ Kirine Client 是 Kirine（桐音）音频工作台的桌面客户端，支持�
 8. IndexTTS
    - IndexTTS 2.0 模型仓库（Hugging Face）：https://huggingface.co/IndexTeam/IndexTTS-2
    - IndexTTS 2.5 模型仓库（Hugging Face）：https://huggingface.co/IndexTeam/IndexTTS-2.5
+9. Ming-3.0-tts
+   - 项目入口（GitHub）：https://github.com/inclusionAI/Ming-3.0-tts
+   - 模型仓库（Hugging Face）：https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5b
 
 ## 7. 常见问题
 

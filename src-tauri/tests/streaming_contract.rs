@@ -55,7 +55,6 @@ fn streaming_speaker_roundtrip_preserves_category() {
     let spk = StreamingSpeaker {
         id: "spk1".into(),
         name: "spk1".into(),
-        base_model: "moss_tts_realtime".into(),
         model_version: Some("1.7B".into()),
         ref_audio_path: "/r".into(),
         ref_audio_name: "r.wav".into(),
@@ -86,6 +85,8 @@ fn streaming_speaker_roundtrip_preserves_category() {
 
 #[test]
 fn streaming_speaker_defaults_when_absent() {
+    // 输入 JSON 带遗留的说话人级 baseModel（旧 context.json）：字段已移除，
+    // serde 必须静默忽略而非报错——保证旧任务 context.json 仍可回放/热更新。
     let json = r#"{"id":"s","name":"n","baseModel":"m","refAudioPath":"/r","refAudioName":"r.wav","refText":"t"}"#;
     let spk: StreamingSpeaker = serde_json::from_str(json).expect("deserialize");
     assert_eq!(spk.category, "");
@@ -103,6 +104,7 @@ fn streaming_speaker_defaults_when_absent() {
 fn streaming_speaker_input_roundtrip_preserves_avatar_fields() {
     // 经 JSON 文本构造，覆盖前端 CreateStreamingSpeechTaskPayload 与回放快照两条
     // 使用路径上 StreamingSpeakerInput 的 camelCase 契约。
+    // 输入 JSON 带遗留的说话人级 baseModel（旧前端 payload）：已移除的字段被忽略。
     let json = r#"{"name":"A","baseModel":"moss_tts_realtime","refAudioPath":"/r","refAudioName":"r.wav","refText":"t","category":"voice-clone","side":"right","avatarPath":"C:/pics/a.png","avatarName":"a.png"}"#;
     let input: models::StreamingSpeakerInput = serde_json::from_str(json).expect("deserialize");
     assert_eq!(input.side, "right");
@@ -112,6 +114,7 @@ fn streaming_speaker_input_roundtrip_preserves_avatar_fields() {
     assert!(back.contains("\"side\":\"right\""));
     assert!(back.contains("\"avatarPath\":\"C:/pics/a.png\""));
     assert!(back.contains("\"avatarName\":\"a.png\""));
+    assert!(!back.contains("baseModel"), "speaker payload must not carry baseModel");
 }
 
 #[test]

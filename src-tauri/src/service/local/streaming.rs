@@ -154,6 +154,9 @@ pub fn ingest_streaming_speaker_avatars(
 
 /// 流式说话人基础校验（创建任务与运行中热更新共用）：非空、name 非空且唯一、
 /// trained 至多一个且须有 speakerDirName、voice-clone 须有参考音频。
+/// `preset`（模型内置音色，如 qwen3_tts 的 CustomVoice spk_id）无参考音频/checkpoint
+/// 要求、不占 trained 名额；名字是否为模型预置音色由 Python 端在合成时按模型
+/// config 的 spk_id 校验（错误经 error 帧回传，文案含可用音色列表）。
 pub fn validate_streaming_speakers(speakers: &[StreamingSpeakerInput]) -> Result<()> {
     if speakers.is_empty() {
         bail!("流式语音会话至少需要一个说话人");
@@ -177,7 +180,8 @@ pub fn validate_streaming_speakers(speakers: &[StreamingSpeakerInput]) -> Result
             {
                 bail!("已训练说话人必须提供 speakerDirName");
             }
-        } else if s.ref_audio_path.trim().is_empty() {
+        } else if s.category != "preset" && s.ref_audio_path.trim().is_empty() {
+            // voice-clone（含 category 缺省）要求参考音频；preset 免参考音频。
             bail!("语音克隆说话人必须提供参考音频");
         }
     }
@@ -261,7 +265,6 @@ impl LocalService {
             .into_iter()
             .map(|speaker| crate::service::models::StreamingSpeakerInput {
                 name: speaker.name,
-                base_model: speaker.base_model,
                 model_version: speaker.model_version,
                 ref_audio_path: speaker.ref_audio_path,
                 ref_audio_name: speaker.ref_audio_name,
@@ -391,7 +394,6 @@ impl LocalService {
                     .map(|(idx, s)| StreamingSpeaker {
                         id: s.name.clone(),
                         name: s.name.clone(),
-                        base_model: s.base_model.trim().to_string(),
                         model_version: s.model_version.clone(),
                         ref_audio_path: s.ref_audio_path.clone(),
                         ref_audio_name: s.ref_audio_name.clone(),
@@ -949,7 +951,6 @@ impl LocalService {
             new_speakers.push(StreamingSpeaker {
                 id: input.name.clone(),
                 name: input.name.clone(),
-                base_model: input.base_model.trim().to_string(),
                 model_version: input.model_version.clone(),
                 ref_audio_path: input.ref_audio_path.clone(),
                 ref_audio_name: input.ref_audio_name.clone(),
@@ -1071,7 +1072,6 @@ impl LocalService {
             .into_iter()
             .map(|s| crate::service::models::StreamingSpeakerInput {
                 name: s.name,
-                base_model: s.base_model,
                 model_version: s.model_version,
                 ref_audio_path: s.ref_audio_path,
                 ref_audio_name: s.ref_audio_name,

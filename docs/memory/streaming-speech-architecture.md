@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: f3951a22-6e9b-44c0-90cf-5e1c985197d8
+  modified: 2026-11-25T03:07:05.635Z
 ---
 
 # 流式语音生成（StreamingSpeech）架构
@@ -43,7 +44,7 @@ metadata:
 
 - **帧解析纯函数**：`parse_streaming_frame`（控制帧 JSON -> `StreamingFrame`）、`frame_to_event`（-> `InvokeResponseBody`：Chunk->`Raw`、控制->`Json`）、`error_event`（本地构造 error 事件）、`serialize_input_entry`。`StreamingFramePayload` = Started/Chunk/Finished/Error。帧源是环回 Socket 二进制帧（非 stdout、非文件），见下「帧协议 / 传输」。
 - **类型**：`StreamingContextJson`/`StreamingContextBasic`/`StreamingSpeaker`/`StreamingMessageEntry`（context.json 结构）；`ResolvedStreamingPaths`（含 `base_model`/`model_version`/`sample_root`/`model_root_path` 等待用字段，见 [[retain-future-use-fields]]）；`LoadedStreamingDetail`（含 `model_params`）。
-- `StreamingSpeaker`/`StreamingSpeakerArg`/`StreamingSpeakerInput` 扩展 `category`（"voice-clone"|"trained"，缺省视为 voice-clone）+ `speaker_dir_name: Option<String>`（trained=speaker_id）+ `side`（"left"|"right"，缺省视为 right）+ `avatar_path`/`avatar_name`（头像原图绝对路径与原始文件名，缺省 None）；`StreamingArgs` 含 `model_root_path`（= service.model_dir()）+ `model_params_json`（流式 UI 参数透传至 Python）+ `streaming_socket_addr`/`streaming_socket_token`（环回 Socket 端点与鉴权令牌，`#[serde(default)]`）。
+- `StreamingSpeaker`/`StreamingSpeakerArg`/`StreamingSpeakerInput` 扩展 `category`（"voice-clone"|"trained"|"preset"，缺省视为 voice-clone）+ `speaker_dir_name: Option<String>`（trained=speaker_id）+ `side`（"left"|"right"，缺省视为 right）+ `avatar_path`/`avatar_name`（头像原图绝对路径与原始文件名，缺省 None）；`StreamingArgs` 含 `model_root_path`（= service.model_dir()）+ `model_params_json`（流式 UI 参数透传至 Python）+ `streaming_socket_addr`/`streaming_socket_token`（环回 Socket 端点与鉴权令牌，`#[serde(default)]`）。**说话人级 `base_model` 已于 2026-11-25 移除**（前端表单不再选模型，统一由会话 `baseModel` 确定；旧 context.json 的遗留 speaker.baseModel 键被 serde 静默忽略）。
 - `resolve_streaming_paths` + `build_streaming_invocation`（`PythonScriptTaskKind::StreamingSpeech` + `StreamingArgs`，写 `streaming.params.json`；签名含 `socket_addr`/`socket_token`/`model_params: serde_json::Value`，填 `model_root_path` + 映射 speaker 新字段）。
 - `StreamingSessionExtra`：`message_channels: Arc<RwLock<HashMap<String, MessageChannel>>>` + `context_lock: Arc<Mutex<()>>` + `input_tx: Arc<std::sync::Mutex<Option<mpsc::Sender<Vec<u8>>>>>`（向 Python 推 input 帧的通道句柄），存于 `ActiveTaskControl.streaming_extra`，runner 与 send 共享。
 - `MessageChannel { on_event: Channel<InvokeResponseBody>, done: oneshot::Sender<StreamMessageOutcome> }`；`StreamMessageOutcome { cancelled, errored }`。

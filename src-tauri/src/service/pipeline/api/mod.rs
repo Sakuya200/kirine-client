@@ -89,7 +89,8 @@ pub struct StreamingSpeakerArg {
     /// trained 说话人 = speaker_id；voice-clone 为 None。
     #[serde(default)]
     pub speaker_dir_name: Option<String>,
-    /// "voice-clone" | "trained"；缺省视为 "voice-clone"。
+    /// "voice-clone" | "trained" | "preset"；缺省视为 "voice-clone"。
+    /// preset = 模型内置音色（无参考音频/checkpoint，名字即模型侧 spk_id）。
     #[serde(default)]
     pub category: String,
 }

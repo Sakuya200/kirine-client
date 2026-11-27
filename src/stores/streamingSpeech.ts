@@ -19,13 +19,13 @@ import type {
  * 需要参考文本的模型集合（对齐 TextToSpeechView 的 DYNAMIC_REFERENCE_BASE_MODELS）。
  * 后续可由后端模型能力字段驱动，本期以前端常量判断。
  */
-export const REQUIRES_REF_TEXT_MODELS = new Set(['gpt_sovits_cpufast']);
+export const REQUIRES_REF_TEXT_MODELS = new Set(['gpt_sovits_cpufast', 'qwen3_tts']);
 export const requiresRefText = (baseModel: string) => REQUIRES_REF_TEXT_MODELS.has(baseModel);
 
-/** 新增/编辑说话人时由表单提交的输入（不含 id/时间，时间由后端生成）。 */
+/** 新增/编辑说话人时由表单提交的输入（不含 id/时间，时间由后端生成）。
+ * 说话人模型由会话配置（sessionConfig.baseModel）统一确定，不随说话人提交。 */
 export interface StreamingSpeakerInput {
   name: string;
-  baseModel: string;
   modelVersion?: string;
   refAudioPath: string;
   refAudioName: string;
@@ -68,7 +68,6 @@ const nextMessageId = () => `msg-${++messageSeed}`;
 /** 说话人配置 → 后端 StreamingSpeakerInput 映射（startSession 与 persistSpeakers 共用）。 */
 const toSpeakerPayload = (s: StreamingSpeakerConfig) => ({
   name: s.name,
-  baseModel: s.baseModel,
   modelVersion: s.modelVersion,
   refAudioPath: s.refAudioPath,
   refAudioName: s.refAudioName,
@@ -244,7 +243,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
       category: payload.category ?? 'voice-clone',
       speakerDirName: payload.speakerDirName,
       name: payload.name,
-      baseModel: payload.baseModel,
       modelVersion: payload.modelVersion,
       refAudioPath: payload.refAudioPath,
       refAudioName: payload.refAudioName,
@@ -455,7 +453,6 @@ export const useStreamingSpeechStore = defineStore('streaming-speech', () => {
           category: speaker.category ?? 'voice-clone',
           speakerDirName: speaker.speakerDirName,
           name: speaker.name,
-          baseModel: speaker.baseModel,
           modelVersion: speaker.modelVersion,
           refAudioPath: speaker.refAudioPath,
           refAudioName: speaker.refAudioName,

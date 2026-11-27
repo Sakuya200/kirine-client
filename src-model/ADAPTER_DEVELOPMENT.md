@@ -53,10 +53,13 @@ Kirine Client 的模型链路分为三层，适配器位于最底层：
 | `training.py` | 模型训练入口 | 支持训练时 |
 | `common.py` | 路径解析、设备归一化、subprocess 调上游脚本 | 推荐 |
 | `download.py` | 克隆上游仓库 / 下载权重（`downloadType: Custom` 时） | 视情况 |
+| `streaming.py` | 流式语音会话入口（会话级长期进程） | 支持流式时 |
+| `streaming_transport.py` | 环回 Socket 帧协议公共层（复制复用） | 支持流式时 |
+| `streaming_session.py` | 通用会话主循环 + `StreamingModelBackend` 抽象（复制复用） | 支持流式时 |
 | `requirements.txt` | 基础 Python 依赖 | ✅ |
 | `requirements-torch.txt` | Torch 运行时依赖（CPU/CUDA 由脚本切换） | ✅ |
 | `requirements-post-torch.txt` | 依赖 torch 的运行时依赖（如 deepspeed），由 init_task_runtime 在 torch 装完后安装 | 可选 |
-| `__init__.py` | 包标识（部分适配器兼作 TTS 入口） | ✅ |
+| `__init__.py` | 包标识 | ✅ |
 
 > 各适配器因上游差异略有不同（见 [§8 各适配器实现差异](#8-各适配器实现差异)），新增适配器建议遵循上述 irodori 结构。
 
@@ -77,7 +80,7 @@ Kirine Client 的模型链路分为三层，适配器位于最底层：
 | `baseModel` | string | 适配器目录名，作为全局唯一标识（如 `irodori_tts_v3`） |
 | `modelName` | string | 展示名（如 `Irodori-TTS-V3`） |
 | `modelVersion` | string | 版本号（如 `500M`、`V1`）；同一 `baseModel` 可声明多个版本 |
-| `downloadType` | `"HF-Like"` \| `"Custom"` | `HF-Like`：按 `requiredModelRepoIdList` 从 Hugging Face 拉取；`Custom`：交由适配器 `download.py` 自行处理 |
+| `downloadType` | `"HF-Like"` \| `"Custom"` | `HF-Like`：按 `requiredModelRepoIdList` 从 Hugging Face 拉取；`Custom`：交由适配器 `download.py` 自行处理。字段可省略，缺省 `HF-Like` |
 | `requiredModelNameList` | string[] | 下载后落地的本地目录名清单 |
 | `requiredModelRepoIdList` | string[] | Hugging Face repo id 清单（`HF-Like` 时使用） |
 | `supportedDevices` | (`"cpu"` \| `"cuda"`)[] | 支持的设备类型 |
@@ -86,7 +89,7 @@ Kirine Client 的模型链路分为三层，适配器位于最底层：
 
 **`supportedFeatureList` 取值**（对应 `HistoryTaskType`）：
 
-- `text-to-speech` / `voice-clone` / `voice-design` / `model-training`
+- `text-to-speech` / `voice-clone` / `voice-design` / `model-training` / `streaming-speech`
 
 **`supportedLanguages` 取值**（对应 `AppLanguage`）：
 
@@ -208,12 +211,12 @@ Kirine Client 的模型链路分为三层，适配器位于最底层：
 
 | `componentType` | 前端组件 | `type` 建议 | 渲染效果 | 当前用量 |
 | --- | --- | --- | --- | --- |
-| `input-number` | `UiParamInputField`（type=number） | `number` / `string` | 数字输入框，支持 min/max/step/nullable | 84 |
+| `input-number` | `UiParamInputField`（type=number） | `number` / `string` | 数字输入框，支持 min/max/step/nullable | 110 |
 | `input-text` | `UiParamInputField`（type=text） | `string` | 单行文本输入框 | 3 |
-| `textarea` | `UiParamTextareaField` | `string` | 多行文本，支持 rows | 2 |
-| `select` | `UiParamSelectField` | `string` | 下拉选择，需配 `options` | 11 |
-| `switch` | `UiParamSwitchField` | `boolean` | 开关，支持 text/textOn/textOff | 12 |
-| `input-audio-file` | `UiParamAudioFileField` | `string` | 音频文件选择，支持 extensions 白名单 | 5 |
+| `textarea` | `UiParamTextareaField` | `string` | 多行文本，支持 rows | 4 |
+| `select` | `UiParamSelectField` | `string` | 下拉选择，需配 `options` | 16 |
+| `switch` | `UiParamSwitchField` | `boolean` | 开关，支持 text/textOn/textOff | 16 |
+| `input-audio-file` | `UiParamAudioFileField` | `string` | 音频文件选择，支持 extensions 白名单 | 8 |
 | `input-text-file` | `UiParamTextFileField` | `string` | 文本文件选择，支持 extensions 白名单 | 1 |
 
 **实现要点：**
@@ -238,9 +241,9 @@ class ParamsEntity:
     version: str
     base_model: str
     model_version: str
-    kind: TaskKind                 # Training / TextToSpeech / VoiceClone / VoiceDesign
+    kind: TaskKind                 # Training / TextToSpeech / VoiceClone / VoiceDesign / StreamingSpeech
     runtime: RuntimeOptions        # device / logging_dir / attn_implementation
-    args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs
+    args: TrainingArgs | TextToSpeechArgs | VoiceCloneArgs | VoiceDesignArgs | StreamingArgs
 ```
 
 **`--params-file` JSON 结构：**
@@ -270,14 +273,14 @@ class ParamsEntity:
 
 关键点：
 
-- `kind` 决定 `args` 内层 key（`args.TextToSpeech` / `args.VoiceClone` / `args.VoiceDesign` / `args.Training`），且为 PascalCase 字符串。
+- `kind` 决定 `args` 内层 key（`args.TextToSpeech` / `args.VoiceClone` / `args.VoiceDesign` / `args.Training`），且为 PascalCase 字符串。**例外**：流式任务 `kind="StreamingSpeech"` 但 `args` 键为 `"Streaming"`（`kind.value` ≠ args 键，`params_entity.py` 内以显式映射表处理，复制流式适配器的 `params_entity.py` 时勿简化回 `kind.value`）。
 - `common.model_params_json` 就是前端表单收集到的参数字典，**key 与 `params-config.json` 的 `name` 一一对应**。
 - `ParamsEntity` 提供取值辅助方法，`params.py` 通过它们读取表单值：
   - `params.model_param(key, default)` — 原始值
   - `params.model_param_str(key, default)` — 字符串
   - `params.model_param_int(key, default)` — 整数
   - `params.model_param_bool(key, default)` — 布尔（兼容 `"true"`/`1`/`"on"` 等字符串形式）
-- 任务参数通过 `params.tts_args()` / `voice_clone_args()` / `voice_design_args()` / `training_args()` 取得，内部会校验 `kind` 是否匹配，类型不符会抛错。
+- 任务参数通过 `params.tts_args()` / `voice_clone_args()` / `voice_design_args()` / `training_args()` / `streaming_args()` 取得，内部会校验 `kind` 是否匹配，类型不符会抛错。
 
 ### 5.2 `params.py` — 适配器专用映射
 
@@ -337,7 +340,7 @@ if __name__ == "__main__":
     main()
 ```
 
-> 入口脚本名是 Rust 调度时的 `--script-path` 目标。`model-training` 用 `training.py`，`text-to-speech` 用 `tts.py`，以此类推。`dots_tts` 历史上用 `__init__.py` 作为 TTS 入口，新适配器建议统一用 `tts.py`。
+> 入口脚本名是 Rust 调度时的 `--script-path` 目标。`model-training` 用 `training.py`，`text-to-speech` 用 `tts.py`，以此类推。`dots_tts` 历史上曾用 `__init__.py` 作为 TTS 入口，现已迁移为 `tts.py`（经 `_bootstrap.py` 以 `kirine_dots_tts` 别名加载，避免遮蔽 pip 安装的官方 `dots_tts` 包）；新适配器统一用 `tts.py`。
 
 ### 5.4 `common.py` — 路径解析与上游调用
 
@@ -364,7 +367,7 @@ if __name__ == "__main__":
 
 支持「会话级流式语音生成」功能的适配器在上述四类任务之外额外提供一个会话入口 `streaming.py`，Rust 端（`run_streaming_session`）以**会话级长期进程**方式运行：一条聊天消息一个 contextId，音频经环回 Socket 二进制帧实时回传。
 
-**入口契约**：Rust 拼装 `streaming.params.json`（含 `context_file_path` / `streaming_socket_addr` / `streaming_socket_token` / `output_audio_dir` / `model_root_path` / `device` 及 `model_params_json`）后以 `--script-path streaming.py --params-file <file>` 拉起进程；适配器 `main()` 解析参数后调用 `streaming_session.run_streaming_session(params, backend)`。
+**入口契约**：Rust 拼装**标准 ParamsEntity 结构**的参数文件（`kind="StreamingSpeech"`，字段在 `args.Streaming` 下：`context_file_path` / `input_cache_file_path` / `output_audio_dir` / `model_root_path` / `streaming_socket_addr` / `streaming_socket_token` / `model_params_json`（temperature/topP 等流式 UI 参数）及 `speakers` 初始说话人列表；`runtime.device` 照常携带）后以 `--script-path streaming.py --params-file <file>` 拉起进程；适配器经 `params.streaming_args()` 读取后调用 `streaming_session.run_streaming_session(params, backend)`。流式 UI 参数从 `model_params_json` 读取，同样以 `params-config.json`（`task: "streaming-speech"`）的 `name` 为契约。
 
 **复用方式**：把公共层两个文件复制进适配器目录（与 `params_entity.py` 复制约定一致）：
 
@@ -383,6 +386,14 @@ if __name__ == "__main__":
 | `synthesize(speaker, text, context_id, output_audio_dir, sink)` | 单条消息合成：emit started → chunk* → finished | 自兜异常（error 帧不退进程）；推理上下文（如 `torch.inference_mode`）自行包裹 |
 
 参考实现：`moss_tts_realtime/streaming.py` 的 `MossTTSBackend`（首个实现者）。说话人条目字段为 context.json 的 camelCase（`name` / `category` / `speakerDirName` / `refAudioPath` / `refText` / `side` 等）；帧协议细节以 `streaming_transport.py` 模块注释与 Rust `streaming_transport.rs` 为准（两侧逐字节对齐）。
+
+**说话人类别（`category`）与 Rust 校验的对应关系**（Rust 侧 `validate_streaming_speakers`）：
+
+| category | 参考音频 | checkpoint | 校验规则 | 热更新（0x11） |
+| --- | --- | --- | --- | --- |
+| `voice-clone`（含缺省） | 必填 | — | 无参考音频拒绝 | 可增删改（Python 端校验 refAudioPath 存在，无效剔除） |
+| `preset` | 不需要 | 不需要 | 仅 name 唯一；名字是否为模型预置音色由 Backend 合成时按模型 config 校验（错误经 error 帧回传，文案含可用音色列表） | 可增删改（无预处理） |
+| `trained` | 不需要 | 必填 `speakerDirName` | 至多一个；名字按 checkpoint config 的 spk_id 解析 | 运行中仅可删，不可新增/更换（checkpoint 启动时加载定死） |
 
 ---
 
@@ -436,14 +447,15 @@ tts.py main()
 
 ## 8. 各适配器实现差异
 
-| 适配器 | TTS 入口 | 声音克隆 | 音色设计 | 训练 | 下载 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `irodori_tts_v3` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` | `download.py` | 参考实现，四类任务齐全 |
-| `dots_tts` | `__init__.py` | `voice_clone.py` | — | `training.py` + `training_common.py` + `dataset.py` | `download.py` | TTS 入口为 `__init__.py`；训练拆共享逻辑 |
-| `qwen3_tts` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` + `training_common.py` + `training_full.py` | HF-Like（无 `download.py`） | 含 `encode_audio.py` 训练前预处理 |
-| `vox_cpm2` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` + `train_voxcpm_finetune.py` | HF-Like（无 `download.py`） | 本地维护训练入口副本 |
-| `moss_tts_local` | `tts.py` | `voice_clone.py` | — | `training.py` | `download.py` | v0.11.2 重构为标准脚本调用模式 |
-| `gpt_sovits_cpufast` | `tts.py` | `voice_clone.py` | — | — | `download.py` + `inference_bridge.py` | 仅 CPU；无训练；多版本（V1/V2/V2Pro/V2ProPlus） |
-| `index_tts` | `tts.py` | `voice_clone.py` | — | — | `download.py` | 多版本（2.0/2.5）；进程内直调 Python API（infer_v2 / infer_v2_5）；版本自包含产物目录（index_tts_2 / index_tts_25）隔离卸载；aux 模型由 download.py 预取到 checkpoints/hf_cache/；含 `requirements-post-torch.txt` |
+| 适配器 | TTS 入口 | 声音克隆 | 音色设计 | 训练 | 流式 | 下载 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `irodori_tts_v3` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` | — | `download.py` | 参考实现，四类任务齐全 |
+| `dots_tts` | `tts.py` | `voice_clone.py` | — | `training.py` + `training_common.py` + `dataset.py` | — | `download.py` | 经 `_bootstrap.py` 以 `kirine_dots_tts` 别名加载；训练拆共享逻辑 |
+| `qwen3_tts` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` + `training_common.py` + `training_full.py` | `streaming.py` + `streaming_session.py` + `streaming_transport.py` | HF-Like（无 `download.py`） | 含 `encode_audio.py` 训练前预处理；流式=分句模拟（`qwen_tts` 公开 API 仅整段合成，无 token 级流式；preset 类别=CustomVoice 内置音色） |
+| `vox_cpm2` | `tts.py` | `voice_clone.py` | `voice_design.py` | `training.py` + `train_voxcpm_finetune.py` | — | HF-Like（无 `download.py`） | 本地维护训练入口副本 |
+| `moss_tts_local` | `tts.py` | `voice_clone.py` | — | `training.py` | — | `download.py` | v0.11.2 重构为标准脚本调用模式 |
+| `moss_tts_realtime` | — | — | — | — | `streaming.py` + `streaming_session.py` + `streaming_transport.py` | `download.py` | 仅流式（`streaming-speech`）；流式公共层参考实现（`MossTTSBackend`），见 [§5.7](#57-流式语音streamingspeech适配器) |
+| `gpt_sovits_cpufast` | `tts.py` | `voice_clone.py` | — | — | — | `download.py` + `inference_bridge.py` | 仅 CPU；无训练；多版本（V1/V2/V2Pro/V2ProPlus） |
+| `index_tts` | `tts.py` | `voice_clone.py` | — | — | — | `download.py` | 多版本（2.0/2.5）；进程内直调 Python API（infer_v2 / infer_v2_5）；版本自包含产物目录（index_tts_2 / index_tts_25）隔离卸载；aux 模型由 download.py 预取到 checkpoints/hf_cache/；含 `requirements-post-torch.txt` |
 
 新增适配器建议以 `irodori_tts_v3` 为模板，按上游能力裁剪入口脚本。
